@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 6B - UI Cutover Readiness Audit
+Phase 6C1 - Frontend Channel State and V2 Read Client Cutover
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,9 @@ TECH_LEAD_APPROVED
 
 ## Repository Baseline
 - Branch: master
-- HEAD: 8312c5c
-- Subject: fix: harden canonical channel metrics sync
-- Working tree: only unrelated untracked `implement.docx`
+- HEAD: a3ad7eb
+- Subject: docs: record UI cutover readiness audit
+- Working tree before closure: uncommitted Phase 6C1 changes in `scripts/ui_server.py`, `tests/test_ui_frontend_contract.py`, `project_status.md`, `changelog.md`, and `next_task.md`; unrelated untracked `implement.docx`
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -39,18 +39,20 @@ TECH_LEAD_APPROVED
 - Phase 6A: one selected-channel metrics sync completed locally for canonical Mist of Ages; narrow runtime compatibility fixes remain uncommitted for Tech Lead review
 - Phase 6A1: metrics-sync status semantics resolved conservatively; canonical Mist of Ages status restored to `CONNECTED`; approved fixes and tests are ready to commit
 - Phase 6B: read-only UI cutover readiness audit completed with evidence-based cutover phases and explicit preconditions
+- Phase 6C1: embedded production UI read cutover implemented with explicit selected-channel state, `/api/v2/` channel reads, disabled legacy mutations, focused UI contract coverage, and local non-external smoke evidence
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
 - OAuth: isolated per-channel OAuth service now accepts migrated canonical tokens whose `expires_at` arrived as epoch seconds as well as ISO timestamps
 - OAuth browser: loopback-only one-shot OAuth browser flow exists for `/api/v2/oauth/start`, with isolated state, timeout, and rollback-safe connection handling
 - Projects: explicit channel-scoped project service exists with atomic project creation, transcript save protection, validation, and channel snapshot copying
-- UI: the current running UI is still embedded directly in `scripts/ui_server.py` as legacy single-channel HTML and JavaScript; additive `/api/v2/` backend exists beside legacy routes but is not yet the production UI path
+- UI: the current running UI remains embedded directly in `scripts/ui_server.py`, but the visible read path now uses explicit selected-channel frontend state plus canonical `/api/v2/channels` and `/api/v2/channels/<slug>` reads; OAuth, metrics mutation, project creation, transcript mutation, validation mutation, and open-path actions remain intentionally disabled in the visible frontend pending later phases
 - Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically; successful sync now preserves the existing channel status instead of overwriting OAuth/connectivity state
 - Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are isolated from real runtime state
 
 ## Tests
-- Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
+- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`9/9`)
+- Legacy migration planner/apply: previously passing (`43/43`) from the closed migration phases; not re-run as part of the focused Phase 6C1 validation set
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
 - OAuth: `python -m unittest tests.test_channel_oauth` passing (`42/42`)
 - OAuth browser flow: `python -m unittest tests.test_channel_oauth_browser` passing (`24/24`)
@@ -58,9 +60,49 @@ TECH_LEAD_APPROVED
 - Metrics service: `python -m unittest tests.test_channel_metrics` passing (`27/27`)
 - V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`46/46`)
 - Legacy collector: `python -m unittest tests.test_collector` passing (`5/5`)
-- Full regression total: `245/245` passing with no skips or xfails
-- Compilation: `python -m py_compile scripts\legacy_migration.py scripts\channel_workspace.py scripts\channel_oauth.py scripts\channel_oauth_browser.py scripts\channel_projects.py scripts\channel_metrics.py scripts\ui_server.py tests\runtime_isolation_helpers.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_projects.py tests\test_channel_metrics.py tests\test_multichannel_api.py tests\test_collector.py` passing
+- Focused Phase 6C1 regression total: `211/211` passing with no skips or xfails
+- Compilation: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py tests\test_multichannel_api.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_metrics.py tests\test_channel_projects.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
+
+## Phase 6C1 Scope
+- Implemented only the approved embedded-frontend read cutover inside `scripts/ui_server.py`.
+- Added explicit frontend state for available channels, `selectedChannelSlug`, selected summary, loading, and error handling.
+- Added a reusable `/api/v2/` frontend request helper with nested error handling and malformed-response fallback.
+- Replaced the visible legacy status read with `GET /api/v2/channels` and `GET /api/v2/channels/<selectedChannelSlug>`.
+- Added safe no-channel, stale-selection, loading, and disconnected states.
+- Disabled not-yet-cut-over controls so the visible frontend no longer invokes `/oauth/start`, `/api/create_project`, `/api/save_transcript`, `/api/validate`, or `/api/open_path`.
+- Left all backend compatibility routes in place for rollback safety.
+
+## Phase 6C1 Frontend Contract
+- No action silently falls back to `mist_of_ages`.
+- Saved selection is restored only when the slug still exists in the current channel list.
+- Invalid or stale saved selection is cleared from local storage.
+- Each channel-scoped read derives its route from the explicit selected slug.
+- Changing selection invalidates the previous summary and reloads safely.
+- Late responses from older selections cannot replace the current selected-channel summary.
+
+## Phase 6C1 Test And Smoke Evidence
+- Added `tests/test_ui_frontend_contract.py` for explicit UI-contract assertions rather than full-page snapshots.
+- Verified the embedded UI references `/api/v2/channels` and `/api/v2/channels/<slug>` and no longer references `/api/status` or visible legacy mutation routes.
+- Verified stale-selection clearing, no fallback selection behavior, nested V2 error parsing, async supersession guards, and disabled mutation controls through focused contract tests.
+- Local non-external smoke succeeded by serving the existing local app on a temporary loopback port and confirming:
+  - the page renders the selected-channel summary UI
+  - the embedded page references `/api/v2/`
+  - the embedded page no longer references `/api/status`
+  - disabled controls are rendered for not-yet-cut-over actions
+  - `GET /api/v2/channels` returns the canonical Mist of Ages channel list locally without external calls
+- Confirmed no GitHub remote has been added and no push has been performed during Phase 6C1.
+
+## Phase 6C1 Runtime Preservation
+- Canonical channel identity remained `mist_of_ages` / `UCYVuamt3HabLFAicDxcsMdg` / `@mistofages`.
+- Canonical status remained `CONNECTED`.
+- `last_metrics_sync_at` remained present.
+- Canonical metrics remained readable with `10` data rows.
+- Canonical token remained present and ignored.
+- Canonical profile and learnings remained unchanged.
+- Legacy sources remained unchanged.
+- No canonical project directory was created.
+- `implement.docx` remained untouched and untracked.
 
 ## Phase 6B Baseline Verification
 - Verified branch `master` and exact HEAD `8312c5c`.
@@ -102,6 +144,14 @@ TECH_LEAD_APPROVED
 ## Phase 6C1 Gate
 - Next task title: `Phase 6C1 - Frontend Channel State and V2 Read Client Cutover`
 - Phase 6C1 remains blocked pending a separate execution prompt from the Tech Lead.
+
+## Phase 6C2 Gate
+- Proposed next task title: `Phase 6C2 - OAuth And Metrics UI Wiring`
+- OAuth connect/reconnect, metrics sync mutation, project creation, transcript mutation, validation mutation, collector workflow actions, and open-path actions remain blocked pending a separate execution prompt from the Tech Lead.
+
+## Proposed Next Task
+- `Repository History and Secret Audit for Initial GitHub Push`
+- This is a separate review/audit task only. It does not authorize Phase 6C2 implementation work.
 
 ## Phase 5B1 Root Cause
 - Four regression tests still assumed the real repository root must not contain `channels/` or `secrets/`, which stopped being true after the authorized canonical migration in Phase 5B.
@@ -224,4 +274,4 @@ TECH_LEAD_APPROVED
 - UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-Phase 6B is approved and closed. Phase 6C1 remains blocked pending a separate execution prompt from the Tech Lead. UI cutover remains blocked until that prompt is issued.
+Phase 6C1 is approved and closed. Phase 6C2 remains blocked pending a separate execution prompt from the Tech Lead. The proposed next task is `Repository History and Secret Audit for Initial GitHub Push`.

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Phase 6C1 - Frontend Channel State and V2 Read Client Cutover
+- Modified the embedded production UI in `scripts/ui_server.py` to introduce explicit selected-channel frontend state with persisted slug restore and stale-selection clearing.
+- Added a reusable `/api/v2/` frontend request helper with nested V2 error handling, malformed-response fallback, and async supersession safety.
+- Replaced the visible legacy status read with `GET /api/v2/channels` and `GET /api/v2/channels/<selectedChannelSlug>`.
+- Added safe loading, no-channel, stale-selection, and disconnected UI states for the selected canonical channel.
+- Disabled visible OAuth, metrics mutation, project creation, transcript save, validation, and open-path controls so the frontend no longer invokes legacy mutation routes during the read cutover phase.
+- Added `tests/test_ui_frontend_contract.py` with focused embedded-UI contract coverage for selected-channel state, V2 read usage, stale async protection, nested error handling, and disabled legacy mutation controls.
+- Re-ran the required UI, API, workspace, OAuth, metrics, projects, and collector regression suites successfully with no external calls.
+- Performed a local non-external smoke on a temporary loopback port and confirmed the embedded UI renders the selected-channel summary, uses `/api/v2/`, and no longer references `/api/status`.
+- Preserved canonical runtime data, canonical metrics readability, canonical token ignore safety, canonical profile/learnings, and all legacy sources.
+- Tech Lead approved Phase 6C1 and authorized closure only.
+- Confirmed no GitHub remote was added and no push occurred during the phase.
+- Proposed next task: `Repository History and Secret Audit for Initial GitHub Push`.
+- OAuth, metrics mutation, project creation, transcript mutation, validation mutation, collector workflow cutover, and legacy backend-route removal remain blocked pending separate authorization.
+
 ### Phase 6B - UI Cutover Readiness Audit
 - Completed a read-only audit of the current UI, route registration, channel services, project services, and tests at commit `8312c5c`.
 - Tech Lead approved the audit conclusion and accepted the readiness decision `READY_WITH_PRECONDITIONS`.

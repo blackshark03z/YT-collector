@@ -1161,6 +1161,7 @@ HTML_PAGE = r"""<!doctype html>
     main { max-width:1180px; margin:0 auto; padding:22px; display:grid; grid-template-columns: 360px 1fr; gap:18px; }
     section, aside { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
     h2 { margin:0 0 12px; font-size:17px; }
+    h3 { margin:0 0 8px; font-size:15px; }
     label { display:block; margin:12px 0 6px; font-weight:700; font-size:13px; }
     input, select, textarea { width:100%; border:1px solid #c7d1dd; border-radius:6px; padding:10px; font:inherit; background:#fff; }
     textarea { min-height:190px; resize:vertical; }
@@ -1174,84 +1175,89 @@ HTML_PAGE = r"""<!doctype html>
     .pass { color:#027a48; background:#ecfdf3; }
     .missing { color:var(--bad); background:#fef3f2; }
     .pending { color:var(--warn); background:#fffaeb; }
-    .result { display:grid; gap:12px; }
-    .preview { display:grid; grid-template-columns:180px 1fr; gap:14px; align-items:start; }
-    .preview img { width:180px; aspect-ratio:16/9; object-fit:cover; border-radius:6px; border:1px solid var(--line); background:#eef2f6; }
+    .result { display:grid; gap:14px; }
     .meta { color:var(--muted); font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
     .checks { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
     .check { border:1px solid var(--line); border-radius:6px; padding:10px; display:flex; justify-content:space-between; gap:8px; }
     .path { font-family: Consolas, monospace; font-size:13px; background:#f8fafc; border:1px solid var(--line); border-radius:6px; padding:10px; overflow-wrap:anywhere; }
+    .card { border:1px solid var(--line); border-radius:6px; padding:12px; background:#fbfcfe; }
+    .stack { display:grid; gap:12px; }
+    .summary-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+    .notice { border:1px solid #c7d1dd; background:#f8fafc; border-radius:6px; padding:12px; }
+    .notice strong { display:block; margin-bottom:6px; }
+    .mono { font-family: Consolas, monospace; font-size:13px; }
     .hidden { display:none; }
-    @media (max-width: 860px) { main { grid-template-columns:1fr; padding:14px; } .preview { grid-template-columns:1fr; } .preview img { width:100%; } header { align-items:flex-start; flex-direction:column; } }
+    @media (max-width: 860px) { main { grid-template-columns:1fr; padding:14px; } header { align-items:flex-start; flex-direction:column; } }
   </style>
 </head>
 <body>
   <header>
     <div>
       <h1>Mist of Ages Research</h1>
-      <span>Input Collector + Project Initializer + Validator</span>
+      <span>Selected-channel reader for the multi-channel collector</span>
     </div>
-    <button class="ghost" onclick="refreshStatus()">Refresh Status</button>
+    <button class="ghost" id="refreshBtn" onclick="refreshStatus()">Refresh Channels</button>
   </header>
   <main>
     <aside>
-      <h2>Configuration</h2>
-      <div class="status" id="configStatus"></div>
+      <h2>Channel Context</h2>
+      <label for="channelSelect">Selected Channel</label>
+      <select id="channelSelect">
+        <option value="">Loading channels...</option>
+      </select>
+      <div class="status" id="channelState" style="margin-top:12px"></div>
       <div class="row" style="margin-top:12px">
-        <button onclick="connectChannel()">Connect Channel</button>
-        <button class="ghost" onclick="openMaster()">Open Learnings</button>
+        <button id="connectChannelBtn" disabled data-cutover-state="disabled">Connect Channel</button>
+        <button class="ghost" id="openLearningsBtn" disabled data-cutover-state="disabled">Open Learnings</button>
       </div>
+      <p class="meta">OAuth and learnings actions stay disabled until later cutover phases.</p>
     </aside>
 
     <section>
-      <h2>Create Research Project</h2>
-      <label for="url">Competitor YouTube URL</label>
-      <input id="url" placeholder="https://www.youtube.com/watch?v=...">
-      <label for="name">Project Name (optional)</label>
-      <input id="name" placeholder="Auto-generated from title">
-      <div class="row">
-        <div style="flex:1">
-          <label for="recent">Recent Channel Videos</label>
-          <input id="recent" type="number" min="1" max="50" value="10">
-        </div>
-        <div style="flex:1">
-          <label for="window">Performance Window</label>
-          <select id="window">
-            <option value="7">7 days</option>
-            <option value="28" selected>28 days</option>
-            <option value="90">90 days</option>
-          </select>
-        </div>
-      </div>
-      <div class="row" style="margin-top:14px">
-        <button id="createBtn" onclick="createProject()">Create Research Project</button>
-      </div>
-      <p class="meta" id="message"></p>
+      <h2>Selected Channel Summary</h2>
+      <p class="meta" id="message">Loading channels...</p>
+      <div id="summaryPanel" class="result"></div>
 
-      <div id="result" class="result hidden">
-        <div class="preview">
-          <img id="thumb" alt="Competitor thumbnail">
-          <div>
-            <h2 id="videoTitle"></h2>
-            <div class="meta" id="videoMeta"></div>
-            <div class="path" id="projectPath"></div>
-            <div class="row" style="margin-top:10px">
-              <button class="secondary" onclick="openProject()">Open Project Folder</button>
-              <button class="ghost" onclick="openTranscript()">Open Transcript File</button>
-              <button class="ghost" onclick="validateInputs()">Validate Inputs</button>
+      <div class="stack" style="margin-top:18px">
+        <div class="notice">
+          <strong>Project workflow cutover is not active yet.</strong>
+          <span class="meta">Project creation, transcript save, validation, metrics sync, OAuth connect, and open-path actions are held back until later phases.</span>
+        </div>
+        <div class="card">
+          <h3>Create Research Project</h3>
+          <label for="url">Competitor YouTube URL</label>
+          <input id="url" placeholder="Available after channel workflow cutover" disabled>
+          <label for="name">Project Name (optional)</label>
+          <input id="name" placeholder="Available after channel workflow cutover" disabled>
+          <div class="row">
+            <div style="flex:1">
+              <label for="recent">Recent Channel Videos</label>
+              <input id="recent" type="number" min="1" max="50" value="10" disabled>
+            </div>
+            <div style="flex:1">
+              <label for="window">Performance Window</label>
+              <select id="window" disabled>
+                <option value="7">7 days</option>
+                <option value="28" selected>28 days</option>
+                <option value="90">90 days</option>
+              </select>
             </div>
           </div>
+          <div class="row" style="margin-top:14px">
+            <button id="createBtn" disabled data-cutover-state="disabled">Create Research Project</button>
+          </div>
         </div>
-        <div>
-          <h2>Readiness</h2>
-          <div class="checks" id="checks"></div>
-          <p class="meta" id="nextAction"></p>
-        </div>
-        <div>
-          <h2>Manual Transcript</h2>
-          <textarea id="transcript" placeholder="Paste the manually collected transcript here."></textarea>
+        <div class="card">
+          <h3>Project Actions</h3>
+          <div class="row">
+            <button class="secondary" disabled data-cutover-state="disabled">Open Project Folder</button>
+            <button class="ghost" disabled data-cutover-state="disabled">Open Transcript File</button>
+            <button class="ghost" disabled data-cutover-state="disabled">Validate Inputs</button>
+          </div>
+          <label for="transcript">Manual Transcript</label>
+          <textarea id="transcript" placeholder="Available after channel workflow cutover." disabled></textarea>
           <div class="row" style="margin-top:10px">
-            <button onclick="saveTranscript()">Save Transcript</button>
+            <button disabled data-cutover-state="disabled">Save Transcript</button>
           </div>
         </div>
       </div>
@@ -1259,104 +1265,305 @@ HTML_PAGE = r"""<!doctype html>
   </main>
 
 <script>
-let currentProject = null;
-let currentProjectPath = null;
-let masterPath = null;
+const SELECTED_CHANNEL_STORAGE_KEY = "yt_input_collector.selectedChannelSlug";
+const CUTOVER_PENDING_MESSAGE = "Available after channel workflow cutover.";
+const state = {
+  channels: [],
+  selectedChannelSlug: null,
+  selectedChannelSummary: null,
+  isLoadingChannels: false,
+  isLoadingSummary: false,
+  errorMessage: "",
+  summaryRequestId: 0,
+  summaryAbortController: null
+};
 
-async function api(path, options = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...options });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data;
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatTime(value) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString();
 }
 
 function pill(value) {
-  const cls = value === "FOUND" || value === "PASS" || value === "READY_FOR_WORKFLOW" ? "pass" : value === "MISSING" || value === false ? "missing" : "pending";
-  return `<span class="pill ${cls}">${value === true ? "PASS" : value === false ? "MISSING" : value}</span>`;
+  const normalized = String(value ?? "UNKNOWN");
+  const upper = normalized.toUpperCase();
+  const ok = ["CONNECTED", "FOUND", "PASS", "READY_FOR_WORKFLOW"].includes(upper);
+  const missing = ["MISSING", "DISCONNECTED", "FAILED", "ERROR"].includes(upper);
+  const cls = ok ? "pass" : missing ? "missing" : "pending";
+  return `<span class="pill ${cls}">${escapeHtml(normalized)}</span>`;
 }
 
-async function refreshStatus() {
-  const data = await api("/api/status");
-  masterPath = data.master_learnings;
-  const channel = data.channel && data.channel.id ? `${data.channel.title} (${data.channel.id})` : "Not connected";
-  document.getElementById("configStatus").innerHTML = `
-    <div>Data API Key ${pill(data.api_key.startsWith("FOUND") ? "FOUND" : "MISSING")}</div>
-    <div>OAuth Client ${pill(data.oauth_client)}</div>
-    <div>OAuth Token ${pill(data.oauth_token)}</div>
-    <div class="meta">Channel: ${channel}</div>
-    <div class="path">${data.master_learnings}</div>
-  `;
+function describeError(error, fallback) {
+  if (!error) return fallback;
+  if (error.name === "AbortError") return "Request was replaced by a newer channel selection.";
+  return error.message || fallback;
 }
 
-async function connectChannel() {
-  window.open("/oauth/start", "_blank");
-}
+async function v2Api(path, options = {}) {
+  const requestPath = "/api/v2/" + path.replace(/^\/+/, "");
+  const config = {
+    method: options.method || "GET",
+    headers: { "Accept": "application/json", "Content-Type": "application/json", ...(options.headers || {}) },
+    signal: options.signal
+  };
+  if (options.body !== undefined) config.body = options.body;
 
-async function createProject() {
-  document.getElementById("createBtn").disabled = true;
-  document.getElementById("message").textContent = "Creating project...";
+  let response;
   try {
-    const data = await api("/api/create_project", {
-      method: "POST",
-      body: JSON.stringify({
-        url: document.getElementById("url").value,
-        project_name: document.getElementById("name").value,
-        recent_count: Number(document.getElementById("recent").value || 10),
-        window_days: Number(document.getElementById("window").value || 28)
-      })
-    });
-    currentProject = data.project.project_slug;
-    currentProjectPath = data.project_path;
-    document.getElementById("result").classList.remove("hidden");
-    document.getElementById("videoTitle").textContent = data.title;
-    document.getElementById("videoMeta").textContent = `${data.channel} | ${data.duration}`;
-    document.getElementById("projectPath").textContent = data.project_path;
-    if (data.thumbnail) document.getElementById("thumb").src = "/" + data.thumbnail.replaceAll("\\", "/");
-    renderValidation(data.validation);
-    document.getElementById("message").textContent = "Project created.";
-    refreshStatus();
-  } catch (err) {
-    document.getElementById("message").textContent = err.message;
-  } finally {
-    document.getElementById("createBtn").disabled = false;
+    response = await fetch(requestPath, config);
+  } catch (error) {
+    if (error && error.name === "AbortError") throw error;
+    throw new Error("Could not reach the local collector UI.");
+  }
+
+  const text = await response.text();
+  let payload = null;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const nested = payload && payload.error && typeof payload.error.message === "string" ? payload.error.message : "";
+    const direct = payload && typeof payload.error === "string" ? payload.error : "";
+    const message = nested || direct || response.statusText || "The request could not be completed.";
+    const err = new Error(message);
+    err.code = payload && payload.error && typeof payload.error.code === "string" ? payload.error.code : `HTTP_${response.status}`;
+    throw err;
+  }
+
+  if (payload && typeof payload === "object") return payload;
+  return {};
+}
+
+function setSelectedChannelSlug(nextSlug) {
+  if (!nextSlug) {
+    localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
+    state.selectedChannelSlug = null;
+  } else {
+    localStorage.setItem(SELECTED_CHANNEL_STORAGE_KEY, nextSlug);
+    state.selectedChannelSlug = nextSlug;
+  }
+  state.selectedChannelSummary = null;
+  state.errorMessage = "";
+  if (state.summaryAbortController) state.summaryAbortController.abort();
+  render();
+  if (state.selectedChannelSlug) {
+    loadSelectedChannelSummary();
   }
 }
 
-function renderValidation(validation) {
-  document.getElementById("checks").innerHTML = Object.entries(validation.checks).map(([name, ok]) =>
-    `<div class="check"><strong>${name}</strong>${pill(ok)}</div>`
-  ).join("") + `<div class="check"><strong>Workflow</strong>${pill(validation.workflow_status)}</div>`;
-  document.getElementById("nextAction").textContent = "NEXT ACTION: " + validation.next_action;
+function syncChannelSelector() {
+  const select = document.getElementById("channelSelect");
+  const options = ['<option value="">Select a channel</option>'];
+  for (const channel of state.channels) {
+    const selected = channel.channel_slug === state.selectedChannelSlug ? " selected" : "";
+    options.push(`<option value="${escapeHtml(channel.channel_slug)}"${selected}>${escapeHtml(channel.display_name)}</option>`);
+  }
+  select.innerHTML = options.join("");
+  select.disabled = state.isLoadingChannels || state.channels.length === 0;
 }
 
-async function validateInputs() {
-  if (!currentProject) return;
-  const data = await api("/api/validate", { method: "POST", body: JSON.stringify({ project_slug: currentProject }) });
-  renderValidation(data);
+function renderChannelState() {
+  const target = document.getElementById("channelState");
+  if (state.isLoadingChannels && state.channels.length === 0) {
+    target.innerHTML = `<div class="meta">Loading available channels...</div>`;
+    return;
+  }
+  if (state.channels.length === 0) {
+    target.innerHTML = `
+      <div class="check"><strong>Channels</strong>${pill("MISSING")}</div>
+      <div class="meta">No canonical channels are available yet. Create or migrate a channel workspace before using the UI.</div>
+    `;
+    return;
+  }
+  if (!state.selectedChannelSlug) {
+    target.innerHTML = `
+      <div class="check"><strong>Selection</strong>${pill("REQUIRED")}</div>
+      <div class="meta">Choose a channel to load its canonical summary. The UI will not guess a fallback channel.</div>
+    `;
+    return;
+  }
+  const selected = state.channels.find((item) => item.channel_slug === state.selectedChannelSlug);
+  const summary = state.selectedChannelSummary ? state.selectedChannelSummary.channel : selected;
+  const disconnected = summary && summary.status && summary.status !== "CONNECTED";
+  target.innerHTML = `
+    <div class="check"><strong>Selected</strong>${pill(summary ? summary.status : "LOADING")}</div>
+    <div class="meta">${escapeHtml(summary ? summary.display_name : state.selectedChannelSlug)}</div>
+    <div class="meta mono">${escapeHtml(summary ? summary.channel_slug : state.selectedChannelSlug)}</div>
+    ${disconnected ? '<div class="meta">This channel is disconnected. Read-only summary is available, but workflow actions stay unavailable.</div>' : ""}
+  `;
 }
 
-async function saveTranscript() {
-  if (!currentProject) return;
-  const data = await api("/api/save_transcript", {
-    method: "POST",
-    body: JSON.stringify({ project_slug: currentProject, transcript: document.getElementById("transcript").value })
-  });
-  renderValidation(data);
+function renderSelectedChannelSummary() {
+  const panel = document.getElementById("summaryPanel");
+  const message = document.getElementById("message");
+  if (state.errorMessage) {
+    message.textContent = state.errorMessage;
+  } else if (state.isLoadingSummary) {
+    message.textContent = "Loading selected channel summary...";
+  } else if (!state.selectedChannelSlug) {
+    message.textContent = "Select a channel to load its summary.";
+  } else {
+    message.textContent = "Selected channel summary is loaded from the canonical /api/v2 routes.";
+  }
+
+  if (!state.selectedChannelSlug) {
+    panel.innerHTML = `
+      <div class="notice">
+        <strong>Selection required</strong>
+        <span class="meta">No channel is selected. Choose a channel from the list before using the read-only summary view.</span>
+      </div>
+    `;
+    return;
+  }
+  if (state.isLoadingSummary && !state.selectedChannelSummary) {
+    panel.innerHTML = `<div class="notice"><strong>Loading</strong><span class="meta">Fetching the selected channel summary...</span></div>`;
+    return;
+  }
+  if (!state.selectedChannelSummary) {
+    panel.innerHTML = `
+      <div class="notice">
+        <strong>Summary unavailable</strong>
+        <span class="meta">${escapeHtml(state.errorMessage || "The selected channel summary is not available yet.")}</span>
+      </div>
+    `;
+    return;
+  }
+
+  const summary = state.selectedChannelSummary;
+  const channel = summary.channel || {};
+  const reporting = summary.reporting || {};
+  const availableMetrics = Array.isArray(reporting.available_metrics) && reporting.available_metrics.length ? reporting.available_metrics.join(", ") : "None reported";
+  const pendingMetrics = Array.isArray(reporting.pending_metrics) && reporting.pending_metrics.length ? reporting.pending_metrics.join(", ") : "None";
+  const disconnected = channel.status && channel.status !== "CONNECTED";
+
+  panel.innerHTML = `
+    <div class="summary-grid">
+      <div class="card"><strong>Display Name</strong><div class="meta">${escapeHtml(channel.display_name || "")}</div></div>
+      <div class="card"><strong>Handle</strong><div class="meta">${escapeHtml(channel.youtube_handle || "Not set")}</div></div>
+      <div class="card"><strong>Channel ID</strong><div class="meta mono">${escapeHtml(channel.youtube_channel_id || "")}</div></div>
+      <div class="card"><strong>Status</strong><div>${pill(channel.status || "UNKNOWN")}</div></div>
+      <div class="card"><strong>Last Metrics Sync</strong><div class="meta">${escapeHtml(formatTime(channel.last_metrics_sync_at))}</div></div>
+      <div class="card"><strong>Projects</strong><div class="meta">${escapeHtml(String(summary.project_count ?? channel.project_count ?? 0))}</div></div>
+      <div class="card"><strong>Reporting</strong><div>${pill(reporting.status || "UNAVAILABLE")}</div></div>
+      <div class="card"><strong>Metrics File</strong><div>${pill(summary.metrics && summary.metrics.exists ? "FOUND" : "MISSING")}</div></div>
+      <div class="card"><strong>Learnings File</strong><div>${pill(summary.learnings && summary.learnings.exists ? "FOUND" : "MISSING")}</div></div>
+    </div>
+    <div class="card">
+      <strong>Reporting Detail</strong>
+      <div class="meta">Available metrics: ${escapeHtml(availableMetrics)}</div>
+      <div class="meta">Pending metrics: ${escapeHtml(pendingMetrics)}</div>
+      <div class="meta">Last checked: ${escapeHtml(formatTime(reporting.last_checked_at))}</div>
+    </div>
+    ${disconnected ? `
+      <div class="notice">
+        <strong>Channel disconnected</strong>
+        <span class="meta">This selected channel is not currently connected. Read-only details are visible, but workflow actions remain blocked until later cutover phases.</span>
+      </div>
+    ` : ""}
+  `;
 }
 
-async function openProject() {
-  if (currentProjectPath) await api("/api/open_path", { method: "POST", body: JSON.stringify({ path: currentProjectPath }) });
+function render() {
+  syncChannelSelector();
+  renderChannelState();
+  renderSelectedChannelSummary();
 }
 
-async function openTranscript() {
-  if (currentProjectPath) await api("/api/open_path", { method: "POST", body: JSON.stringify({ path: currentProjectPath + "\\\\research\\\\competitor_transcript.md" }) });
+async function loadSelectedChannelSummary() {
+  const slug = state.selectedChannelSlug;
+  if (!slug) {
+    state.selectedChannelSummary = null;
+    state.isLoadingSummary = false;
+    render();
+    return;
+  }
+
+  if (state.summaryAbortController) state.summaryAbortController.abort();
+  const controller = new AbortController();
+  state.summaryAbortController = controller;
+  const requestId = ++state.summaryRequestId;
+  state.isLoadingSummary = true;
+  state.errorMessage = "";
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}`, { signal: controller.signal });
+    if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
+    state.selectedChannelSummary = data;
+  } catch (error) {
+    if (error && error.name === "AbortError") return;
+    if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
+    state.selectedChannelSummary = null;
+    if (error && error.code === "CHANNEL_NOT_FOUND") {
+      localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
+      state.selectedChannelSlug = null;
+      state.errorMessage = "The previously selected channel is no longer available. Please select another channel.";
+    } else {
+      state.errorMessage = describeError(error, "Could not load the selected channel summary.");
+    }
+  } finally {
+    if (requestId === state.summaryRequestId) {
+      state.isLoadingSummary = false;
+      if (state.summaryAbortController === controller) state.summaryAbortController = null;
+      render();
+    }
+  }
 }
 
-async function openMaster() {
-  if (masterPath) await api("/api/open_path", { method: "POST", body: JSON.stringify({ path: masterPath }) });
+async function loadChannels() {
+  state.isLoadingChannels = true;
+  state.errorMessage = "";
+  render();
+  try {
+    const data = await v2Api("channels");
+    state.channels = Array.isArray(data.channels) ? data.channels : [];
+    const savedSlug = localStorage.getItem(SELECTED_CHANNEL_STORAGE_KEY);
+    const validSavedSlug = savedSlug && state.channels.some((item) => item.channel_slug === savedSlug) ? savedSlug : null;
+    if (savedSlug && !validSavedSlug) localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
+    if (!state.channels.some((item) => item.channel_slug === state.selectedChannelSlug)) {
+      state.selectedChannelSlug = validSavedSlug;
+      state.selectedChannelSummary = null;
+    }
+    render();
+    if (state.selectedChannelSlug) {
+      await loadSelectedChannelSummary();
+    }
+  } catch (error) {
+    state.channels = [];
+    state.selectedChannelSlug = null;
+    state.selectedChannelSummary = null;
+    state.errorMessage = describeError(error, "Could not load the channel list.");
+    render();
+  } finally {
+    state.isLoadingChannels = false;
+    render();
+  }
 }
 
-refreshStatus();
+function refreshStatus() {
+  loadChannels();
+}
+
+document.getElementById("channelSelect").addEventListener("change", (event) => {
+  setSelectedChannelSlug(event.target.value || null);
+});
+
+loadChannels();
 </script>
 </body>
 </html>

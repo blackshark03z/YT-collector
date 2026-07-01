@@ -4,57 +4,60 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-Phase 6C1 - Frontend Channel State and V2 Read Client Cutover
+Repository History and Secret Audit for Initial GitHub Push
 
 ## Do Not Start Yet
-Wait for a separate execution prompt from the Tech Lead before any UI cutover work.
+Wait for a separate execution prompt from the Tech Lead before any repository publication, remote configuration, Phase 6C2 implementation, or push activity.
 
 ## Proposed Objective
-Switch the visible UI from legacy single-channel routes to selected-channel `/api/v2/` reads and actions, starting with explicit channel state and safe empty/disconnected handling.
+Audit repository history, staged publication safety, and secret exposure risk before adding a GitHub remote or attempting the first push.
 
 ## Expected Files
-- `scripts/ui_server.py`
-- possibly extracted UI assets if the implementation prompt explicitly allows it
-- updated UI-focused tests
+- repository history and git-configuration review outputs only if separately authorized
+- unchanged source files unless factual status-doc corrections are required
 - unchanged ignored canonical runtime files
 
 ## Required Tests
-- UI uses only canonical `/api/v2/` channel APIs
-- selected channel scopes all visible actions
-- safe no-channel and disconnected states
-- no legacy root token or root project writes through the visible UI
+- inspect git history for runtime or secret leakage risk
+- verify ignore coverage for runtime and secret paths before publication
+- confirm no remote is configured before the audit begins
+- confirm no push occurs during the audit phase
 - canonical runtime files remain ignored
-- existing backend regression suite stays green
+- preserve the approved Phase 6C1 UI state unchanged
 
 ## Stop Conditions
+- repository history contains sensitive data requiring remediation planning
 - canonical workspace or token is missing or invalid
-- selected-channel contract cannot be enforced safely
 - any legacy source changed unexpectedly
 - secret or runtime data becomes staged without authorization
 
 ## Forbidden Work
+- do not add a GitHub remote
+- do not push
+- do not perform Phase 6C2 implementation work
 - do not perform unapproved runtime mutation
-- do not run another real sync unless separately authorized
-- do not reconnect OAuth unless separately authorized
 - do not mutate protected `jesus/`
 - do not remove legacy routes
 
 ## Verification Requirements
-- confirm visible UI actions are always channel-scoped
+- confirm Phase 6C1 approved UI state remains unchanged
+- confirm no remote has been added
+- confirm no push has been attempted
 - confirm canonical metrics files remain valid under the canonical channel workspace only
-- confirm the canonical token remains structurally valid after non-interactive refresh
+- confirm the canonical token remains structurally valid and ignored
 - confirm legacy sources remain unchanged
-- confirm no production UI workflow still depends on root `projects/`, root token state, or legacy Mist of Ages globals
-- keep channel status semantics at preserved `CONNECTED` unless a future prompt explicitly changes the architecture decision
+- keep channel status semantics at preserved `CONNECTED`
 
 ## Migration Baseline
 - canonical Mist of Ages workspace now exists
 - canonical OAuth token now exists
 - canonical metrics now exist from one authorized sync
 - canonical projects are still absent
+- selected-channel V2 read cutover is implemented in the embedded frontend
+- visible mutation controls remain intentionally disabled pending later phases
 
 ## Reasoning Effort
 High
 
 ## Exact First Action
-Wait for the separate Phase 6C1 execution prompt, then verify the approved selected-channel state contract and `/api/v2/` cutover scope before implementing.
+Wait for the separate repository-audit execution prompt, then verify that no GitHub remote exists and inspect history/ignore coverage without modifying runtime data or starting Phase 6C2.
