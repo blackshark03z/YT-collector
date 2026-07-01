@@ -29,6 +29,16 @@ TECH_LEAD_APPROVED
 ## MVP Status
 MVP_ACCEPTED
 
+## Post-MVP Documentation
+- Preserved the intentional post-MVP planning document at `docs/post_mvp/video_production_optimization_proposals.md`.
+- Document state remains `DOCUMENTED_FOR_LATER_RESEARCH`.
+- Authorization state remains `NO_IMPLEMENTATION_AUTHORIZED`.
+- No proposal module has been approved for implementation.
+- No production behavior changed.
+- No canonical runtime data changed.
+- Cleanup remains the next maintenance action and must be rerun from the new baseline.
+- `implement.docx` remains unrelated and untracked.
+
 ## Completed
 - Phase 0: read-only architecture audit completed
 - Phase 1: channel workspace foundation completed and committed
@@ -346,8 +356,8 @@ MVP_ACCEPTED
 - OAuth connect/reconnect, metrics sync mutation, project creation, transcript mutation, validation mutation, collector workflow actions, and open-path actions remain blocked pending a separate execution prompt from the Tech Lead.
 
 ## Proposed Next Task
-- `POST_MVP_PLANNING_BLOCKED_PENDING_USER_PRIORITIZATION`
-- Final MVP acceptance is complete. Post-MVP planning remains blocked pending a separate user prioritization decision and execution prompt.
+- `POST_MVP_REPOSITORY_CLEANUP_PENDING`
+- The post-MVP optimization proposal has been preserved as documentation only. Repository cleanup remains the next maintenance action and must be rerun from the new baseline.
 
 ## Phase 5B1 Root Cause
 - Four regression tests still assumed the real repository root must not contain `channels/` or `secrets/`, which stopped being true after the authorized canonical migration in Phase 5B.
@@ -470,4 +480,4 @@ MVP_ACCEPTED
 - UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-MVP final acceptance is complete. Do not begin post-MVP planning or implementation until a separate user prioritization decision is provided.
+Do not begin post-MVP feature implementation. The next maintenance action is a rerun of the repository cleanup audit from the new documentation baseline.

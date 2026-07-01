@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Post-MVP Planning Document Preservation
+- Preserved the intentional post-MVP planning document as `docs/post_mvp/video_production_optimization_proposals.md`.
+- Kept the proposal in documented-only state: `DOCUMENTED_FOR_LATER_RESEARCH`.
+- Kept the authorization state as `NO_IMPLEMENTATION_AUTHORIZED`.
+- Did not approve or implement any proposed module.
+- Did not change production behavior, runtime data, legacy sources, tests, or code.
+- Cleanup remains the next maintenance action and must be rerun from the new baseline.
+- `implement.docx` remained unrelated and untracked.
+
 ### Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure
 - Audited the final embedded frontend route inventory in `scripts/ui_server.py` and confirmed the visible production UI now uses canonical `/api/v2/` routes for channel reads, OAuth start, metrics sync, project list/detail, transcript save, and validation.
 - Confirmed the visible frontend no longer actively invokes `/api/status`, `/oauth/start`, `/api/create_project`, `/api/save_transcript`, `/api/validate`, or `/api/open_path`.
