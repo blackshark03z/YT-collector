@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7B - Versioned Workflow Foundation and Read API
+Phase 7C1 - Versioned Prompt Set Ingestion and Bundle Backend
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,9 @@ IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
 
 ## Repository Baseline
 - Branch: master
-- HEAD: `04e6b0e`
-- Subject: `docs: close phase 6c4 mvp acceptance`
-- Working tree before Phase 7B implementation: only unrelated untracked `implement.docx`
+- HEAD before Phase 7C1 implementation: `24c477a`
+- Subject before Phase 7C1 implementation: `feat: add versioned workflow foundation`
+- Working tree before Phase 7C1 implementation: only unrelated untracked `implement.docx`
 
 ## MVP Status
 MVP_ACCEPTED
@@ -58,6 +58,34 @@ MVP_ACCEPTED
 - Phase 6C3: embedded production UI now wires canonical selected-channel project listing, project creation, project detail reads, transcript save, and validation using V2 routes with duplicate/stale-response protection and isolated temporary-root smoke evidence
 - Phase 6C4: final MVP cutover verification completed with active UI-route audit, legacy-dependency classification, real read-only smoke, temporary-root end-to-end smoke, narrow frontend cleanup, and MVP readiness documentation
 - Phase 7B: versioned workflow registry/definition foundation, immutable project workflow binding, legacy synthesized binding reads, workflow state read synthesis, and channel-scoped workflow read API completed locally without runtime mutation
+- Phase 7C1: authoritative Mist of Ages prompt-set ingestion, immutable workflow v2, generic prompt-manifest validation, prompt-bundle builder, and read-only bundle API completed locally without runtime mutation
+
+## Phase 7C1 Scope
+- Verified the approved source document `Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx` by exact SHA-256 `3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772`.
+- Added `scripts/prompt_source_ingest.py` for exact-source verification, DOCX text extraction, and deterministic prompt-body normalization into canonical Markdown files.
+- Added immutable workflow v2 assets under `workflows/mist_of_ages_assisted_content/v2/` with seven canonical prompt Markdown files and a cross-validated prompt manifest.
+- Extended `scripts/channel_workflow.py` so workflow definitions can declare prompt-set availability metadata safely.
+- Added `scripts/channel_prompt_bundle.py` for generic prompt-manifest loading, digest verification, output-contract validation, and deterministic read-only bundle construction from exact workflow bindings plus project artifacts.
+- Added `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/bundle` in `scripts/ui_server.py`.
+- Added focused bundle coverage in `tests/test_channel_prompt_bundle.py` for portable DOCX-fixture extraction, v1 immutability, manifest validation, topic derivation, bundle determinism, API behavior, and runtime isolation.
+- Kept workflow execution writes, output parsing, artifact writes, approvals, retries, stale propagation, UI changes, and model/API calls out of scope.
+
+## Phase 7C1 Evidence
+- Source document filename: `Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx`
+- Source SHA-256: `3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772`
+- Workflow v1 definition SHA-256: `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E` (unchanged)
+- Workflow v2 definition path: `workflows/mist_of_ages_assisted_content/v2/workflow.json`
+- Workflow v2 definition SHA-256: `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`
+- Prompt manifest path: `workflows/mist_of_ages_assisted_content/v2/prompts/manifest.json`
+- Prompt manifest SHA-256: `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`
+- Prompt 2 Topic context source: canonical competitor metadata title at `input/_raw/competitor_video.json:title`
+- Prompt 5 pronunciation notes contract: optional contextual input only, explicitly reported as not provided, with no canonical file path introduced
+- Default and legacy-unpinned workflow versions remain `1`.
+- Bundle endpoint: `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/bundle`
+- Focused prompt-bundle tests: `python -m unittest tests.test_channel_prompt_bundle` passing portably with no external-DOCX dependency in the required suite; optional operator audit may be run separately when the approved source file is available locally
+- Compile check: `python -m py_compile scripts\prompt_source_ingest.py scripts\channel_prompt_bundle.py scripts\channel_workflow.py scripts\ui_server.py tests\test_channel_prompt_bundle.py` passing
+- Full offline regression: `python -m unittest discover -s tests` passing after Phase 7C1 changes
+- All prompt-bundle and API write-safety checks used temporary roots only; the real Mist of Ages runtime snapshot remained unchanged.
 
 ## Phase 7B Scope
 - Added file-driven workflow loading in `workflows/registry.json` and `workflows/mist_of_ages_assisted_content/v1/workflow.json`.
@@ -83,10 +111,10 @@ MVP_ACCEPTED
 - Legacy synthesized-binding GET coverage proved no `project.json` rewrite and no `workflow_state.json` creation during reads.
 - Runtime isolation coverage continued to use temporary roots only and preserved the real Mist of Ages runtime snapshot.
 
-## Phase 7B Blocker
-- Authoritative Prompt 1-7 bodies are still not present in the repository.
-- `prompt_set.status` therefore remains `MISSING` and `bundle_available` remains `false`.
-- This is not a blocker for Phase 7B read architecture, but it blocks prompt-bundle generation in a later phase.
+## Phase 7C1 Gate
+- Prompt-set status is now `AVAILABLE` for workflow version `2` only.
+- Production defaults remain pinned to workflow version `1`, so no existing project was migrated.
+- Phase 7C2 remains blocked pending a separate execution prompt for prompt-output parsing, artifact writes, and workflow-state write semantics.
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes

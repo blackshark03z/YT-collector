@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Phase 7C1 - Versioned Prompt Set Ingestion and Bundle Backend
+- Verified the approved source document `Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx` by exact SHA-256 `3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772`.
+- Added `scripts/prompt_source_ingest.py` to verify the approved DOCX, extract the authoritative Prompt 1-7 bodies, and normalize them deterministically into canonical UTF-8 Markdown files.
+- Added immutable workflow v2 assets under `workflows/mist_of_ages_assisted_content/v2/`, including seven canonical prompt files and `prompts/manifest.json`.
+- Updated `workflows/registry.json` to register version `2` while keeping `default_version` and `legacy_unpinned_version` pinned to `1`.
+- Extended `scripts/channel_workflow.py` with prompt-set availability metadata validation and safe workflow-definition path resolution for versioned prompt sets.
+- Added `scripts/channel_prompt_bundle.py` for generic prompt-manifest validation, prompt/source/workflow digest enforcement, project-context injection, deterministic bundle generation, and controlled prompt-bundle domain errors.
+- Added `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/bundle` in `scripts/ui_server.py`.
+- Added `tests/test_channel_prompt_bundle.py` covering portable DOCX-fixture extraction, manifest failures, v1 immutability, topic derivation, bundle determinism, API behavior, alternate prompt-set loading, and real-runtime isolation.
+- Confirmed workflow v1 remained byte-identical with SHA-256 `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Confirmed workflow v2 SHA-256 `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606` and manifest SHA-256 `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- Tightened Prompt 2 Topic handling to use only canonical competitor metadata title and to fail with a controlled error when no trustworthy topic title exists.
+- Kept Prompt 5 pronunciation notes pathless and non-blocking, reported only as an optional contextual input not provided.
+- Re-ran focused prompt-bundle tests successfully with a portable required suite and temporary-root-only write coverage.
+- Kept UI work, model/API calls, workflow output writes, approval flows, retries, revisions, stale propagation, and production default changes out of scope.
+
 ### Phase 7B - Versioned Workflow Foundation and Read API
 - Added production workflow registry data at `workflows/registry.json`.
 - Added production Mist of Ages workflow definition data at `workflows/mist_of_ages_assisted_content/v1/workflow.json`.

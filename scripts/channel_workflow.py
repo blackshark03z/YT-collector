@@ -13,6 +13,7 @@ SUPPORTED_REGISTRY_SCHEMA_VERSION = 1
 SUPPORTED_DEFINITION_SCHEMA_VERSION = 1
 SUPPORTED_STATE_SCHEMA_VERSION = 1
 SUPPORTED_EXECUTION_MODE = "LINEAR"
+SUPPORTED_PROMPT_SET_STATUSES = {"MISSING", "AVAILABLE"}
 SUPPORTED_VERSION_STATUSES = {"ACTIVE", "DEPRECATED"}
 SUPPORTED_ARTIFACT_ROLES = {"INPUT", "OPTIONAL_INPUT", "GENERATED", "FINAL"}
 SUPPORTED_STEP_STATUSES = {
@@ -222,11 +223,41 @@ def _validate_definition_payload(definition: dict[str, Any]) -> dict[str, Any]:
     prompt_set = definition["prompt_set"]
     if not isinstance(prompt_set, dict):
         raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set must be an object.")
-    if prompt_set.get("status") == "MISSING":
-        if prompt_set.get("bundle_available") not in {False, None}:
-            raise _error("WORKFLOW_DEFINITION_INVALID", "Prompt bundle cannot be available when prompt_set.status is MISSING.")
+    status = prompt_set.get("status")
+    if status not in SUPPORTED_PROMPT_SET_STATUSES:
+        raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set.status is unsupported.")
     if not isinstance(prompt_set.get("bundle_available"), bool):
         raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set.bundle_available must be a boolean.")
+    if status == "MISSING":
+        if prompt_set.get("bundle_available"):
+            raise _error("WORKFLOW_DEFINITION_INVALID", "Prompt bundle cannot be available when prompt_set.status is MISSING.")
+        normalized_prompt_set = {
+            "status": "MISSING",
+            "version": prompt_set.get("version"),
+            "bundle_available": False,
+        }
+    else:
+        if not prompt_set.get("bundle_available"):
+            raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set.bundle_available must be true when prompt_set.status is AVAILABLE.")
+        prompt_set_id = prompt_set.get("prompt_set_id")
+        prompt_set_version = prompt_set.get("version")
+        manifest_path = prompt_set.get("manifest_path")
+        if not isinstance(prompt_set_id, str) or not prompt_set_id.strip():
+            raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set.prompt_set_id is required when the prompt set is available.")
+        if not isinstance(prompt_set_version, str) or not prompt_set_version.strip():
+            raise _error("WORKFLOW_DEFINITION_INVALID", "prompt_set.version is required when the prompt set is available.")
+        normalized_prompt_set = {
+            "status": "AVAILABLE",
+            "prompt_set_id": prompt_set_id.strip(),
+            "version": prompt_set_version.strip(),
+            "manifest_path": _safe_relative_posix_path(manifest_path, field_name="prompt_set.manifest_path").as_posix(),
+            "manifest_sha256": _validate_digest(
+                prompt_set.get("manifest_sha256"),
+                field_name="prompt_set.manifest_sha256",
+                code="WORKFLOW_DEFINITION_INVALID",
+            ),
+            "bundle_available": True,
+        }
 
     artifacts = definition["artifacts"]
     if not isinstance(artifacts, list) or not artifacts:
@@ -360,13 +391,13 @@ def _validate_definition_payload(definition: dict[str, Any]) -> dict[str, Any]:
         "entry_lifecycle_state": entry_state,
         "terminal_lifecycle_state": terminal_state,
         "lifecycle_states": list(lifecycle_states),
-        "prompt_set": prompt_set,
+        "prompt_set": normalized_prompt_set,
         "artifacts": list(artifact_map.values()),
         "steps": validated_steps,
     }
 
 
-def load_workflow_definition(root: Path | str, workflow_id: str, workflow_version: str) -> dict[str, Any]:
+def resolve_workflow_definition_path(root: Path | str, workflow_id: str, workflow_version: str) -> Path:
     registry = load_workflow_registry(root)
     workflow_entry = registry["workflows"].get(workflow_id)
     if workflow_entry is None:
@@ -380,6 +411,18 @@ def load_workflow_definition(root: Path | str, workflow_id: str, workflow_versio
         definition_path.relative_to(workflow_root)
     except ValueError as exc:
         raise _error("WORKFLOW_DEFINITION_INVALID", "Workflow definition path escapes the workflow root.") from exc
+    return definition_path
+
+
+def load_workflow_definition(root: Path | str, workflow_id: str, workflow_version: str) -> dict[str, Any]:
+    registry = load_workflow_registry(root)
+    workflow_entry = registry["workflows"].get(workflow_id)
+    if workflow_entry is None:
+        raise _error("WORKFLOW_DEFINITION_NOT_FOUND", f"Workflow {workflow_id} is not registered.", 404)
+    version_entry = workflow_entry["versions"].get(workflow_version)
+    if version_entry is None:
+        raise _error("WORKFLOW_DEFINITION_NOT_FOUND", f"Workflow {workflow_id} version {workflow_version} is not registered.", 404)
+    definition_path = resolve_workflow_definition_path(root, workflow_id, workflow_version)
     if not definition_path.exists():
         raise _error("WORKFLOW_DEFINITION_NOT_FOUND", "Workflow definition file does not exist.", 404)
     digest = _sha256_file(definition_path)

@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "prompt_set_id": "mist_of_ages_package_first",
+  "prompt_set_version": "2",
+  "source_document": {
+    "filename": "Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx",
+    "sha256": "3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772"
+  },
+  "prompts": {
+    "prompt_1_transcript_analysis": {
+      "relative_path": "prompt_01_transcript_analyst.md",
+      "sha256": "DFDA98B8E805C079D098A2843FC777C0BF34B2674D537A3A4513AA986B15F6D0",
+      "output_contract": {
+        "response_mode": "SINGLE_ARTIFACT",
+        "artifacts": [
+          {
+            "artifact_id": "transcript_analysis",
+            "required_headings": [
+              "## Subject",
+              "## Competitor Promise",
+              "## Narrative Map",
+              "## Strong Idea-Level Elements",
+              "## Weak or Removable Elements",
+              "## Claims Requiring Verification",
+              "## Originality Risks",
+              "## Neutral Research Questions"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_2_historical_research": {
+      "relative_path": "prompt_02_historical_researcher.md",
+      "sha256": "B844D23E977294A1E4F3879E061B4E004848FE3592EEBAF5FF56CA0526489463",
+      "project_context": [
+        {
+          "context_id": "topic",
+          "label": "Topic",
+          "source": "source_metadata_title",
+          "required": true,
+          "note": "Read from canonical competitor metadata title only; do not infer from slug or transcript."
+        }
+      ],
+      "output_contract": {
+        "response_mode": "MULTI_ARTIFACT_TOOL_ENVELOPE",
+        "artifacts": [
+          {
+            "artifact_id": "research_pack",
+            "delivery_marker": "=== FILE 1: research_pack.md ===",
+            "required_headings": [
+              "## Topic Overview",
+              "## Reliable Timeline",
+              "## Key People and Roles",
+              "## Anchor Facts",
+              "## Human Details and Human Cost",
+              "## Myths, Disputes, and Later Accounts",
+              "## Facts That Contradict the Competitor",
+              "## Possible Evidence-Based Contradictions",
+              "## Documented Visual Details",
+              "## Source Notes"
+            ]
+          },
+          {
+            "artifact_id": "evidence_ledger",
+            "delivery_marker": "=== FILE 2: evidence_ledger.md ===",
+            "required_headings": [
+              "CLAIM:",
+              "SOURCE:",
+              "STATUS:",
+              "ALLOWED WORDING:",
+              "NOTES:"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_3_creative_package": {
+      "relative_path": "prompt_03_creative_strategist.md",
+      "sha256": "82E6DCD167995558E949F20BD9DEC8FA321008B86AA5C7A87F632D786B26839F",
+      "output_contract": {
+        "response_mode": "SINGLE_ARTIFACT",
+        "artifacts": [
+          {
+            "artifact_id": "locked_creative_package",
+            "required_headings": [
+              "# Locked Creative Package",
+              "## Topic Verdict",
+              "## Locked Central Question",
+              "## Locked Core Angle",
+              "## Viewer Takeaway",
+              "## Primary Package",
+              "## Backup Package A",
+              "## Backup Package B",
+              "## Additional Title Candidates",
+              "## Description Draft",
+              "## Hashtag Draft",
+              "## Keyword Set",
+              "## Required Anchor Facts",
+              "## Required Human-Cost Detail",
+              "## Forbidden Claims",
+              "## Originality Guardrails"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_4_retention_outline": {
+      "relative_path": "prompt_04_retention_architect.md",
+      "sha256": "B0AD09E7A3F24B1FF62FB033532DE66529EF72CF04EE2C04F6A29CD8A53D22CA",
+      "output_contract": {
+        "response_mode": "SINGLE_ARTIFACT",
+        "artifacts": [
+          {
+            "artifact_id": "retention_outline",
+            "required_headings": [
+              "# Retention Outline",
+              "## Package Fulfillment Map",
+              "## 0:00–0:15 — Package Proof",
+              "## 0:15–0:35 — Central Question",
+              "## 0:35–1:30 — Minimum Setup",
+              "## Causal Escalation",
+              "## Evidence-Based Reframe",
+              "## Human Cost and Aftermath",
+              "## Ending and Debate Question",
+              "## Open-Loop Audit",
+              "## Visuality Audit"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_5_narration_v1": {
+      "relative_path": "prompt_05_main_writer.md",
+      "sha256": "1843925E0B82A20A2D29E56A58C5B08E21950FBD064D66DD576D3AA619ED670D",
+      "project_context": [
+        {
+          "context_id": "pronunciation_notes",
+          "label": "Pronunciation Notes",
+          "source": "unavailable",
+          "required": false,
+          "note": "Optional future input capability; not stored in the canonical project layout."
+        }
+      ],
+      "output_contract": {
+        "response_mode": "SINGLE_ARTIFACT",
+        "artifacts": [
+          {
+            "artifact_id": "narration_v1",
+            "required_headings": [
+              "## Narration"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_6_red_team": {
+      "relative_path": "prompt_06_red_team.md",
+      "sha256": "A141486E5504B557EBBCA91848604899C1D53FC5C581A5544BFDFE7271F9CF08",
+      "output_contract": {
+        "response_mode": "SINGLE_ARTIFACT",
+        "artifacts": [
+          {
+            "artifact_id": "red_team_report",
+            "required_headings": [
+              "## Overall Verdict",
+              "## Must Fix — Narration",
+              "## Must Fix — Publishing Package",
+              "## Optional Improvements",
+              "## Passed Checks"
+            ]
+          }
+        ]
+      }
+    },
+    "prompt_7_final_content": {
+      "relative_path": "prompt_07_finalizer.md",
+      "sha256": "D813CDF167A7013865D01F4C05354770DD92B86DC64830146656134C0BED40B3",
+      "output_contract": {
+        "response_mode": "MULTI_ARTIFACT_PROMPT_NATIVE",
+        "artifacts": [
+          {
+            "artifact_id": "content",
+            "native_marker": "=== FILE 1: content.md ==="
+          },
+          {
+            "artifact_id": "publishing_package",
+            "native_marker": "=== FILE 2: publishing_package.md ==="
+          }
+        ]
+      }
+    }
+  }
+}

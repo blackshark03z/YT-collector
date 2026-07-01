@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "workflow_id": "mist_of_ages_assisted_content",
+  "workflow_version": "2",
+  "display_name": "Mist of Ages Assisted Content Workflow",
+  "execution_mode": "LINEAR",
+  "entry_lifecycle_state": "INPUT_READY",
+  "terminal_lifecycle_state": "PRODUCTION_READY",
+  "lifecycle_states": [
+    "INPUT_READY",
+    "TRANSCRIPT_ANALYZED",
+    "RESEARCH_READY",
+    "PACKAGE_LOCKED",
+    "OUTLINE_READY",
+    "NARRATION_V1_READY",
+    "RED_TEAM_READY",
+    "FINAL_READY",
+    "PRODUCTION_READY"
+  ],
+  "prompt_set": {
+    "status": "AVAILABLE",
+    "prompt_set_id": "mist_of_ages_package_first",
+    "version": "2",
+    "manifest_path": "prompts/manifest.json",
+    "manifest_sha256": "E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602",
+    "bundle_available": true
+  },
+  "artifacts": [
+    {
+      "artifact_id": "competitor_reference",
+      "display_name": "Competitor Reference",
+      "relative_path": "input/competitor_reference.md",
+      "artifact_role": "INPUT",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "competitor_transcript",
+      "display_name": "Competitor Transcript",
+      "relative_path": "research/competitor_transcript.md",
+      "artifact_role": "INPUT",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "channel_learnings",
+      "display_name": "Channel Learnings",
+      "relative_path": "input/channel_learnings.md",
+      "artifact_role": "OPTIONAL_INPUT",
+      "required": false,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "transcript_analysis",
+      "display_name": "Transcript Analysis",
+      "relative_path": "workflow/transcript_analysis.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "research_pack",
+      "display_name": "Research Pack",
+      "relative_path": "workflow/research_pack.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "evidence_ledger",
+      "display_name": "Evidence Ledger",
+      "relative_path": "workflow/evidence_ledger.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "locked_creative_package",
+      "display_name": "Locked Creative Package",
+      "relative_path": "workflow/locked_creative_package.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "retention_outline",
+      "display_name": "Retention Outline",
+      "relative_path": "workflow/retention_outline.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "narration_v1",
+      "display_name": "Narration V1",
+      "relative_path": "workflow/narration_v1.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "red_team_report",
+      "display_name": "Red Team Report",
+      "relative_path": "workflow/red_team_report.md",
+      "artifact_role": "GENERATED",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "content",
+      "display_name": "Content",
+      "relative_path": "content.md",
+      "artifact_role": "FINAL",
+      "required": true,
+      "media_type": "text/markdown"
+    },
+    {
+      "artifact_id": "publishing_package",
+      "display_name": "Publishing Package",
+      "relative_path": "publishing_package.md",
+      "artifact_role": "FINAL",
+      "required": true,
+      "media_type": "text/markdown"
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "prompt_1_transcript_analysis",
+      "order": 1,
+      "display_name": "Prompt 1 - Transcript Analysis",
+      "required_model": "Gemini 3.1 Pro",
+      "input_artifact_ids": [
+        "competitor_reference",
+        "competitor_transcript"
+      ],
+      "optional_input_artifact_ids": [
+        "channel_learnings"
+      ],
+      "output_artifact_ids": [
+        "transcript_analysis"
+      ],
+      "resulting_lifecycle_state": "TRANSCRIPT_ANALYZED",
+      "constraints": [
+        {
+          "type": "SAME_MODEL_CONVERSATION_REQUIRED",
+          "group_id": "gemini_analysis_and_research"
+        }
+      ],
+      "prompt_source_ref": "prompt_1_transcript_analysis"
+    },
+    {
+      "step_id": "prompt_2_historical_research",
+      "order": 2,
+      "display_name": "Prompt 2 - Historical Research",
+      "required_model": "Gemini 3.1 Pro",
+      "input_artifact_ids": [
+        "transcript_analysis",
+        "competitor_transcript"
+      ],
+      "optional_input_artifact_ids": [],
+      "output_artifact_ids": [
+        "research_pack",
+        "evidence_ledger"
+      ],
+      "resulting_lifecycle_state": "RESEARCH_READY",
+      "constraints": [
+        {
+          "type": "SAME_MODEL_CONVERSATION_REQUIRED",
+          "group_id": "gemini_analysis_and_research"
+        }
+      ],
+      "prompt_source_ref": "prompt_2_historical_research"
+    },
+    {
+      "step_id": "prompt_3_creative_package",
+      "order": 3,
+      "display_name": "Prompt 3 - Creative Package",
+      "required_model": "GPT-5.5 Thinking",
+      "input_artifact_ids": [
+        "competitor_reference",
+        "transcript_analysis",
+        "research_pack",
+        "evidence_ledger"
+      ],
+      "optional_input_artifact_ids": [
+        "channel_learnings"
+      ],
+      "output_artifact_ids": [
+        "locked_creative_package"
+      ],
+      "resulting_lifecycle_state": "PACKAGE_LOCKED",
+      "constraints": [],
+      "prompt_source_ref": "prompt_3_creative_package"
+    },
+    {
+      "step_id": "prompt_4_retention_outline",
+      "order": 4,
+      "display_name": "Prompt 4 - Retention Outline",
+      "required_model": "GPT-5.5 Thinking",
+      "input_artifact_ids": [
+        "locked_creative_package",
+        "research_pack",
+        "evidence_ledger"
+      ],
+      "optional_input_artifact_ids": [],
+      "output_artifact_ids": [
+        "retention_outline"
+      ],
+      "resulting_lifecycle_state": "OUTLINE_READY",
+      "constraints": [],
+      "prompt_source_ref": "prompt_4_retention_outline"
+    },
+    {
+      "step_id": "prompt_5_narration_v1",
+      "order": 5,
+      "display_name": "Prompt 5 - Narration V1",
+      "required_model": "Claude Sonnet 4.6 — High",
+      "input_artifact_ids": [
+        "competitor_transcript",
+        "locked_creative_package",
+        "research_pack",
+        "evidence_ledger",
+        "retention_outline"
+      ],
+      "optional_input_artifact_ids": [],
+      "output_artifact_ids": [
+        "narration_v1"
+      ],
+      "resulting_lifecycle_state": "NARRATION_V1_READY",
+      "constraints": [
+        {
+          "type": "SAME_MODEL_CONVERSATION_REQUIRED",
+          "group_id": "claude_narration_and_final"
+        }
+      ],
+      "prompt_source_ref": "prompt_5_narration_v1"
+    },
+    {
+      "step_id": "prompt_6_red_team",
+      "order": 6,
+      "display_name": "Prompt 6 - Red Team",
+      "required_model": "GPT-5.5 Thinking",
+      "input_artifact_ids": [
+        "narration_v1",
+        "locked_creative_package",
+        "evidence_ledger",
+        "retention_outline",
+        "competitor_transcript"
+      ],
+      "optional_input_artifact_ids": [],
+      "output_artifact_ids": [
+        "red_team_report"
+      ],
+      "resulting_lifecycle_state": "RED_TEAM_READY",
+      "constraints": [],
+      "prompt_source_ref": "prompt_6_red_team"
+    },
+    {
+      "step_id": "prompt_7_final_content",
+      "order": 7,
+      "display_name": "Prompt 7 - Final Content",
+      "required_model": "Claude Sonnet 4.6 — High",
+      "input_artifact_ids": [
+        "narration_v1",
+        "red_team_report",
+        "locked_creative_package",
+        "evidence_ledger"
+      ],
+      "optional_input_artifact_ids": [],
+      "output_artifact_ids": [
+        "content",
+        "publishing_package"
+      ],
+      "resulting_lifecycle_state": "FINAL_READY",
+      "constraints": [
+        {
+          "type": "SAME_MODEL_CONVERSATION_REQUIRED",
+          "group_id": "claude_narration_and_final"
+        }
+      ],
+      "prompt_source_ref": "prompt_7_final_content"
+    }
+  ]
+}

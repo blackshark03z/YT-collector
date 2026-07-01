@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_workflow, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -921,6 +921,10 @@ def _map_workflow_error(exc: channel_workflow.ChannelWorkflowError) -> V2Error:
     return _v2_error(exc.code, exc.message, exc.status)
 
 
+def _map_prompt_bundle_error(exc: channel_prompt_bundle.PromptBundleError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
 def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
     channel = _load_channel_or_error(root, channel_slug)
     paths = channel_workspace.canonical_channel_paths(root, channel_slug)
@@ -1118,6 +1122,25 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, workflow
+            if len(parts) == 10 and parts[4] == "projects" and parts[6] == "workflow" and parts[7] == "steps" and parts[9] == "bundle" and method == "GET":
+                project_slug = parts[5]
+                step_id = parts[8]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                try:
+                    bundle = channel_prompt_bundle.build_prompt_bundle(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        step_id,
+                        project,
+                        project_dir,
+                    )
+                except channel_prompt_bundle.PromptBundleError as exc:
+                    raise _map_prompt_bundle_error(exc) from exc
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
+                return 200, bundle
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
                 project_slug = parts[5]
                 try:
