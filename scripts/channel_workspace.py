@@ -225,6 +225,11 @@ def load_channel(root: Path | str, slug: str) -> dict[str, Any]:
     return validate_channel_metadata(data, expected_slug=slug)
 
 
+def channel_exists(root: Path | str, slug: str) -> bool:
+    paths = canonical_channel_paths(root, slug)
+    return paths.channel_json.exists()
+
+
 def list_channels(root: Path | str) -> list[dict[str, Any]]:
     repo_root = Path(root).resolve()
     channels_dir = repo_root / "channels"
@@ -295,3 +300,31 @@ def create_channel_workspace(
         ),
     )
     return metadata
+
+
+def update_channel_connection_metadata(
+    root: Path | str,
+    slug: str,
+    *,
+    youtube_channel_id: str,
+    display_name: str,
+    youtube_handle: str | None,
+    status: str = "CONNECTED",
+    last_connected_at: str | None = None,
+) -> dict[str, Any]:
+    channel_slug = validate_channel_slug(slug)
+    current = load_channel(root, channel_slug)
+    if current["channel_slug"] != channel_slug:
+        raise ChannelWorkspaceError("channel.json slug does not match the workspace folder.")
+    if current["youtube_channel_id"] != youtube_channel_id:
+        raise ChannelWorkspaceError("Refusing to change youtube_channel_id for an existing workspace.")
+
+    updated = dict(current)
+    updated["display_name"] = display_name.strip()
+    updated["youtube_handle"] = youtube_handle.strip() if isinstance(youtube_handle, str) and youtube_handle.strip() else ""
+    updated["status"] = status.strip()
+    updated["last_connected_at"] = last_connected_at or utc_now_iso()
+    validated = validate_channel_metadata(updated, expected_slug=channel_slug)
+    paths = canonical_channel_paths(root, channel_slug)
+    _write_json_atomic(paths.channel_json, validated)
+    return validated
