@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 6B - UI Cutover Readiness Audit
+- Completed a read-only audit of the current UI, route registration, channel services, project services, and tests at commit `8312c5c`.
+- Tech Lead approved the audit conclusion and accepted the readiness decision `READY_WITH_PRECONDITIONS`.
+- Confirmed the production UI is still embedded in `scripts/ui_server.py`; there is no separate `ui/index.html` or `ui/app.js` to cut over independently.
+- Confirmed the visible UI still calls legacy single-channel routes and legacy storage helpers, while the canonical multi-channel backend already exists under `/api/v2/`.
+- Classified the active legacy production dependencies, mapped the UI workflows, and built a minimal cutover phase breakdown.
+- Audit result: `READY_WITH_PRECONDITIONS`.
+- Preconditions are frontend/API-client cutover, explicit selected-channel state, channel-scoped project wiring, and removal of live UI dependence on legacy root paths.
+- Re-ran the relevant backend and API regression suites without external calls.
+- UI cutover implementation remains blocked pending a separate execution prompt for Phase 6C1.
+
 ### Phase 6A - Selected-Channel Metrics Sync
 - Modified `scripts/channel_oauth.py` to accept migrated canonical tokens whose `expires_at` field is stored as epoch seconds.
 - Modified `scripts/channel_workspace.py` and `scripts/channel_metrics.py` so successful metrics sync preserves the current channel status and updates only metrics metadata.
