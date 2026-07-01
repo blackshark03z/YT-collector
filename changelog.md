@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Phase 6C3 - Project And Collector UI Wiring
+- Modified the embedded production UI in `scripts/ui_server.py` to add selected-channel canonical project list, project creation, project detail, transcript save, and validation state without adding a separate frontend stack.
+- Wired visible project listing to `GET /api/v2/channels/<selectedChannelSlug>/projects`.
+- Wired visible project creation to `POST /api/v2/channels/<selectedChannelSlug>/projects` using only `url` and optional `project_name`.
+- Wired selected-project detail reads to `GET /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>` and transcript reads to `GET /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/transcript`.
+- Wired transcript save to `POST /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/transcript` and validation to `POST /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/validate`.
+- Added project-list loading/error state, empty canonical project state, selected-project detail state, transcript draft state, structured validation rendering, and project feedback scoped to channel slug plus project slug.
+- Added duplicate-request and stale-response protection for project list refresh, project creation, transcript save, and validation while preserving the existing Phase 6C2 OAuth and metrics controls.
+- Kept raw-path opening disabled in the visible frontend and preserved backend legacy compatibility routes for rollback.
+- Extended `tests/test_ui_frontend_contract.py` and `tests/test_multichannel_api.py` with focused 6C3 contract coverage.
+- Performed a local non-external smoke on isolated loopback port `8768` using a temporary fixture root only; the smoke verified empty project state, fixture project creation, detail rendering, transcript save, validation rendering, and fixture-only writes under the temporary canonical workspace.
+- Preserved canonical Mist of Ages runtime data, canonical token ignore safety, canonical metrics readability, canonical profile/learnings, and all legacy sources.
+- Tech Lead approved Phase 6C3 closure after the project-workflow V2 wiring, isolated smoke, and full regression rerun.
+- Confirmed Phase 6C3 closes with commit and push only; no real Mist of Ages project was created and no additional runtime mutation was performed.
+- Proposed next task: `Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure`.
+- Phase 6C4 remains blocked pending separate Tech Lead review and execution authorization.
+
 ### Phase 6C2 - OAuth And Metrics UI Wiring
 - Modified the embedded production UI in `scripts/ui_server.py` to add selected-channel OAuth and metrics action state without creating a separate frontend stack.
 - Wired visible OAuth start to canonical `GET /api/v2/oauth/start?channel_slug=<slug>&mode=reconnect` using the explicit current selected channel only.

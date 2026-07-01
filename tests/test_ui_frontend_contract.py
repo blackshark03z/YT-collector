@@ -24,12 +24,23 @@ class UiFrontendContractTests(unittest.TestCase):
             "SELECTED_CHANNEL_STORAGE_KEY",
             "selectedChannelSlug",
             "selectedChannelSummary",
+            "selectedProjectSlug",
+            "selectedProjectDetail",
+            "selectedProjectTranscript",
+            "selectedProjectValidation",
             "state.channels",
+            "state.projects",
             "state.isLoadingChannels",
             "state.isLoadingSummary",
+            "state.isLoadingProjects",
+            "state.isLoadingProjectDetail",
             "oauthAction",
             "metricsAction",
             "actionFeedback",
+            "createProjectAction",
+            "transcriptSaveAction",
+            "validationAction",
+            "projectFeedback",
         ]:
             self.assertIn(token, self.html)
 
@@ -59,11 +70,17 @@ class UiFrontendContractTests(unittest.TestCase):
         for token in [
             "summaryRequestId",
             "summaryAbortController",
+            "projectListRequestId",
+            "projectDetailRequestId",
             "new AbortController()",
             "requestId !== state.summaryRequestId",
             "slug !== state.selectedChannelSlug",
             "state.oauthAction.requestId !== requestId",
             "state.metricsAction.requestId !== requestId",
+            "state.createProjectAction.requestId !== requestId",
+            "state.transcriptSaveAction.requestId !== requestId",
+            "state.validationAction.requestId !== requestId",
+            "projectSlug !== state.selectedProjectSlug",
         ]:
             self.assertIn(token, self.html)
 
@@ -86,19 +103,46 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("recent_count", self.html)
         self.assertIn("Metrics sync is available only when the selected channel is connected.", self.html)
 
+    def test_project_list_and_detail_use_selected_channel_and_project_routes(self):
+        self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects`)', self.html)
+        self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}`)', self.html)
+        self.assertIn('Select a channel to load its canonical project list.', self.html)
+        self.assertIn("No canonical projects yet", self.html)
+        self.assertIn("setSelectedProjectSlug(", self.html)
+
+    def test_project_creation_uses_exact_v2_route_and_supported_payload(self):
+        self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects`, {', self.html)
+        self.assertIn('const payload = { url };', self.html)
+        self.assertIn("payload.project_name = projectName;", self.html)
+        self.assertNotIn("project_slug:", self.html)
+
+    def test_transcript_and_validation_use_exact_v2_project_routes(self):
+        self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript`, {', self.html)
+        self.assertIn('const body = { transcript: transcriptText };', self.html)
+        self.assertIn("body.overwrite = true;", self.html)
+        self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate`, {', self.html)
+        self.assertIn('body: JSON.stringify({})', self.html)
+
     def test_duplicate_and_stale_action_requests_are_blocked(self):
         for token in [
             "state.oauthAction.busy && state.oauthAction.slug === state.selectedChannelSlug",
             "state.metricsAction.busy && state.metricsAction.slug === state.selectedChannelSlug",
+            "state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug",
+            "state.transcriptSaveAction.busy",
+            "state.validationAction.busy",
             "if (oauth.disabled)",
             "if (metrics.disabled)",
             "clearActionFeedback();",
+            "clearProjectState();",
+            "clearProjectFeedback();",
             "await refreshSelectedSummaryForAction(slug);",
+            "await loadProjectsForChannel(slug);",
+            "await loadSelectedProjectDetail(projectSlug, slug);",
         ]:
             self.assertIn(token, self.html)
 
-    def test_not_yet_cut_over_controls_remain_disabled_and_legacy_mutations_are_absent(self):
-        self.assertGreaterEqual(self.html.count('data-cutover-state="disabled"'), 6)
+    def test_legacy_mutations_and_raw_opening_are_absent_from_visible_frontend(self):
+        self.assertGreaterEqual(self.html.count('data-cutover-state="disabled"'), 3)
         for path in [
             "/oauth/start",
             "/api/create_project",
@@ -107,8 +151,8 @@ class UiFrontendContractTests(unittest.TestCase):
             "/api/open_path",
         ]:
             self.assertNotIn(path, self.html)
-        self.assertIn("Available after channel workflow cutover.", self.html)
-        self.assertIn("Project workflow cutover is not active yet.", self.html)
+        self.assertIn("Raw-path opening and later collector actions remain disabled.", self.html)
+        self.assertIn("Project workflow cutover is partially active.", self.html)
 
     def test_frontend_contains_no_live_credential_material(self):
         forbidden = [
@@ -125,6 +169,8 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("Refresh Channels", self.html)
         self.assertIn("Selected Channel Summary", self.html)
         self.assertIn("Selected Channel Actions", self.html)
+        self.assertIn("Research Projects", self.html)
+        self.assertIn("Project Detail", self.html)
 
 
 if __name__ == "__main__":

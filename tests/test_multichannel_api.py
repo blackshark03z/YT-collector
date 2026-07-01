@@ -111,6 +111,14 @@ class MultiChannelApiTests(unittest.TestCase):
             self.assertEqual(len(data["projects"]), 1)
             self.assertEqual(data["projects"][0]["channel_slug"], "channel_a")
 
+    def test_project_list_returns_empty_array_when_channel_has_no_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            status, data = ui_server.dispatch_v2_request("GET", "/api/v2/channels/channel_a/projects", context=ui_server.build_app_context(root=root))
+            self.assertEqual(status, 200)
+            self.assertEqual(data["projects"], [])
+
     def test_sync_metrics_passes_selected_channel_slug(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -398,6 +406,20 @@ class MultiChannelApiTests(unittest.TestCase):
             status, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
             self.assertEqual(status, 200)
             self.assertEqual(data["project"]["channel_slug"], "channel_a")
+            self.assertEqual(set(data["project"].keys()), {
+                "project_slug",
+                "channel_slug",
+                "youtube_channel_id",
+                "source_video_id",
+                "source_video_url",
+                "status",
+                "workflow_input_status",
+                "runnable",
+                "created_at",
+                "updated_at",
+                "has_content",
+                "has_publishing_package",
+            })
 
     def test_project_detail_contains_no_absolute_paths(self):
         with tempfile.TemporaryDirectory() as tmp:

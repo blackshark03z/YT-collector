@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 6C2 - OAuth And Metrics UI Wiring
+Phase 6C3 - Project And Collector UI Wiring
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,9 @@ TECH_LEAD_APPROVED
 
 ## Repository Baseline
 - Branch: master
-- HEAD: `1d1d268`
-- Subject: `docs: record initial GitHub publication`
-- Working tree before Phase 6C2 implementation: only unrelated untracked `implement.docx`
+- HEAD: `44ccf05`
+- Subject: `feat: wire OAuth and metrics UI to v2`
+- Working tree before Phase 6C3 implementation: only unrelated untracked `implement.docx`
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -42,29 +42,80 @@ TECH_LEAD_APPROVED
 - Phase 6C1: embedded production UI read cutover implemented with explicit selected-channel state, `/api/v2/` channel reads, disabled legacy mutations, focused UI contract coverage, and local non-external smoke evidence
 - Repository history and secret audit: completed with reachable-history decision `HISTORY_SAFE_FOR_PUBLIC_PUSH`, exact live-secret scan result `EXACT_LIVE_SECRET_NOT_FOUND_IN_HISTORY`, narrow ignore hardening, initial `master` publication, and remote-tracking setup on `origin/master`
 - Phase 6C2: embedded production UI now wires selected-channel OAuth and metrics actions to canonical V2 routes with separate action state, duplicate/stale-response protection, focused frontend contract coverage, and local non-external smoke evidence
+- Phase 6C3: embedded production UI now wires canonical selected-channel project listing, project creation, project detail reads, transcript save, and validation using V2 routes with duplicate/stale-response protection and isolated temporary-root smoke evidence
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
 - OAuth: isolated per-channel OAuth service now accepts migrated canonical tokens whose `expires_at` arrived as epoch seconds as well as ISO timestamps
 - OAuth browser: loopback-only one-shot OAuth browser flow exists for `/api/v2/oauth/start`, with isolated state, timeout, and rollback-safe connection handling
 - Projects: explicit channel-scoped project service exists with atomic project creation, transcript save protection, validation, and channel snapshot copying
-- UI: the current running UI remains embedded directly in `scripts/ui_server.py`; visible selected-channel reads use canonical `/api/v2/channels` and `/api/v2/channels/<slug>`, visible OAuth start uses canonical `GET /api/v2/oauth/start?channel_slug=<slug>&mode=reconnect`, and visible metrics sync uses canonical `POST /api/v2/channels/<slug>/sync_metrics`; project, transcript, validation, collector, and raw-path actions remain intentionally disabled
+- UI: the current running UI remains embedded directly in `scripts/ui_server.py`; visible selected-channel reads use canonical `/api/v2/channels` and `/api/v2/channels/<slug>`, visible OAuth start uses canonical `GET /api/v2/oauth/start?channel_slug=<slug>&mode=reconnect`, visible metrics sync uses canonical `POST /api/v2/channels/<slug>/sync_metrics`, and visible project workflow now uses canonical project list/detail/transcript/validate V2 routes; raw-path opening and later collector actions remain intentionally disabled
 - Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically; successful sync now preserves the existing channel status instead of overwriting OAuth/connectivity state
 - Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are isolated from real runtime state
 
 ## Tests
-- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`13/13`)
+- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`16/16`)
 - Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
 - OAuth: `python -m unittest tests.test_channel_oauth` passing (`42/42`)
 - OAuth browser flow: `python -m unittest tests.test_channel_oauth_browser` passing (`24/24`)
 - Project service: `python -m unittest tests.test_channel_projects` passing (`43/43`)
 - Metrics service: `python -m unittest tests.test_channel_metrics` passing (`27/27`)
-- V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`47/47`)
+- V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`48/48`)
 - Legacy collector: `python -m unittest tests.test_collector` passing (`5/5`)
-- Full Phase 6C2 regression total: `259/259` passing with no skips or xfails
+- Full Phase 6C3 regression total: `263/263` passing with no skips or xfails
 - Compilation: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py tests\test_multichannel_api.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_metrics.py tests\test_channel_projects.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
+
+## Phase 6C3 Backend Contract Inspection
+- `GET /api/v2/channels/<channel_slug>/projects` returns `{"projects": [...]}` where each project entry is the canonical summary shape: `project_slug`, `channel_slug`, `youtube_channel_id`, `source_video_id`, `source_video_url`, `status`, `workflow_input_status`, `runnable`, `created_at`, and `updated_at`.
+- `POST /api/v2/channels/<channel_slug>/projects` accepts `url` and optional `project_name`; the backend owns `source_video_id` parsing, metadata fetch/normalization, and project slug generation. It returns `{"project": ...}` using the project-summary shape.
+- `GET /api/v2/channels/<channel_slug>/projects/<project_slug>` returns `{"project": ...}` with the project-summary shape plus `has_content` and `has_publishing_package`.
+- `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/transcript` accepts `transcript` and optional `overwrite`; it returns the existing local validation result shape `{"checks": {...}, "project": {...}}`.
+- `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/validate` requires no special payload fields and returns the same `{"checks": {...}, "project": {...}}` shape.
+- Project slug safety and ownership are enforced by the existing backend and `scripts/channel_projects.py`: traversal, path separators, wrong-channel ownership, missing workspace, malformed metadata, and duplicate source video IDs are rejected without any root `projects/` fallback.
+- Stable V2 error shape remains nested and sanitized through `V2Error`: the frontend reads `error.code` and `error.message` without exposing raw OAuth data, token material, or filesystem secrets.
+
+## Phase 6C3 Scope
+- Added explicit embedded-frontend state for canonical project lists, selected project detail, transcript text, validation result, busy/error states, and project feedback scoped to channel slug plus project slug.
+- Wired visible canonical project listing to `GET /api/v2/channels/<selectedChannelSlug>/projects`.
+- Wired visible canonical project creation to `POST /api/v2/channels/<selectedChannelSlug>/projects` using only `url` and optional `project_name`.
+- Wired selected-project detail reads to `GET /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>` and transcript reads to `GET /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/transcript`.
+- Wired transcript save to `POST /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/transcript` and validation to `POST /api/v2/channels/<selectedChannelSlug>/projects/<selectedProjectSlug>/validate`.
+- Kept visible raw-path opening disabled and preserved all legacy backend compatibility routes for rollback.
+
+## Phase 6C3 Selection And Safety Rules
+- Project state belongs only to the current explicit `selectedChannelSlug`.
+- Channel changes clear old project lists, selected project state, validation state, transcript draft, and project feedback.
+- No visible project action falls back to `mist_of_ages`, root `projects/`, or a prior project selected from another channel.
+- Project list refresh, project creation, transcript save, and validation each bind captured channel/project slugs plus request-generation ids so late responses cannot overwrite a newer channel or project selection.
+- If a refreshed list no longer contains the selected project slug, the UI safely deselects that project.
+- The frontend continues to avoid legacy `/api/create_project`, `/api/save_transcript`, `/api/validate`, and `/api/open_path`.
+
+## Phase 6C3 Test And Smoke Evidence
+- Extended `tests/test_ui_frontend_contract.py` with focused assertions for project list routes, create payload shape, transcript/validate routes, project state presence, and continued absence of legacy visible mutations.
+- Extended `tests/test_multichannel_api.py` with focused assertions for empty project lists and stable detail response shape.
+- Local isolated smoke succeeded on loopback port `8768` using a temporary canonical fixture root only and verified:
+  - fake selected channel loads without touching real Mist of Ages data
+  - empty canonical project state renders safely
+  - one fixture project can be created through the visible V2 UI flow
+  - the created project appears in the list and detail panel
+  - transcript save succeeds with fixture text only inside the temporary canonical project workspace
+  - local validation succeeds and renders structured checks
+  - no OAuth start, no metrics sync, no Google or YouTube API call, and no real repository project creation occurred
+
+## Phase 6C3 Runtime Preservation
+- Canonical channel identity remained `mist_of_ages` / `UCYVuamt3HabLFAicDxcsMdg` / `@mistofages`.
+- Canonical status remained `CONNECTED`.
+- `last_metrics_sync_at` remained present and unchanged.
+- Canonical metrics remained readable with `10` data rows and readable reporting state.
+- Canonical token remained present and ignored.
+- Canonical profile and learnings remained unchanged.
+- Legacy sources remained unchanged.
+- No real canonical project directory was created.
+- Remote configuration and upstream tracking remained unchanged.
+- Phase 6C3 closes with approved commit-and-push only; no additional runtime mutation is authorized.
+- `implement.docx` remained untouched and untracked.
 
 ## Phase 6C2 Scope
 - Extended the existing embedded frontend state with separate OAuth and metrics action state, action feedback, and per-action request generation tracking.
@@ -211,8 +262,8 @@ TECH_LEAD_APPROVED
 - OAuth connect/reconnect, metrics sync mutation, project creation, transcript mutation, validation mutation, collector workflow actions, and open-path actions remain blocked pending a separate execution prompt from the Tech Lead.
 
 ## Proposed Next Task
-- `Phase 6C3 - Project And Collector UI Wiring`
-- Phase 6C2 is complete and Tech Lead approved for closure. Phase 6C3 remains blocked pending a separate execution prompt.
+- `Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure`
+- Phase 6C3 is complete and Tech Lead approved. Phase 6C4 remains blocked pending a separate review and execution prompt.
 
 ## Phase 5B1 Root Cause
 - Four regression tests still assumed the real repository root must not contain `channels/` or `secrets/`, which stopped being true after the authorized canonical migration in Phase 5B.
@@ -335,4 +386,4 @@ TECH_LEAD_APPROVED
 - UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-Phase 6C2 is complete and Tech Lead approved. Phase 6C3 remains blocked pending a separate execution prompt from the Tech Lead.
+Phase 6C3 is complete and Tech Lead approved. Phase 6C4 remains blocked pending a separate Tech Lead review and execution prompt.

@@ -1250,30 +1250,45 @@ HTML_PAGE = r"""<!doctype html>
           </div>
         </div>
         <div class="notice">
-          <strong>Project workflow cutover is not active yet.</strong>
-          <span class="meta">Project creation, transcript save, validation, collector submission, and open-path actions are still held back until later phases.</span>
+          <strong>Project workflow cutover is partially active.</strong>
+          <span class="meta">Canonical project listing, creation, transcript save, and validation are enabled for the selected channel. Raw-path opening and later collector actions remain disabled.</span>
+        </div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center;gap:12px">
+            <div>
+              <h3 style="margin:0">Research Projects</h3>
+              <div class="meta">List and select canonical projects for the current channel only.</div>
+            </div>
+            <button id="refreshProjectsBtn" class="secondary" disabled>Refresh Projects</button>
+          </div>
+          <div id="projectListState" class="status" style="margin-top:12px"></div>
+          <div id="projectListPanel" class="stack" style="margin-top:12px"></div>
         </div>
         <div class="card">
           <h3>Create Research Project</h3>
           <label for="url">Competitor YouTube URL</label>
-          <input id="url" placeholder="Available after channel workflow cutover" disabled>
+          <input id="url" placeholder="https://www.youtube.com/watch?v=...">
           <label for="name">Project Name (optional)</label>
-          <input id="name" placeholder="Available after channel workflow cutover" disabled>
+          <input id="name" placeholder="Optional project title override">
+          <div id="projectCreateState" class="status" style="margin-top:12px"></div>
           <div class="row" style="margin-top:14px">
-            <button id="createBtn" disabled data-cutover-state="disabled">Create Research Project</button>
+            <button id="createBtn" disabled>Create Research Project</button>
           </div>
         </div>
         <div class="card">
-          <h3>Project Actions</h3>
+          <h3>Project Detail</h3>
+          <div id="projectDetailState" class="status"></div>
+          <div id="projectDetailPanel" class="result" style="margin-top:12px"></div>
+          <div id="validationPanel" class="result" style="margin-top:12px"></div>
           <div class="row">
-            <button class="secondary" disabled data-cutover-state="disabled">Open Project Folder</button>
-            <button class="ghost" disabled data-cutover-state="disabled">Open Transcript File</button>
-            <button class="ghost" disabled data-cutover-state="disabled">Validate Inputs</button>
+            <button class="secondary" id="validateProjectBtn" disabled>Validate Inputs</button>
+            <button class="ghost" id="openProjectBtn" disabled data-cutover-state="disabled">Open Project Folder</button>
+            <button class="ghost" id="openTranscriptBtn" disabled data-cutover-state="disabled">Open Transcript File</button>
           </div>
           <label for="transcript">Manual Transcript</label>
-          <textarea id="transcript" placeholder="Available after channel workflow cutover." disabled></textarea>
+          <textarea id="transcript" placeholder="Select a project to load its canonical transcript." disabled></textarea>
           <div class="row" style="margin-top:10px">
-            <button disabled data-cutover-state="disabled">Save Transcript</button>
+            <button id="saveTranscriptBtn" disabled>Save Transcript</button>
           </div>
         </div>
       </div>
@@ -1282,19 +1297,34 @@ HTML_PAGE = r"""<!doctype html>
 
 <script>
 const SELECTED_CHANNEL_STORAGE_KEY = "yt_input_collector.selectedChannelSlug";
-const CUTOVER_PENDING_MESSAGE = "Available after channel workflow cutover.";
 const state = {
   channels: [],
   selectedChannelSlug: null,
   selectedChannelSummary: null,
+  projects: [],
+  selectedProjectSlug: null,
+  selectedProjectDetail: null,
+  selectedProjectTranscript: null,
+  selectedProjectValidation: null,
+  transcriptDraft: "",
   isLoadingChannels: false,
   isLoadingSummary: false,
+  isLoadingProjects: false,
+  isLoadingProjectDetail: false,
   errorMessage: "",
+  projectListError: "",
+  projectDetailError: "",
   summaryRequestId: 0,
   summaryAbortController: null,
+  projectListRequestId: 0,
+  projectDetailRequestId: 0,
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
-  actionFeedback: { kind: "", slug: null, text: "" }
+  actionFeedback: { kind: "", slug: null, text: "" },
+  createProjectAction: { busy: false, slug: null, requestId: 0 },
+  transcriptSaveAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
+  validationAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
+  projectFeedback: { kind: "", channelSlug: null, projectSlug: null, text: "" }
 };
 
 function escapeHtml(value) {
@@ -1383,6 +1413,44 @@ function setActionFeedback(kind, slug, text) {
   state.actionFeedback = { kind, slug, text };
 }
 
+function clearProjectFeedback() {
+  state.projectFeedback = { kind: "", channelSlug: null, projectSlug: null, text: "" };
+}
+
+function setProjectFeedback(kind, channelSlug, projectSlug, text) {
+  state.projectFeedback = { kind, channelSlug, projectSlug, text };
+}
+
+function projectFeedbackForSelection() {
+  const feedback = state.projectFeedback;
+  if (!feedback.text || feedback.channelSlug !== state.selectedChannelSlug) return { kind: "", text: "" };
+  if (feedback.projectSlug && feedback.projectSlug !== state.selectedProjectSlug) return { kind: "", text: "" };
+  return feedback;
+}
+
+function clearProjectSelectionState() {
+  state.selectedProjectSlug = null;
+  state.selectedProjectDetail = null;
+  state.selectedProjectTranscript = null;
+  state.selectedProjectValidation = null;
+  state.transcriptDraft = "";
+  state.projectDetailError = "";
+}
+
+function clearProjectState() {
+  state.projects = [];
+  state.projectListError = "";
+  clearProjectSelectionState();
+  clearProjectFeedback();
+}
+
+function selectedProjectSummaryRecord() {
+  if (state.selectedProjectDetail && state.selectedProjectDetail.project) {
+    return state.selectedProjectDetail.project;
+  }
+  return state.projects.find((item) => item.project_slug === state.selectedProjectSlug) || null;
+}
+
 function oauthButtonModel() {
   const channel = selectedChannelRecord();
   if (!state.selectedChannelSlug) {
@@ -1420,6 +1488,78 @@ function metricsButtonModel() {
   };
 }
 
+function projectsRefreshModel() {
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Refresh Projects", helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary) {
+    return { disabled: true, label: "Refresh Projects", helper: "Load the selected channel summary before listing projects." };
+  }
+  return {
+    disabled: state.isLoadingProjects,
+    label: state.isLoadingProjects ? "Refreshing Projects..." : "Refresh Projects",
+    helper: "List canonical projects for the selected channel only."
+  };
+}
+
+function createProjectModel() {
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Create Research Project", helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    return { disabled: true, label: "Create Research Project", helper: "Load the selected channel summary before creating a project." };
+  }
+  const busy = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Creating Project..." : "Create Research Project",
+    helper: "Create a canonical project under the selected channel only."
+  };
+}
+
+function transcriptSaveModel() {
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Save Transcript", helper: "Select a channel first." };
+  }
+  if (!state.selectedProjectSlug) {
+    return { disabled: true, label: "Save Transcript", helper: "Select a project first." };
+  }
+  if (state.isLoadingProjectDetail || !state.selectedProjectDetail) {
+    return { disabled: true, label: "Save Transcript", helper: "Load the selected project detail before saving its transcript." };
+  }
+  if (!String(state.transcriptDraft || "").trim()) {
+    return { disabled: true, label: "Save Transcript", helper: "Transcript text must not be empty." };
+  }
+  const busy = state.transcriptSaveAction.busy
+    && state.transcriptSaveAction.slug === state.selectedChannelSlug
+    && state.transcriptSaveAction.projectSlug === state.selectedProjectSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Saving Transcript..." : "Save Transcript",
+    helper: "Save transcript text through the canonical selected-channel project route."
+  };
+}
+
+function validationModel() {
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Validate Inputs", helper: "Select a channel first." };
+  }
+  if (!state.selectedProjectSlug) {
+    return { disabled: true, label: "Validate Inputs", helper: "Select a project first." };
+  }
+  if (state.isLoadingProjectDetail || !state.selectedProjectDetail) {
+    return { disabled: true, label: "Validate Inputs", helper: "Load the selected project detail before validating inputs." };
+  }
+  const busy = state.validationAction.busy
+    && state.validationAction.slug === state.selectedChannelSlug
+    && state.validationAction.projectSlug === state.selectedProjectSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Validating Inputs..." : "Validate Inputs",
+    helper: "Run local canonical validation for the selected project only."
+  };
+}
+
 function setSelectedChannelSlug(nextSlug) {
   if (!nextSlug) {
     localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
@@ -1431,10 +1571,27 @@ function setSelectedChannelSlug(nextSlug) {
   state.selectedChannelSummary = null;
   state.errorMessage = "";
   clearActionFeedback();
+  clearProjectState();
   if (state.summaryAbortController) state.summaryAbortController.abort();
   render();
   if (state.selectedChannelSlug) {
     loadSelectedChannelSummary();
+  }
+}
+
+function setSelectedProjectSlug(nextSlug) {
+  const normalized = nextSlug && state.projects.some((item) => item.project_slug === nextSlug) ? nextSlug : null;
+  if (normalized === state.selectedProjectSlug && state.selectedProjectDetail) return;
+  state.selectedProjectSlug = normalized;
+  state.selectedProjectDetail = null;
+  state.selectedProjectTranscript = null;
+  state.selectedProjectValidation = null;
+  state.projectDetailError = "";
+  state.transcriptDraft = "";
+  clearProjectFeedback();
+  render();
+  if (state.selectedProjectSlug) {
+    loadSelectedProjectDetail();
   }
 }
 
@@ -1507,6 +1664,206 @@ function renderActionState() {
     <div class="check"><strong>Metrics</strong>${pill(metrics.disabled ? "WAITING" : "READY")}</div>
     <div class="meta">${escapeHtml(metrics.helper)}</div>
     ${feedbackHtml}
+  `;
+}
+
+function renderProjectListState() {
+  const refreshButton = document.getElementById("refreshProjectsBtn");
+  const createButton = document.getElementById("createBtn");
+  const urlInput = document.getElementById("url");
+  const nameInput = document.getElementById("name");
+  const stateTarget = document.getElementById("projectListState");
+  const listTarget = document.getElementById("projectListPanel");
+  const refresh = projectsRefreshModel();
+  const create = createProjectModel();
+
+  refreshButton.disabled = refresh.disabled;
+  refreshButton.textContent = refresh.label;
+  createButton.disabled = create.disabled;
+  createButton.textContent = create.label;
+  urlInput.disabled = create.disabled;
+  nameInput.disabled = create.disabled;
+
+  if (!state.selectedChannelSlug) {
+    stateTarget.innerHTML = `
+      <div class="check"><strong>Projects</strong>${pill("WAITING")}</div>
+      <div class="meta">Select a channel to load its canonical project list.</div>
+    `;
+    listTarget.innerHTML = "";
+    return;
+  }
+
+  if (state.isLoadingProjects && state.projects.length === 0) {
+    stateTarget.innerHTML = `
+      <div class="check"><strong>Projects</strong>${pill("LOADING")}</div>
+      <div class="meta">Loading canonical projects for the selected channel...</div>
+    `;
+    listTarget.innerHTML = "";
+    return;
+  }
+
+  if (state.projectListError) {
+    stateTarget.innerHTML = `
+      <div class="check"><strong>Projects</strong>${pill("ERROR")}</div>
+      <div class="meta">${escapeHtml(state.projectListError)}</div>
+    `;
+  } else {
+    stateTarget.innerHTML = `
+      <div class="check"><strong>Projects</strong>${pill(state.isLoadingProjects ? "LOADING" : "READY")}</div>
+      <div class="meta">${escapeHtml(refresh.helper)}</div>
+    `;
+  }
+
+  if (!state.projects.length) {
+    listTarget.innerHTML = `
+      <div class="notice">
+        <strong>No canonical projects yet</strong>
+        <span class="meta">The selected channel does not have any canonical projects yet. Create one to begin the workflow.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const items = state.projects.map((project) => {
+    const selected = project.project_slug === state.selectedProjectSlug;
+    return `
+      <button
+        class="${selected ? "" : "secondary"}"
+        data-project-slug="${escapeHtml(project.project_slug)}"
+        style="width:100%;text-align:left"
+      >
+        <div class="check"><strong>${escapeHtml(project.project_slug)}</strong>${pill(project.status || "UNKNOWN")}</div>
+        <div class="meta">Video ID: ${escapeHtml(project.source_video_id || "")}</div>
+        <div class="meta">Updated: ${escapeHtml(formatTime(project.updated_at))}</div>
+      </button>
+    `;
+  });
+  listTarget.innerHTML = items.join("");
+}
+
+function renderProjectCreateState() {
+  const target = document.getElementById("projectCreateState");
+  const create = createProjectModel();
+  const feedback = state.projectFeedback.channelSlug === state.selectedChannelSlug && !state.projectFeedback.projectSlug
+    ? state.projectFeedback
+    : { kind: "", text: "" };
+
+  if (feedback.text) {
+    target.innerHTML = `
+      <div class="check"><strong>${feedback.kind === "error" ? "Create Error" : "Create Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div>
+      <div class="meta">${escapeHtml(feedback.text)}</div>
+    `;
+    return;
+  }
+
+  target.innerHTML = `
+    <div class="check"><strong>Create</strong>${pill(create.disabled ? "WAITING" : "READY")}</div>
+    <div class="meta">${escapeHtml(create.helper)}</div>
+  `;
+}
+
+function renderProjectDetailState() {
+  const target = document.getElementById("projectDetailState");
+  const panel = document.getElementById("projectDetailPanel");
+  const validationPanel = document.getElementById("validationPanel");
+  const transcript = document.getElementById("transcript");
+  const saveButton = document.getElementById("saveTranscriptBtn");
+  const validateButton = document.getElementById("validateProjectBtn");
+  const save = transcriptSaveModel();
+  const validate = validationModel();
+  const feedback = projectFeedbackForSelection();
+  const project = selectedProjectSummaryRecord();
+
+  transcript.disabled = save.disabled && !(state.selectedChannelSlug && state.selectedProjectSlug && state.selectedProjectDetail);
+  transcript.value = state.transcriptDraft;
+  saveButton.disabled = save.disabled;
+  saveButton.textContent = save.label;
+  validateButton.disabled = validate.disabled;
+  validateButton.textContent = validate.label;
+
+  if (!state.selectedChannelSlug) {
+    target.innerHTML = `
+      <div class="check"><strong>Project Detail</strong>${pill("WAITING")}</div>
+      <div class="meta">Select a channel before choosing a project.</div>
+    `;
+    panel.innerHTML = "";
+    validationPanel.innerHTML = "";
+    return;
+  }
+
+  if (!state.selectedProjectSlug) {
+    target.innerHTML = `
+      <div class="check"><strong>Project Detail</strong>${pill("WAITING")}</div>
+      <div class="meta">Select a canonical project to load its detail, transcript, and validation state.</div>
+    `;
+    panel.innerHTML = "";
+    validationPanel.innerHTML = "";
+    return;
+  }
+
+  const helperHtml = feedback.text
+    ? `<div class="check"><strong>${feedback.kind === "error" ? "Project Error" : "Project Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(feedback.text)}</div>`
+    : `<div class="meta">${escapeHtml(state.projectDetailError || validate.helper || save.helper)}</div>`;
+
+  target.innerHTML = `
+    <div class="check"><strong>Selected Project</strong>${pill(state.isLoadingProjectDetail ? "LOADING" : (project && project.workflow_input_status) || "READY")}</div>
+    <div class="meta mono">${escapeHtml(state.selectedProjectSlug)}</div>
+    ${helperHtml}
+  `;
+
+  if (state.isLoadingProjectDetail && !state.selectedProjectDetail) {
+    panel.innerHTML = `<div class="notice"><strong>Loading</strong><span class="meta">Fetching canonical project detail and transcript...</span></div>`;
+    validationPanel.innerHTML = "";
+    return;
+  }
+
+  if (!state.selectedProjectDetail) {
+    panel.innerHTML = `
+      <div class="notice">
+        <strong>Project detail unavailable</strong>
+        <span class="meta">${escapeHtml(state.projectDetailError || "The selected project detail is not available yet.")}</span>
+      </div>
+    `;
+    validationPanel.innerHTML = "";
+    return;
+  }
+
+  const detail = state.selectedProjectDetail.project || {};
+  panel.innerHTML = `
+    <div class="summary-grid">
+      <div class="card"><strong>Project Slug</strong><div class="meta mono">${escapeHtml(detail.project_slug || "")}</div></div>
+      <div class="card"><strong>Status</strong><div>${pill(detail.status || "UNKNOWN")}</div></div>
+      <div class="card"><strong>Workflow Inputs</strong><div>${pill(detail.workflow_input_status || "UNKNOWN")}</div></div>
+      <div class="card"><strong>Runnable</strong><div>${pill(detail.runnable ? "READY_FOR_WORKFLOW" : "WAITING")}</div></div>
+      <div class="card"><strong>Source Video ID</strong><div class="meta mono">${escapeHtml(detail.source_video_id || "")}</div></div>
+      <div class="card"><strong>Updated</strong><div class="meta">${escapeHtml(formatTime(detail.updated_at))}</div></div>
+      <div class="card"><strong>Content.md</strong><div>${pill(detail.has_content ? "FOUND" : "MISSING")}</div></div>
+      <div class="card"><strong>Publishing Package</strong><div>${pill(detail.has_publishing_package ? "FOUND" : "MISSING")}</div></div>
+    </div>
+    <div class="card">
+      <strong>Source Video URL</strong>
+      <div class="meta"><a href="${escapeHtml(detail.source_video_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(detail.source_video_url || "Unavailable")}</a></div>
+    </div>
+  `;
+
+  if (!state.selectedProjectValidation) {
+    validationPanel.innerHTML = `
+      <div class="notice">
+        <strong>Validation not run yet</strong>
+        <span class="meta">Run canonical validation for the selected project to refresh the workflow readiness checks.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const checks = state.selectedProjectValidation.checks || {};
+  const entries = Object.keys(checks).sort().map((key) => `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(checks[key] ? "PASS" : "FAILED")}</div>`).join("");
+  validationPanel.innerHTML = `
+    <div class="card">
+      <strong>Validation Result</strong>
+      <div class="meta">Structured canonical validation for the selected project.</div>
+      <div class="stack" style="margin-top:12px">${entries}</div>
+    </div>
   `;
 }
 
@@ -1585,6 +1942,9 @@ function render() {
   renderChannelState();
   renderActionState();
   renderSelectedChannelSummary();
+  renderProjectListState();
+  renderProjectCreateState();
+  renderProjectDetailState();
 }
 
 async function refreshSelectedSummaryForAction(slug) {
@@ -1683,6 +2043,271 @@ async function syncMetricsAction() {
   }
 }
 
+async function loadProjectsForChannel(slug, options = {}) {
+  if (!slug || slug !== state.selectedChannelSlug) return;
+  const requestId = ++state.projectListRequestId;
+  state.isLoadingProjects = true;
+  state.projectListError = "";
+  render();
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}/projects`);
+    if (requestId !== state.projectListRequestId || slug !== state.selectedChannelSlug) return;
+    const projects = Array.isArray(data.projects) ? data.projects : [];
+    state.projects = projects;
+    let nextSelectedSlug = state.selectedProjectSlug;
+    if (options.preferProjectSlug && projects.some((item) => item.project_slug === options.preferProjectSlug)) {
+      nextSelectedSlug = options.preferProjectSlug;
+    } else if (nextSelectedSlug && !projects.some((item) => item.project_slug === nextSelectedSlug)) {
+      nextSelectedSlug = null;
+    }
+    const selectionChanged = nextSelectedSlug !== state.selectedProjectSlug;
+    if (selectionChanged) {
+      clearProjectSelectionState();
+      state.selectedProjectSlug = nextSelectedSlug;
+    }
+    render();
+    if (state.selectedProjectSlug) {
+      await loadSelectedProjectDetail(state.selectedProjectSlug, slug);
+    }
+  } catch (error) {
+    if (requestId !== state.projectListRequestId || slug !== state.selectedChannelSlug) return;
+    state.projectListError = describeError(error, "Could not load canonical projects for the selected channel.");
+  } finally {
+    if (requestId === state.projectListRequestId) {
+      state.isLoadingProjects = false;
+      render();
+    }
+  }
+}
+
+async function refreshProjectsAction() {
+  if (!state.selectedChannelSlug || !state.selectedChannelSummary) {
+    setProjectFeedback("error", state.selectedChannelSlug, null, "Select a channel and wait for its summary before refreshing projects.");
+    render();
+    return;
+  }
+  clearProjectFeedback();
+  await loadProjectsForChannel(state.selectedChannelSlug);
+}
+
+async function createProjectAction() {
+  const create = createProjectModel();
+  const slug = state.selectedChannelSlug;
+  if (!slug || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    setProjectFeedback("error", slug, null, "Select a channel and wait for its summary before creating a project.");
+    render();
+    return;
+  }
+  if (create.disabled) {
+    if (!(state.createProjectAction.busy && state.createProjectAction.slug === slug)) {
+      setProjectFeedback("error", slug, null, create.helper);
+      render();
+    }
+    return;
+  }
+
+  const url = String(document.getElementById("url").value || "").trim();
+  const projectName = String(document.getElementById("name").value || "").trim();
+  if (!url) {
+    setProjectFeedback("error", slug, null, "Competitor YouTube URL is required.");
+    render();
+    return;
+  }
+
+  const requestId = state.createProjectAction.requestId + 1;
+  state.createProjectAction = { busy: true, slug, requestId };
+  setProjectFeedback("info", slug, null, "Creating a canonical project for the selected channel...");
+  render();
+
+  try {
+    const payload = { url };
+    if (projectName) payload.project_name = projectName;
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}/projects`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    if (state.createProjectAction.requestId !== requestId || state.createProjectAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    const createdSlug = data && data.project && data.project.channel_slug === slug && typeof data.project.project_slug === "string"
+      ? data.project.project_slug
+      : null;
+    await loadProjectsForChannel(slug, { preferProjectSlug: createdSlug });
+    if (state.selectedChannelSlug === slug) {
+      setProjectFeedback("success", slug, createdSlug, "Canonical project created for the selected channel.");
+      document.getElementById("url").value = "";
+      document.getElementById("name").value = "";
+      if (createdSlug && state.projects.some((item) => item.project_slug === createdSlug)) {
+        setSelectedProjectSlug(createdSlug);
+      }
+    }
+  } catch (error) {
+    if (state.createProjectAction.requestId !== requestId || state.createProjectAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    setProjectFeedback("error", slug, null, describeError(error, "Could not create a canonical project for the selected channel."));
+  } finally {
+    if (state.createProjectAction.requestId === requestId && state.createProjectAction.slug === slug) {
+      state.createProjectAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
+  const channelSlug = channelSlugArg || state.selectedChannelSlug;
+  const projectSlug = projectSlugArg || state.selectedProjectSlug;
+  if (!channelSlug || !projectSlug || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+
+  const requestId = ++state.projectDetailRequestId;
+  state.isLoadingProjectDetail = true;
+  state.projectDetailError = "";
+  state.selectedProjectDetail = null;
+  state.selectedProjectTranscript = null;
+  state.selectedProjectValidation = null;
+  state.transcriptDraft = "";
+  render();
+
+  try {
+    const detail = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}`);
+    if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectDetail = detail;
+
+    try {
+      const transcript = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript`);
+      if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+      state.selectedProjectTranscript = transcript;
+      state.transcriptDraft = typeof transcript.transcript === "string" ? transcript.transcript : "";
+    } catch (error) {
+      if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+      state.selectedProjectTranscript = null;
+      state.transcriptDraft = "";
+      state.projectDetailError = describeError(error, "Could not load the selected project transcript.");
+    }
+  } catch (error) {
+    if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectDetail = null;
+    state.selectedProjectTranscript = null;
+    state.transcriptDraft = "";
+    state.projectDetailError = describeError(error, "Could not load the selected project detail.");
+  } finally {
+    if (requestId === state.projectDetailRequestId) {
+      state.isLoadingProjectDetail = false;
+      render();
+    }
+  }
+}
+
+async function saveTranscriptAction() {
+  const save = transcriptSaveModel();
+  const slug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const transcriptText = state.transcriptDraft;
+  if (!slug || !projectSlug || !state.selectedProjectDetail) {
+    setProjectFeedback("error", slug, projectSlug, "Select a project and load its detail before saving a transcript.");
+    render();
+    return;
+  }
+  if (save.disabled) {
+    if (!(state.transcriptSaveAction.busy && state.transcriptSaveAction.slug === slug && state.transcriptSaveAction.projectSlug === projectSlug)) {
+      setProjectFeedback("error", slug, projectSlug, save.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.transcriptSaveAction.requestId + 1;
+  const shouldOverwrite = !!(state.selectedProjectTranscript && state.selectedProjectTranscript.has_real_content);
+  state.transcriptSaveAction = { busy: true, slug, projectSlug, requestId };
+  setProjectFeedback("info", slug, projectSlug, "Saving transcript for the selected project...");
+  render();
+
+  try {
+    const body = { transcript: transcriptText };
+    if (shouldOverwrite) body.overwrite = true;
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript`, {
+      method: "POST",
+      body: JSON.stringify(body)
+    });
+    if (
+      state.transcriptSaveAction.requestId !== requestId
+      || state.transcriptSaveAction.slug !== slug
+      || state.transcriptSaveAction.projectSlug !== projectSlug
+      || state.selectedChannelSlug !== slug
+      || state.selectedProjectSlug !== projectSlug
+    ) return;
+    state.selectedProjectValidation = data;
+    setProjectFeedback("success", slug, projectSlug, "Transcript saved for the selected project.");
+    await loadSelectedProjectDetail(projectSlug, slug);
+  } catch (error) {
+    if (
+      state.transcriptSaveAction.requestId !== requestId
+      || state.transcriptSaveAction.slug !== slug
+      || state.transcriptSaveAction.projectSlug !== projectSlug
+      || state.selectedChannelSlug !== slug
+      || state.selectedProjectSlug !== projectSlug
+    ) return;
+    setProjectFeedback("error", slug, projectSlug, describeError(error, "Could not save the selected project transcript."));
+  } finally {
+    if (state.transcriptSaveAction.requestId === requestId && state.transcriptSaveAction.slug === slug && state.transcriptSaveAction.projectSlug === projectSlug) {
+      state.transcriptSaveAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function validateProjectAction() {
+  const validate = validationModel();
+  const slug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  if (!slug || !projectSlug || !state.selectedProjectDetail) {
+    setProjectFeedback("error", slug, projectSlug, "Select a project and load its detail before validating inputs.");
+    render();
+    return;
+  }
+  if (validate.disabled) {
+    if (!(state.validationAction.busy && state.validationAction.slug === slug && state.validationAction.projectSlug === projectSlug)) {
+      setProjectFeedback("error", slug, projectSlug, validate.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.validationAction.requestId + 1;
+  state.validationAction = { busy: true, slug, projectSlug, requestId };
+  setProjectFeedback("info", slug, projectSlug, "Running canonical validation for the selected project...");
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    if (
+      state.validationAction.requestId !== requestId
+      || state.validationAction.slug !== slug
+      || state.validationAction.projectSlug !== projectSlug
+      || state.selectedChannelSlug !== slug
+      || state.selectedProjectSlug !== projectSlug
+    ) return;
+    state.selectedProjectValidation = data;
+    if (state.selectedProjectDetail && state.selectedProjectDetail.project && data.project) {
+      state.selectedProjectDetail = { project: { ...state.selectedProjectDetail.project, ...data.project } };
+    }
+    setProjectFeedback("success", slug, projectSlug, "Validation completed for the selected project.");
+  } catch (error) {
+    if (
+      state.validationAction.requestId !== requestId
+      || state.validationAction.slug !== slug
+      || state.validationAction.projectSlug !== projectSlug
+      || state.selectedChannelSlug !== slug
+      || state.selectedProjectSlug !== projectSlug
+    ) return;
+    setProjectFeedback("error", slug, projectSlug, describeError(error, "Could not validate the selected project inputs."));
+  } finally {
+    if (state.validationAction.requestId === requestId && state.validationAction.slug === slug && state.validationAction.projectSlug === projectSlug) {
+      state.validationAction.busy = false;
+      render();
+    }
+  }
+}
+
 async function loadSelectedChannelSummary() {
   const slug = state.selectedChannelSlug;
   if (!slug) {
@@ -1704,6 +2329,7 @@ async function loadSelectedChannelSummary() {
     const data = await v2Api(`channels/${encodeURIComponent(slug)}`, { signal: controller.signal });
     if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
     state.selectedChannelSummary = data;
+    await loadProjectsForChannel(slug);
   } catch (error) {
     if (error && error.name === "AbortError") return;
     if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
@@ -1711,6 +2337,7 @@ async function loadSelectedChannelSummary() {
     if (error && error.code === "CHANNEL_NOT_FOUND") {
       localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
       state.selectedChannelSlug = null;
+      clearProjectState();
       state.errorMessage = "The previously selected channel is no longer available. Please select another channel.";
     } else {
       state.errorMessage = describeError(error, "Could not load the selected channel summary.");
@@ -1737,6 +2364,7 @@ async function loadChannels() {
     if (!state.channels.some((item) => item.channel_slug === state.selectedChannelSlug)) {
       state.selectedChannelSlug = validSavedSlug;
       state.selectedChannelSummary = null;
+      clearProjectState();
     }
     render();
     if (state.selectedChannelSlug) {
@@ -1763,6 +2391,18 @@ document.getElementById("channelSelect").addEventListener("change", (event) => {
 });
 document.getElementById("connectChannelBtn").addEventListener("click", startOAuthAction);
 document.getElementById("syncMetricsBtn").addEventListener("click", syncMetricsAction);
+document.getElementById("refreshProjectsBtn").addEventListener("click", refreshProjectsAction);
+document.getElementById("createBtn").addEventListener("click", createProjectAction);
+document.getElementById("saveTranscriptBtn").addEventListener("click", saveTranscriptAction);
+document.getElementById("validateProjectBtn").addEventListener("click", validateProjectAction);
+document.getElementById("transcript").addEventListener("input", (event) => {
+  state.transcriptDraft = event.target.value;
+});
+document.getElementById("projectListPanel").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-project-slug]");
+  if (!button) return;
+  setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
+});
 
 loadChannels();
 </script>
