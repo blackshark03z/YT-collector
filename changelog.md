@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure
+- Audited the final embedded frontend route inventory in `scripts/ui_server.py` and confirmed the visible production UI now uses canonical `/api/v2/` routes for channel reads, OAuth start, metrics sync, project list/detail, transcript save, and validation.
+- Confirmed the visible frontend no longer actively invokes `/api/status`, `/oauth/start`, `/api/create_project`, `/api/save_transcript`, `/api/validate`, or `/api/open_path`.
+- Classified remaining legacy production items as rollback compatibility only, migration source only, test only, dead frontend code, or no-action-required; no remaining legacy item was classified as an active cutover blocker.
+- Removed the unused embedded-frontend constant `CUTOVER_PENDING_MESSAGE` as conclusively dead visible-frontend code.
+- Performed a real read-only smoke on isolated loopback port `8773` against the repository root and confirmed Mist of Ages summary rendering, connected-channel action state, metrics/reporting visibility, and empty project-list rendering without clicking any mutating control.
+- Performed a full temporary-root end-to-end UI smoke on isolated loopback port `8774` with connected and disconnected fixture channels; verified project creation, project detail reads, transcript save, validation, channel-switch clearing, disconnected-channel blocking, fixture-only writes under canonical `channels/<fixture_slug>/projects/`, and cleanup of the entire temporary root afterward.
+- Captured request logs in the temporary-root smoke proving the visible UI exercised only canonical `/api/v2/...` routes.
+- Preserved the real canonical Mist of Ages runtime, canonical token ignore safety, canonical profile/learnings, canonical metrics readability, and all legacy sources with no real project creation and no external API call.
+- Extended `tests/test_ui_frontend_contract.py` with the final active-route allowlist assertion and the disconnected-channel project-creation block.
+- Re-ran the full required regression suite successfully with no skips or xfails.
+- MVP readiness decision: `ACCEPTED_WITH_MINOR_NON_BLOCKING_WARNINGS`.
+- Non-blocking warnings recorded: rollback compatibility routes remain registered but unreachable from visible UI, legacy source files remain locally for rollback evidence, reporting remains `PENDING` by current product semantics, and Windows CRLF warnings may still appear while checks pass.
+- Tech Lead approved Phase 6C4 closure and accepted the Mist of Ages Multi-Channel MVP.
+- The final MVP closeout will commit and push the approved Phase 6C4 changes, keep runtime data unchanged, and create release baseline tag `v0.1.0`.
+- No GitHub Release was created.
+- Post-MVP work remains unauthorized pending separate user prioritization.
+- Proposed next task: `POST_MVP_PLANNING_BLOCKED_PENDING_USER_PRIORITIZATION`.
+
 ### Phase 6C3 - Project And Collector UI Wiring
 - Modified the embedded production UI in `scripts/ui_server.py` to add selected-channel canonical project list, project creation, project detail, transcript save, and validation state without adding a separate frontend stack.
 - Wired visible project listing to `GET /api/v2/channels/<selectedChannelSlug>/projects`.

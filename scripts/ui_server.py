@@ -1503,11 +1503,15 @@ function projectsRefreshModel() {
 }
 
 function createProjectModel() {
+  const channel = selectedChannelRecord();
   if (!state.selectedChannelSlug) {
     return { disabled: true, label: "Create Research Project", helper: "Select a channel first." };
   }
-  if (state.isLoadingSummary || !state.selectedChannelSummary || !selectedChannelRecord()) {
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
     return { disabled: true, label: "Create Research Project", helper: "Load the selected channel summary before creating a project." };
+  }
+  if (channel.status !== "CONNECTED") {
+    return { disabled: true, label: "Create Research Project", helper: "Project creation is available only when the selected channel is connected." };
   }
   const busy = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
   return {

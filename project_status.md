@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 6C3 - Project And Collector UI Wiring
+Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,12 @@ TECH_LEAD_APPROVED
 
 ## Repository Baseline
 - Branch: master
-- HEAD: `44ccf05`
-- Subject: `feat: wire OAuth and metrics UI to v2`
-- Working tree before Phase 6C3 implementation: only unrelated untracked `implement.docx`
+- HEAD: `df7244f`
+- Subject: `feat: wire project and collector UI to v2`
+- Working tree before Phase 6C4 implementation: only unrelated untracked `implement.docx`
+
+## MVP Status
+MVP_ACCEPTED
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -43,18 +46,19 @@ TECH_LEAD_APPROVED
 - Repository history and secret audit: completed with reachable-history decision `HISTORY_SAFE_FOR_PUBLIC_PUSH`, exact live-secret scan result `EXACT_LIVE_SECRET_NOT_FOUND_IN_HISTORY`, narrow ignore hardening, initial `master` publication, and remote-tracking setup on `origin/master`
 - Phase 6C2: embedded production UI now wires selected-channel OAuth and metrics actions to canonical V2 routes with separate action state, duplicate/stale-response protection, focused frontend contract coverage, and local non-external smoke evidence
 - Phase 6C3: embedded production UI now wires canonical selected-channel project listing, project creation, project detail reads, transcript save, and validation using V2 routes with duplicate/stale-response protection and isolated temporary-root smoke evidence
+- Phase 6C4: final MVP cutover verification completed with active UI-route audit, legacy-dependency classification, real read-only smoke, temporary-root end-to-end smoke, narrow frontend cleanup, and MVP readiness documentation
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
 - OAuth: isolated per-channel OAuth service now accepts migrated canonical tokens whose `expires_at` arrived as epoch seconds as well as ISO timestamps
 - OAuth browser: loopback-only one-shot OAuth browser flow exists for `/api/v2/oauth/start`, with isolated state, timeout, and rollback-safe connection handling
 - Projects: explicit channel-scoped project service exists with atomic project creation, transcript save protection, validation, and channel snapshot copying
-- UI: the current running UI remains embedded directly in `scripts/ui_server.py`; visible selected-channel reads use canonical `/api/v2/channels` and `/api/v2/channels/<slug>`, visible OAuth start uses canonical `GET /api/v2/oauth/start?channel_slug=<slug>&mode=reconnect`, visible metrics sync uses canonical `POST /api/v2/channels/<slug>/sync_metrics`, and visible project workflow now uses canonical project list/detail/transcript/validate V2 routes; raw-path opening and later collector actions remain intentionally disabled
+- UI: the current running UI remains embedded directly in `scripts/ui_server.py`; the visible frontend uses only canonical `/api/v2/` routes for channel reads, OAuth start, metrics sync, project list/detail, transcript save, and validation; raw-path opening remains disabled in the visible UI while backend compatibility routes stay registered for rollback
 - Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically; successful sync now preserves the existing channel status instead of overwriting OAuth/connectivity state
 - Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are isolated from real runtime state
 
 ## Tests
-- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`16/16`)
+- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`17/17`)
 - Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
 - OAuth: `python -m unittest tests.test_channel_oauth` passing (`42/42`)
@@ -63,9 +67,60 @@ TECH_LEAD_APPROVED
 - Metrics service: `python -m unittest tests.test_channel_metrics` passing (`27/27`)
 - V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`48/48`)
 - Legacy collector: `python -m unittest tests.test_collector` passing (`5/5`)
-- Full Phase 6C3 regression total: `263/263` passing with no skips or xfails
+- Full Phase 6C4 regression total: `264/264` passing with no skips or xfails
 - Compilation: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py tests\test_multichannel_api.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_metrics.py tests\test_channel_projects.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
+
+## Phase 6C4 Active UI Route Inventory
+- `GET /api/v2/channels`
+- `GET /api/v2/channels/<channel_slug>`
+- `GET /api/v2/oauth/start?channel_slug=<channel_slug>&mode=reconnect`
+- `POST /api/v2/channels/<channel_slug>/sync_metrics`
+- `GET /api/v2/channels/<channel_slug>/projects`
+- `POST /api/v2/channels/<channel_slug>/projects`
+- `GET /api/v2/channels/<channel_slug>/projects/<project_slug>`
+- `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/transcript`
+- `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/transcript`
+- `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/validate`
+- Active visible frontend audit confirmed no handler invokes `/api/status`, `/oauth/start`, `/api/create_project`, `/api/save_transcript`, `/api/validate`, or `/api/open_path`.
+
+## Phase 6C4 Legacy Dependency Classification
+- Legacy route handlers in `scripts/ui_server.py`: `ROLLBACK_COMPATIBILITY_ONLY`
+- Legacy root token helpers and refresh flow: `ROLLBACK_COMPATIBILITY_ONLY`
+- Legacy channel identity helpers: `ROLLBACK_COMPATIBILITY_ONLY`
+- Legacy root project helpers and legacy root project routes: `ROLLBACK_COMPATIBILITY_ONLY`
+- `ensure_dirs()` legacy initialization: `ROLLBACK_COMPATIBILITY_ONLY`
+- Legacy open-path behavior: `ROLLBACK_COMPATIBILITY_ONLY`
+- Migration source paths and retained legacy files: `MIGRATION_SOURCE_ONLY`
+- Remaining locally retained legacy runtime files: `MIGRATION_SOURCE_ONLY`
+- Backend compatibility tests and runtime-isolation fixtures: `TEST_ONLY`
+- Removed unused visible-frontend constant from the embedded UI: `DEAD_FRONTEND_CODE`
+- No remaining legacy item was classified as `ACTIVE_CUTOVER_BLOCKER`
+
+## Phase 6C4 Real Read-Only Smoke
+- Started the production server against the real repository root on isolated loopback port `8773`.
+- Loaded the visible UI and confirmed the channel list contains `mist_of_ages`.
+- Selected Mist of Ages and confirmed summary rendering for display name, handle, channel ID, status `CONNECTED`, `last_metrics_sync_at`, reporting state, metrics presence, and empty project list.
+- Confirmed visible OAuth state shows reconnect availability, metrics sync eligibility remains correct for the connected channel, and project-creation inputs render without clicking any mutating control.
+- No OAuth start, no metrics sync, no project creation, no transcript save, and no validation were executed.
+
+## Phase 6C4 Temporary-Root End-to-End Smoke
+- Started an isolated temporary-root server on loopback port `8774` with two sanitized canonical fixture channels: one `CONNECTED` and one `DISCONNECTED`.
+- Completed the visible UI flow for the connected fixture channel: list channels, load summary, confirm empty project state, create one fixture project, load detail, save a non-sensitive test transcript, run local validation, switch channels, confirm project state clears, switch back, and re-read the persisted fixture project safely.
+- Confirmed the disconnected fixture channel blocks project creation and metrics sync while still allowing read-only summary and project-list viewing.
+- Captured request logs proving the visible UI used only canonical `/api/v2/...` routes during the temporary-root smoke.
+- Confirmed all writes remained under `channels/connected_fixture/projects/` and that no root `projects/`, root token file, `.local/mist_of_ages_channel.json`, or `channel/mist_of_ages/` path was created in the temporary root.
+- Removed the temporary fixture root completely after the smoke and stopped both smoke servers cleanly.
+
+## Phase 6C4 Error And Stale-State Verification
+- Existing and extended UI contract coverage now proves stale channel-summary, project-list, project-detail, OAuth, metrics, create-project, transcript-save, and validation responses are guarded by explicit selected-channel and selected-project request-generation checks.
+- Failed create/save/validate paths preserve current UI state or draft content through the embedded frontend contract.
+- Nested V2 errors and malformed responses still flow through the shared safe frontend API helper without exposing raw payloads or secrets.
+- Duplicate action clicks remain blocked through busy-state gating for OAuth, metrics, create-project, transcript-save, and validation actions.
+
+## Phase 6C4 Frontend Cleanup
+- Removed the unused embedded-frontend constant `CUTOVER_PENDING_MESSAGE`.
+- No broader frontend refactor was performed.
 
 ## Phase 6C3 Backend Contract Inspection
 - `GET /api/v2/channels/<channel_slug>/projects` returns `{"projects": [...]}` where each project entry is the canonical summary shape: `project_slug`, `channel_slug`, `youtube_channel_id`, `source_video_id`, `source_video_url`, `status`, `workflow_input_status`, `runnable`, `created_at`, and `updated_at`.
@@ -116,6 +171,35 @@ TECH_LEAD_APPROVED
 - Remote configuration and upstream tracking remained unchanged.
 - Phase 6C3 closes with approved commit-and-push only; no additional runtime mutation is authorized.
 - `implement.docx` remained untouched and untracked.
+
+## Phase 6C4 Runtime Preservation
+- Canonical channel identity remained `mist_of_ages` / `UCYVuamt3HabLFAicDxcsMdg` / `@mistofages`.
+- Canonical status remained `CONNECTED`.
+- `last_metrics_sync_at` remained present and unchanged.
+- Canonical metrics remained readable with `10` data rows and readable reporting state.
+- Canonical token remained present and ignored.
+- Canonical profile and learnings remained unchanged.
+- Legacy sources remained unchanged.
+- No real canonical project directory was created.
+- Git remote and upstream state remained unchanged.
+- No push occurred for Phase 6C4.
+- `implement.docx` remained untouched and untracked.
+
+## MVP Readiness Decision
+- Decision: `ACCEPTED_WITH_MINOR_NON_BLOCKING_WARNINGS`
+- Visible production UI now operates through canonical `/api/v2/` routes only.
+- Selected-channel and selected-project scoping is explicit across the visible mutation flows.
+- Real Mist of Ages runtime can be viewed safely without mutation.
+- Temporary-root end-to-end project workflow succeeds without touching real runtime data.
+- Remaining warnings are non-blocking and consistent with the approved MVP boundary:
+  - backend rollback compatibility routes remain registered but are unreachable from the visible UI
+  - legacy source files remain locally for rollback and migration evidence
+  - reporting metrics remain `PENDING` by the existing product semantics
+  - Windows CRLF warnings may appear during diff checks while checks still pass
+- Tech Lead approved Phase 6C4 closure and accepted the Mist of Ages Multi-Channel MVP with the warnings above.
+- Release baseline tag approved: `v0.1.0`
+- No GitHub Release was created.
+- Post-MVP work is not authorized in this phase.
 
 ## Phase 6C2 Scope
 - Extended the existing embedded frontend state with separate OAuth and metrics action state, action feedback, and per-action request generation tracking.
@@ -262,8 +346,8 @@ TECH_LEAD_APPROVED
 - OAuth connect/reconnect, metrics sync mutation, project creation, transcript mutation, validation mutation, collector workflow actions, and open-path actions remain blocked pending a separate execution prompt from the Tech Lead.
 
 ## Proposed Next Task
-- `Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure`
-- Phase 6C3 is complete and Tech Lead approved. Phase 6C4 remains blocked pending a separate review and execution prompt.
+- `POST_MVP_PLANNING_BLOCKED_PENDING_USER_PRIORITIZATION`
+- Final MVP acceptance is complete. Post-MVP planning remains blocked pending a separate user prioritization decision and execution prompt.
 
 ## Phase 5B1 Root Cause
 - Four regression tests still assumed the real repository root must not contain `channels/` or `secrets/`, which stopped being true after the authorized canonical migration in Phase 5B.
@@ -386,4 +470,4 @@ TECH_LEAD_APPROVED
 - UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-Phase 6C3 is complete and Tech Lead approved. Phase 6C4 remains blocked pending a separate Tech Lead review and execution prompt.
+MVP final acceptance is complete. Do not begin post-MVP planning or implementation until a separate user prioritization decision is provided.

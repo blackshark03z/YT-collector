@@ -19,6 +19,23 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}`', self.html)
         self.assertNotIn("/api/status", self.html)
 
+    def test_active_visible_ui_route_allowlist_is_canonical_v2_only(self):
+        routes = set(re.findall(r'v2Api\((?:`|")([^`"]+)', self.html))
+        self.assertEqual(
+            routes,
+            {
+                "channels",
+                "oauth/start?channel_slug=${encodeURIComponent(slug)}&mode=${encodeURIComponent(mode)}",
+                "channels/${encodeURIComponent(slug)}",
+                "channels/${encodeURIComponent(slug)}/sync_metrics",
+                "channels/${encodeURIComponent(slug)}/projects",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
+                "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
+                "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate",
+            },
+        )
+
     def test_selected_channel_state_contract_is_present(self):
         for token in [
             "SELECTED_CHANNEL_STORAGE_KEY",
@@ -114,6 +131,7 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects`, {', self.html)
         self.assertIn('const payload = { url };', self.html)
         self.assertIn("payload.project_name = projectName;", self.html)
+        self.assertIn("Project creation is available only when the selected channel is connected.", self.html)
         self.assertNotIn("project_slug:", self.html)
 
     def test_transcript_and_validation_use_exact_v2_project_routes(self):
