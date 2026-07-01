@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 6C1 - Frontend Channel State and V2 Read Client Cutover
+Repository History and Secret Audit + Initial GitHub Push
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,9 @@ TECH_LEAD_APPROVED
 
 ## Repository Baseline
 - Branch: master
-- HEAD: a3ad7eb
-- Subject: docs: record UI cutover readiness audit
-- Working tree before closure: uncommitted Phase 6C1 changes in `scripts/ui_server.py`, `tests/test_ui_frontend_contract.py`, `project_status.md`, `changelog.md`, and `next_task.md`; unrelated untracked `implement.docx`
+- HEAD before publication docs closure: `c40d9af`
+- Subject before publication docs closure: `chore: harden runtime ignore rules`
+- Working tree before publication docs closure: only documentation updates for publication result plus unrelated untracked `implement.docx`
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -40,6 +40,7 @@ TECH_LEAD_APPROVED
 - Phase 6A1: metrics-sync status semantics resolved conservatively; canonical Mist of Ages status restored to `CONNECTED`; approved fixes and tests are ready to commit
 - Phase 6B: read-only UI cutover readiness audit completed with evidence-based cutover phases and explicit preconditions
 - Phase 6C1: embedded production UI read cutover implemented with explicit selected-channel state, `/api/v2/` channel reads, disabled legacy mutations, focused UI contract coverage, and local non-external smoke evidence
+- Repository history and secret audit: completed with reachable-history decision `HISTORY_SAFE_FOR_PUBLIC_PUSH`, exact live-secret scan result `EXACT_LIVE_SECRET_NOT_FOUND_IN_HISTORY`, narrow ignore hardening, initial `master` publication, and remote-tracking setup on `origin/master`
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
@@ -63,6 +64,20 @@ TECH_LEAD_APPROVED
 - Focused Phase 6C1 regression total: `211/211` passing with no skips or xfails
 - Compilation: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py tests\test_multichannel_api.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_metrics.py tests\test_channel_projects.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
+
+## Publication Audit Result
+- Reachable-history decision: `HISTORY_SAFE_FOR_PUBLIC_PUSH`
+- Exact live-secret scan result: `EXACT_LIVE_SECRET_NOT_FOUND_IN_HISTORY`
+- Repository integrity result: reachable history is valid; `git fsck --full` reported dangling unreachable trees only, not reachable corruption
+- Ignore-rule result: narrow hardening committed in `c40d9af` to cover `.env`, `.env.*`, `.oauth-state*.json`, and `oauth-state*.json` in addition to existing runtime ignores
+- Remote name: `origin`
+- Remote repository: `blackshark03z/YT-collector`
+- Initial push completed: yes
+- Branch pushed: `master`
+- Upstream established: `origin/master`
+- No runtime channel data, token files, metrics files, legacy source data, or `implement.docx` were pushed
+- Canonical runtime remained local and ignored throughout publication
+- No tags were pushed
 
 ## Phase 6C1 Scope
 - Implemented only the approved embedded-frontend read cutover inside `scripts/ui_server.py`.
@@ -150,8 +165,8 @@ TECH_LEAD_APPROVED
 - OAuth connect/reconnect, metrics sync mutation, project creation, transcript mutation, validation mutation, collector workflow actions, and open-path actions remain blocked pending a separate execution prompt from the Tech Lead.
 
 ## Proposed Next Task
-- `Repository History and Secret Audit for Initial GitHub Push`
-- This is a separate review/audit task only. It does not authorize Phase 6C2 implementation work.
+- `Phase 6C2 - OAuth And Metrics UI Wiring`
+- Publication is complete. Phase 6C2 remains separately blocked until the Tech Lead issues a new execution prompt.
 
 ## Phase 5B1 Root Cause
 - Four regression tests still assumed the real repository root must not contain `channels/` or `secrets/`, which stopped being true after the authorized canonical migration in Phase 5B.
@@ -274,4 +289,4 @@ TECH_LEAD_APPROVED
 - UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-Phase 6C1 is approved and closed. Phase 6C2 remains blocked pending a separate execution prompt from the Tech Lead. The proposed next task is `Repository History and Secret Audit for Initial GitHub Push`.
+Repository publication is complete. Phase 6C2 remains blocked pending a separate execution prompt from the Tech Lead.

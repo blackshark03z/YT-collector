@@ -4,48 +4,47 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-Repository History and Secret Audit for Initial GitHub Push
+Phase 6C2 - OAuth And Metrics UI Wiring
 
 ## Do Not Start Yet
-Wait for a separate execution prompt from the Tech Lead before any repository publication, remote configuration, Phase 6C2 implementation, or push activity.
+Wait for a separate execution prompt from the Tech Lead before any OAuth wiring, metrics-sync UI wiring, project workflow cutover, or other Phase 6C2 work.
 
 ## Proposed Objective
-Audit repository history, staged publication safety, and secret exposure risk before adding a GitHub remote or attempting the first push.
+Wire the embedded selected-channel frontend to the approved canonical OAuth and metrics UI actions without reintroducing legacy single-channel mutations or changing current runtime data unexpectedly.
 
 ## Expected Files
-- repository history and git-configuration review outputs only if separately authorized
-- unchanged source files unless factual status-doc corrections are required
+- `scripts/ui_server.py`
+- updated UI-focused tests
 - unchanged ignored canonical runtime files
 
 ## Required Tests
-- inspect git history for runtime or secret leakage risk
-- verify ignore coverage for runtime and secret paths before publication
-- confirm no remote is configured before the audit begins
-- confirm no push occurs during the audit phase
+- selected channel scopes OAuth and metrics UI actions
+- visible OAuth and metrics controls use canonical `/api/v2/` channel APIs only
+- safe disconnected and in-progress states
+- no legacy root token or root project writes through the visible UI
 - canonical runtime files remain ignored
-- preserve the approved Phase 6C1 UI state unchanged
+- existing backend regression suite stays green
 
 ## Stop Conditions
-- repository history contains sensitive data requiring remediation planning
 - canonical workspace or token is missing or invalid
+- selected-channel OAuth or metrics action cannot be enforced safely
 - any legacy source changed unexpectedly
 - secret or runtime data becomes staged without authorization
 
 ## Forbidden Work
-- do not add a GitHub remote
-- do not push
-- do not perform Phase 6C2 implementation work
-- do not perform unapproved runtime mutation
+- do not perform unapproved runtime mutation beyond the authorized Phase 6C2 scope
+- do not run another real sync unless separately authorized by the execution prompt
+- do not reconnect OAuth unless separately authorized by the execution prompt
 - do not mutate protected `jesus/`
 - do not remove legacy routes
 
 ## Verification Requirements
-- confirm Phase 6C1 approved UI state remains unchanged
-- confirm no remote has been added
-- confirm no push has been attempted
+- confirm visible UI actions remain channel-scoped
+- confirm the selected-channel storage contract from Phase 6C1 remains intact
 - confirm canonical metrics files remain valid under the canonical channel workspace only
 - confirm the canonical token remains structurally valid and ignored
 - confirm legacy sources remain unchanged
+- confirm no production UI OAuth or metrics control depends on legacy root token state or legacy Mist of Ages globals
 - keep channel status semantics at preserved `CONNECTED`
 
 ## Migration Baseline
@@ -60,4 +59,4 @@ Audit repository history, staged publication safety, and secret exposure risk be
 High
 
 ## Exact First Action
-Wait for the separate repository-audit execution prompt, then verify that no GitHub remote exists and inspect history/ignore coverage without modifying runtime data or starting Phase 6C2.
+Wait for the separate Phase 6C2 execution prompt, then verify the approved selected-channel frontend contract and limit the work to canonical OAuth and metrics UI wiring only.

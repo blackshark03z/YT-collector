@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Repository History And Secret Audit + Initial GitHub Push
+- Audited the complete tracked tree and all history reachable from `master` before publication.
+- Confirmed no tracked file exists under `.local/`, `channels/`, `secrets/`, root `projects/`, or the local runtime token path.
+- Confirmed reachable-history decision `HISTORY_SAFE_FOR_PUBLIC_PUSH`.
+- Confirmed exact live-secret scan result `EXACT_LIVE_SECRET_NOT_FOUND_IN_HISTORY`.
+- Ran `git fsck --full` and found dangling unreachable trees only; no reachable-history integrity blocker was found.
+- Narrowly hardened `.gitignore` in `c40d9af` to cover `.env`, `.env.*`, `.oauth-state*.json`, and `oauth-state*.json` before publication.
+- Added remote `origin` for `https://github.com/blackshark03z/YT-collector.git`.
+- Confirmed the remote was empty before publication.
+- Performed the initial push of `master` and established tracking to `origin/master`.
+- Preserved canonical runtime files, canonical token ignore protections, canonical metrics, legacy source files, and unrelated `implement.docx` locally without pushing them.
+- No tags were pushed and no branch other than `master` was published.
+- Proposed next task: `Phase 6C2 - OAuth And Metrics UI Wiring`.
+- Phase 6C2 remains blocked pending a separate Tech Lead execution prompt.
+
 ### Phase 6C1 - Frontend Channel State and V2 Read Client Cutover
 - Modified the embedded production UI in `scripts/ui_server.py` to introduce explicit selected-channel frontend state with persisted slug restore and stale-selection clearing.
 - Added a reusable `/api/v2/` frontend request helper with nested V2 error handling, malformed-response fallback, and async supersession safety.
