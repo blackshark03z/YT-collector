@@ -1,0 +1,13 @@
+youtube_api_key.txt
+youtube_oauth_client.json
+youtube_oauth_token.json
+secrets/
+.local/
+projects/
+channels/
+channel/
+jesus/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.log
