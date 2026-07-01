@@ -1,13 +1,13 @@
 # Next Task
 
 ## Status
-BLOCKED_PENDING_PHASE_5B_REVIEW
+BLOCKED_PENDING_PHASE_5B1_REVIEW
 
 ## Proposed Phase
 Phase 6A - Selected-Channel Metrics Sync
 
 ## Do Not Start Yet
-Wait for Tech Lead review of the completed Phase 5B migration.
+Wait for Tech Lead review of the completed Phase 5B1 regression-isolation correction.
 
 ## Proposed Objective
 Run the first selected-channel metrics sync against the canonical Mist of Ages workspace after migration, without UI cutover.
@@ -21,6 +21,7 @@ Run the first selected-channel metrics sync against the canonical Mist of Ages w
 - canonical workspace and token precondition verification
 - selected-channel metrics sync success/failure handling
 - no legacy-source mutation verification
+- regression suite remains isolated from existing canonical runtime data
 - no UI cutover verification
 - compilation and `git diff --check`
 

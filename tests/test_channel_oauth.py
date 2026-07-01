@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import channel_oauth, channel_workspace
+from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
 def make_client_config(path: Path) -> None:
@@ -638,6 +639,7 @@ class ChannelOAuthTests(unittest.TestCase):
             self.assertNotIn("a-refresh", dumped)
 
     def test_no_real_repository_credential_or_runtime_path_is_touched(self):
+        before = snapshot_runtime_state(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_client_config(root / "youtube_oauth_client.json")
@@ -650,8 +652,8 @@ class ChannelOAuthTests(unittest.TestCase):
             channel_oauth.connect_channel_from_authorization_code(
                 root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=True
             )
-            self.assertFalse((ROOT / "channels").exists())
-            self.assertFalse((ROOT / "secrets").exists())
+        after = snapshot_runtime_state(ROOT)
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

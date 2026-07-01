@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import channel_metrics, channel_oauth, channel_workspace
+from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
 def make_channel(root: Path, slug: str, channel_id: str) -> None:
@@ -428,6 +429,7 @@ class ChannelMetricsTests(unittest.TestCase):
                 )
 
     def test_no_real_repository_path_is_touched(self):
+        before = snapshot_runtime_state(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
@@ -438,7 +440,8 @@ class ChannelMetricsTests(unittest.TestCase):
                 reporting_fetcher=lambda **kwargs: complete_reach_payload(),
                 token_provider=lambda root, slug: "token-a",
             )
-            self.assertFalse((ROOT / "channels").exists())
+        after = snapshot_runtime_state(ROOT)
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

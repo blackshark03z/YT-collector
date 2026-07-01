@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import channel_projects, channel_workspace
+from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
 def make_channel(root: Path, slug: str, channel_id: str) -> None:
@@ -445,11 +446,13 @@ class ChannelProjectTests(unittest.TestCase):
             self.assertEqual(b_paths.channel_metrics_csv.read_bytes(), before_metrics)
 
     def test_no_real_repository_runtime_folder_is_touched(self):
+        before = snapshot_runtime_state(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_channel(root, "mist_of_ages", "UC123")
             channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
-            self.assertFalse((ROOT / "channels").exists())
+        after = snapshot_runtime_state(ROOT)
+        self.assertEqual(before, after)
 
 
 if __name__ == "__main__":

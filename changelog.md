@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Phase 5B1 - Fix Post-Migration Regression Isolation
+- Added `tests/runtime_isolation_helpers.py`.
+- Modified `tests/test_channel_oauth.py`, `tests/test_multichannel_api.py`, `tests/test_channel_metrics.py`, and `tests/test_channel_projects.py`.
+- Corrected four post-migration regression tests that still assumed the real repository must not contain canonical `channels/` or `secrets/` paths.
+- Replaced obsolete repository-absence assertions with before/after runtime invariance checks against canonical and legacy file hashes.
+- Confirmed the canonical runtime workspace and legacy sources remained unchanged while the tests ran.
+- Re-ran the full required regression set successfully after the isolation fix.
+- Metrics sync and UI cutover remain blocked pending separate Tech Lead authorization.
+
 ### Phase 5B - Apply Legacy Mist of Ages Migration
 - Extended `scripts/legacy_migration.py` with an explicit rollback-safe apply API and `--apply` CLI mode.
 - Expanded `tests/test_legacy_migration.py` to cover apply success, refusal to overwrite, source-hash gates, rollback, source preservation, secrecy, and second-apply safety.

@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import channel_projects, channel_workspace, ui_server
+from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
 def make_channel(root: Path, slug: str, channel_id: str, *, with_metrics: bool = True) -> None:
@@ -499,11 +500,13 @@ class MultiChannelApiTests(unittest.TestCase):
             self.assertEqual(called["video"], 1)
 
     def test_no_real_repository_runtime_data_is_touched(self):
+        before = snapshot_runtime_state(ROOT)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ui_server.dispatch_v2_request("GET", "/api/v2/channels", context=ui_server.build_app_context(root=root))
-            self.assertFalse((ROOT / "channels").exists())
+        after = snapshot_runtime_state(ROOT)
+        self.assertEqual(before, after)
 
     def test_no_real_os_folder_file_is_opened(self):
         with tempfile.TemporaryDirectory() as tmp:
