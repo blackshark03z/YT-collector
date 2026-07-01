@@ -17,6 +17,8 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from scripts import channel_metrics, channel_oauth, channel_projects, channel_workspace
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECTS_DIR = ROOT / "projects"
@@ -41,6 +43,14 @@ SCOPES = [
 class AppError(Exception):
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+class V2Error(Exception):
+    def __init__(self, code: str, message: str, status: int):
+        super().__init__(message)
+        self.code = code
         self.message = message
         self.status = status
 
@@ -145,6 +155,10 @@ def request_json(url: str, headers: dict | None = None, data: bytes | None = Non
         raise AppError(f"Network error: {exc.reason}") from exc
 
 
+def default_transport(*, method: str, url: str, headers: dict | None = None, data: bytes | None = None) -> dict:
+    return request_json(url, headers=headers, data=data)
+
+
 def data_api(path: str, params: dict) -> dict:
     key = first_valid_api_key()
     if not key:
@@ -176,6 +190,22 @@ def fetch_competitor_video(video_id: str) -> dict:
     if not items:
         raise AppError("No video found for that URL.", 404)
     return items[0]
+
+
+def fetch_competitor_thumbnail(url: str) -> tuple[bytes | None, str | None]:
+    if not url:
+        return None, None
+    req = urllib.request.Request(url, headers={"User-Agent": "MistOfAgesCollector/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as res:
+            content = res.read()
+            ctype = res.headers.get("Content-Type", "")
+    except Exception:
+        return None, None
+    ext = mimetypes.guess_extension(ctype.split(";")[0].strip()) or Path(urllib.parse.urlparse(url).path).suffix or ".jpg"
+    if ext == ".jpe":
+        ext = ".jpg"
+    return content, ext
 
 
 def download_thumbnail(url: str, assets_dir: Path) -> str:
@@ -690,6 +720,316 @@ def app_status() -> dict:
     }
 
 
+def default_token_provider(root: Path | str, channel_slug: str) -> str:
+    return channel_oauth.get_access_token_for_channel(root, channel_slug, transport=default_transport)
+
+
+def default_recent_videos_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    recent_count: int,
+    channel: dict,
+) -> dict:
+    channel_payload = request_json(
+        f"{DATA_API}/channels?{urllib.parse.urlencode({'part': 'contentDetails', 'id': channel['youtube_channel_id']})}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    items = channel_payload.get("items", [])
+    if not items:
+        raise AppError("No uploads playlist found for the selected channel.", 404)
+    uploads = items[0].get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads")
+    if not uploads:
+        raise AppError("Selected channel has no uploads playlist.", 404)
+    playlist_payload = request_json(
+        f"{DATA_API}/playlistItems?{urllib.parse.urlencode({'part': 'contentDetails', 'playlistId': uploads, 'maxResults': str(max(1, min(recent_count, 50)))})}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    ids = [item.get("contentDetails", {}).get("videoId") for item in playlist_payload.get("items", [])]
+    ids = [item for item in ids if item]
+    videos = data_api("videos", {"part": "snippet,statistics", "id": ",".join(ids)}) if ids else {"items": []}
+    return {"items": videos.get("items", [])}
+
+
+def default_analytics_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    window_days: int,
+    recent_count: int,
+    channel: dict,
+    recent_payload: dict,
+) -> dict:
+    video_ids = [item.get("id") for item in recent_payload.get("items", []) if item.get("id")]
+    if not video_ids:
+        return {"columnHeaders": [], "rows": []}
+    end = dt.date.today()
+    start = end - dt.timedelta(days=window_days)
+    params = {
+        "ids": "channel==MINE",
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "metrics": "views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage",
+        "dimensions": "video",
+        "filters": "video==" + ",".join(video_ids),
+        "maxResults": str(len(video_ids)),
+    }
+    return request_json(
+        f"{ANALYTICS_API}?{urllib.parse.urlencode(params)}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+
+def default_reporting_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    window_days: int,
+    recent_count: int,
+    channel: dict,
+    recent_payload: dict,
+) -> dict:
+    report_types = request_json(
+        f"{REPORTING_API}/reportTypes?{urllib.parse.urlencode({'includeSystemManaged': 'true'})}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    ).get("reportTypes", [])
+    reach_types = [rt for rt in report_types if "channel_reach" in rt.get("id", "")]
+    if not reach_types:
+        return {
+            "status": "PENDING",
+            "report_type": None,
+            "message": "Reach report type is not available yet.",
+            "available_metrics": [],
+            "pending_metrics": ["thumbnail_impressions", "thumbnail_ctr"],
+            "rows": [],
+        }
+    return {
+        "status": "PENDING",
+        "report_type": reach_types[0].get("id"),
+        "message": "Reach report type exists; reach metrics are pending.",
+        "available_metrics": [],
+        "pending_metrics": ["thumbnail_impressions", "thumbnail_ctr"],
+        "rows": [],
+    }
+
+
+def normalize_competitor_metadata(video: dict, source_url: str, thumbnail_url: str | None) -> dict:
+    snippet = video.get("snippet", {})
+    statistics = video.get("statistics", {})
+    content = video.get("contentDetails", {})
+    return {
+        "title": snippet.get("title", ""),
+        "channelTitle": snippet.get("channelTitle", ""),
+        "channelId": snippet.get("channelId", ""),
+        "publishedAt": snippet.get("publishedAt", ""),
+        "duration": content.get("duration", ""),
+        "description": snippet.get("description", ""),
+        "tags": snippet.get("tags") or [],
+        "viewCount": statistics.get("viewCount", "0"),
+        "likeCount": statistics.get("likeCount", "0"),
+        "commentCount": statistics.get("commentCount", "0"),
+        "thumbnailUrl": thumbnail_url or "",
+        "url": source_url,
+    }
+
+
+def build_app_context(
+    *,
+    root: Path | str | None = None,
+    competitor_video_fetcher=None,
+    thumbnail_fetcher=None,
+    metrics_syncer=None,
+    token_provider=None,
+    recent_videos_fetcher=None,
+    analytics_fetcher=None,
+    reporting_fetcher=None,
+) -> dict:
+    return {
+        "root": Path(root or ROOT).resolve(),
+        "competitor_video_fetcher": competitor_video_fetcher or fetch_competitor_video,
+        "thumbnail_fetcher": thumbnail_fetcher or fetch_competitor_thumbnail,
+        "metrics_syncer": metrics_syncer or channel_metrics.sync_channel_metrics,
+        "token_provider": token_provider or default_token_provider,
+        "recent_videos_fetcher": recent_videos_fetcher or default_recent_videos_fetcher,
+        "analytics_fetcher": analytics_fetcher or default_analytics_fetcher,
+        "reporting_fetcher": reporting_fetcher or default_reporting_fetcher,
+    }
+
+
+APP_CONTEXT = build_app_context()
+
+
+def _v2_error(code: str, message: str, status: int) -> V2Error:
+    return V2Error(code, message, status)
+
+
+def _sanitize_channel_summary(root: Path | str, channel: dict) -> dict:
+    project_count = len(channel_projects.list_channel_projects(root, channel["channel_slug"]))
+    return {
+        "channel_slug": channel["channel_slug"],
+        "display_name": channel["display_name"],
+        "youtube_channel_id": channel["youtube_channel_id"],
+        "youtube_handle": channel["youtube_handle"],
+        "status": channel["status"],
+        "last_connected_at": channel["last_connected_at"],
+        "last_metrics_sync_at": channel["last_metrics_sync_at"],
+        "project_count": project_count,
+    }
+
+
+def _load_channel_or_error(root: Path | str, channel_slug: str) -> dict:
+    try:
+        valid_slug = channel_workspace.validate_channel_slug(channel_slug)
+    except channel_workspace.ChannelWorkspaceError as exc:
+        raise _v2_error("INVALID_CHANNEL_SLUG", str(exc), 400) from exc
+    try:
+        return channel_workspace.load_channel(root, valid_slug)
+    except channel_workspace.ChannelWorkspaceError as exc:
+        raise _v2_error("CHANNEL_NOT_FOUND", "Selected channel was not found.", 404) from exc
+
+
+def _map_project_error(exc: Exception) -> V2Error:
+    message = str(exc)
+    if "Duplicate source_video_id" in message:
+        return _v2_error("SOURCE_VIDEO_ALREADY_EXISTS", "This competitor video already exists in the selected channel.", 409)
+    if "Transcript already contains real content" in message:
+        return _v2_error("TRANSCRIPT_OVERWRITE_REQUIRED", "Transcript already contains real content. Set overwrite to replace it.", 409)
+    if "project.json does not exist" in message:
+        return _v2_error("PROJECT_NOT_FOUND", "Selected project was not found.", 404)
+    if "Required channel" in message:
+        return _v2_error("CHANNEL_METRICS_NOT_READY", "Channel learnings or metrics are not ready. Sync metrics first.", 409)
+    return _v2_error("INVALID_REQUEST", message, 400)
+
+
+def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
+    channel = _load_channel_or_error(root, channel_slug)
+    paths = channel_workspace.canonical_channel_paths(root, channel_slug)
+    reporting_state = {}
+    if paths.reporting_state_json.exists():
+        try:
+            reporting_state = json.loads(paths.reporting_state_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            reporting_state = {}
+    return {
+        "channel": _sanitize_channel_summary(root, channel),
+        "learnings": {
+            "path": paths.channel_learnings_master.relative_to(Path(root)).as_posix(),
+            "exists": paths.channel_learnings_master.exists(),
+            "non_empty": paths.channel_learnings_master.exists() and bool(paths.channel_learnings_master.read_bytes().strip()),
+        },
+        "metrics": {
+            "path": paths.channel_metrics_csv.relative_to(Path(root)).as_posix(),
+            "exists": paths.channel_metrics_csv.exists(),
+            "non_empty": paths.channel_metrics_csv.exists() and bool(paths.channel_metrics_csv.read_bytes().strip()),
+        },
+        "reporting": reporting_state,
+        "project_count": len(channel_projects.list_channel_projects(root, channel_slug)),
+    }
+
+
+def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, context: dict | None = None) -> tuple[int, dict]:
+    ctx = context or APP_CONTEXT
+    root = ctx["root"]
+    payload = payload or {}
+    parsed = urllib.parse.urlparse(path)
+    route = parsed.path
+    parts = [part for part in route.split("/") if part]
+    if len(parts) < 2 or parts[0] != "api" or parts[1] != "v2":
+        raise _v2_error("INVALID_REQUEST", "Invalid v2 route.", 404)
+
+    try:
+        if method == "GET" and parts == ["api", "v2", "channels"]:
+            channels = channel_workspace.list_channels(root)
+            return 200, {"channels": [_sanitize_channel_summary(root, channel) for channel in channels]}
+
+        if len(parts) >= 4 and parts[0:3] == ["api", "v2", "channels"]:
+            channel_slug = parts[3]
+            if method == "GET" and len(parts) == 4:
+                return 200, _channel_status_payload(root, channel_slug)
+            if method == "GET" and len(parts) == 5 and parts[4] == "projects":
+                _load_channel_or_error(root, channel_slug)
+                return 200, {"projects": channel_projects.list_channel_projects(root, channel_slug)}
+            if method == "POST" and len(parts) == 5 and parts[4] == "sync_metrics":
+                _load_channel_or_error(root, channel_slug)
+                window_days = int(payload.get("window_days", 90))
+                recent_count = int(payload.get("recent_count", 12))
+                if window_days < 1 or window_days > 365 or recent_count < 1 or recent_count > 50:
+                    raise _v2_error("INVALID_REQUEST", "window_days or recent_count is out of range.", 400)
+                try:
+                    result = ctx["metrics_syncer"](
+                        root,
+                        channel_slug,
+                        analytics_fetcher=ctx["analytics_fetcher"],
+                        recent_videos_fetcher=ctx["recent_videos_fetcher"],
+                        reporting_fetcher=ctx["reporting_fetcher"],
+                        token_provider=ctx["token_provider"],
+                        window_days=window_days,
+                        recent_count=recent_count,
+                    )
+                except channel_metrics.ChannelMetricsReconnectRequiredError as exc:
+                    raise _v2_error("OAUTH_RECONNECT_REQUIRED", str(exc), 409) from exc
+                except channel_metrics.ChannelMetricsError as exc:
+                    raise _v2_error("INVALID_REQUEST", str(exc), 400) from exc
+                return 200, {"sync": result}
+            if method == "POST" and len(parts) == 5 and parts[4] == "projects":
+                _load_channel_or_error(root, channel_slug)
+                competitor_url = payload.get("url", "")
+                project_name = payload.get("project_name")
+                try:
+                    video_id = parse_video_id(competitor_url)
+                    video = ctx["competitor_video_fetcher"](video_id)
+                except AppError as exc:
+                    raise _v2_error("YOUTUBE_API_ERROR", exc.message, exc.status) from exc
+                except Exception as exc:
+                    raise _v2_error("YOUTUBE_API_ERROR", str(exc), 400) from exc
+                _, thumb_url = choose_thumbnail(video.get("snippet", {}).get("thumbnails", {}))
+                thumb_bytes, thumb_ext = ctx["thumbnail_fetcher"](thumb_url)
+                metadata = normalize_competitor_metadata(video, competitor_url, thumb_url)
+                try:
+                    project = channel_projects.create_channel_project(
+                        root,
+                        channel_slug,
+                        source_video_id=video_id,
+                        source_video_url=competitor_url,
+                        source_metadata=metadata,
+                        project_name=project_name,
+                        thumbnail_bytes=thumb_bytes,
+                        thumbnail_extension=thumb_ext,
+                    )
+                except channel_projects.ChannelProjectError as exc:
+                    raise _map_project_error(exc) from exc
+                return 200, {"project": channel_projects.list_channel_projects(root, channel_slug)[0]}
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
+                project_slug = parts[5]
+                try:
+                    result = channel_projects.save_project_transcript(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        payload.get("transcript", ""),
+                        overwrite=bool(payload.get("overwrite", False)),
+                    )
+                except channel_projects.ChannelProjectError as exc:
+                    raise _map_project_error(exc) from exc
+                return 200, result
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "validate" and method == "POST":
+                project_slug = parts[5]
+                try:
+                    result = channel_projects.validate_channel_project(root, channel_slug, project_slug)
+                except channel_projects.ChannelProjectError as exc:
+                    raise _map_project_error(exc) from exc
+                return 200, result
+    except V2Error:
+        raise
+    except Exception as exc:
+        raise _v2_error("INTERNAL_ERROR", "An unexpected server error occurred.", 500) from exc
+
+    raise _v2_error("INVALID_REQUEST", "Route not found.", 404)
+
+
 HTML_PAGE = r"""<!doctype html>
 <html lang="en">
 <head>
@@ -922,6 +1262,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_v2_error(self, code: str, message: str, status: int) -> None:
+        self.send_json({"error": {"code": code, "message": message}}, status)
+
     def read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
@@ -931,6 +1274,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         try:
             parsed = urllib.parse.urlparse(self.path)
+            if parsed.path.startswith("/api/v2/"):
+                status, data = dispatch_v2_request("GET", parsed.path, context=APP_CONTEXT)
+                self.send_json(data, status)
+                return
             if parsed.path == "/":
                 body = HTML_PAGE.encode("utf-8")
                 self.send_response(200)
@@ -950,6 +1297,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.oauth_callback(parsed)
                 return
             self.serve_file(parsed.path)
+        except V2Error as exc:
+            self.send_v2_error(exc.code, exc.message, exc.status)
         except AppError as exc:
             self.send_json({"error": exc.message}, exc.status)
         except Exception as exc:
@@ -958,6 +1307,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             payload = self.read_body()
+            if self.path.startswith("/api/v2/"):
+                status, data = dispatch_v2_request("POST", self.path, payload=payload, context=APP_CONTEXT)
+                self.send_json(data, status)
+                return
             if self.path == "/api/create_project":
                 self.send_json(create_project(payload))
                 return
@@ -975,6 +1328,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
                 return
             self.send_json({"error": "Not found"}, 404)
+        except V2Error as exc:
+            self.send_v2_error(exc.code, exc.message, exc.status)
         except AppError as exc:
             self.send_json({"error": exc.message}, exc.status)
         except Exception as exc:

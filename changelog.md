@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Phase 4A - Channel Metrics and V2 Backend
+- Added `architecture_decisions.md` with ADR-001 for additive backend-before-UI rollout.
+- Added `scripts/channel_metrics.py`.
+- Added `tests/test_channel_metrics.py`.
+- Added `tests/test_multichannel_api.py`.
+- Modified `scripts/channel_workspace.py` with metrics-sync metadata update support.
+- Modified `scripts/ui_server.py` to add additive `/api/v2/` multi-channel backend endpoints while preserving all legacy routes, HTML, and JavaScript behavior.
+- Added channel-scoped metrics synchronization with atomic CSV/JSON writes, reporting-state persistence, sanitized raw snapshots, and selected-channel isolation.
+- Added `/api/v2/` endpoints for channel listing, channel status, project listing, metrics sync, project creation, transcript save, and project validation.
+- Added stable V2 JSON error responses with sanitized codes/messages and no secret payloads.
+- Tests passed for metrics isolation, V2 dispatch behavior, route-level channel scoping, and legacy collector compatibility.
+- No live API, live OAuth, real token movement, real metrics sync, or real project creation occurred.
+- Deferred Phase 4B OAuth browser integration and minimal multi-channel UI work.
+
 ### Phase 3 - Channel-Scoped Project Service
 - Added `scripts/channel_projects.py`.
 - Added `tests/test_channel_projects.py`.

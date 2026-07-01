@@ -328,3 +328,27 @@ def update_channel_connection_metadata(
     paths = canonical_channel_paths(root, channel_slug)
     _write_json_atomic(paths.channel_json, validated)
     return validated
+
+
+def update_channel_metrics_metadata(
+    root: Path | str,
+    slug: str,
+    *,
+    youtube_channel_id: str,
+    status: str = "READY",
+    last_metrics_sync_at: str | None = None,
+) -> dict[str, Any]:
+    channel_slug = validate_channel_slug(slug)
+    current = load_channel(root, channel_slug)
+    if current["channel_slug"] != channel_slug:
+        raise ChannelWorkspaceError("channel.json slug does not match the workspace folder.")
+    if current["youtube_channel_id"] != youtube_channel_id:
+        raise ChannelWorkspaceError("Refusing to change youtube_channel_id for an existing workspace.")
+
+    updated = dict(current)
+    updated["status"] = status.strip()
+    updated["last_metrics_sync_at"] = last_metrics_sync_at or utc_now_iso()
+    validated = validate_channel_metadata(updated, expected_slug=channel_slug)
+    paths = canonical_channel_paths(root, channel_slug)
+    _write_json_atomic(paths.channel_json, validated)
+    return validated
