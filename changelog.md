@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Phase 6C2 - OAuth And Metrics UI Wiring
+- Modified the embedded production UI in `scripts/ui_server.py` to add selected-channel OAuth and metrics action state without creating a separate frontend stack.
+- Wired visible OAuth start to canonical `GET /api/v2/oauth/start?channel_slug=<slug>&mode=reconnect` using the explicit current selected channel only.
+- Added a narrow backend compatibility adjustment so JSON-preferring UI clients can receive the OAuth redirect payload safely while the existing redirect-oriented backend behavior remains available.
+- Wired visible metrics sync to canonical `POST /api/v2/channels/<selectedChannelSlug>/sync_metrics` using only `window_days` and `recent_count`.
+- Added separate busy, feedback, duplicate-request, and stale-selection protection for OAuth and metrics actions.
+- Refreshed only the same selected-channel summary after successful OAuth-start acceptance or metrics-sync completion.
+- Kept project creation, transcript save, validation, collector submission, raw-path opening, and other legacy mutation controls disabled.
+- Extended `tests/test_ui_frontend_contract.py` and `tests/test_multichannel_api.py` with focused 6C2 contract coverage.
+- Re-ran the required frontend, API, workspace, OAuth, metrics, project, and collector suites successfully with no external calls.
+- Performed a local non-external smoke on isolated loopback port `8767` and verified selected-channel summary rendering, OAuth label state, metrics eligibility state, and continued disabled project/collector controls.
+- Preserved canonical runtime data, canonical token ignore safety, canonical metrics readability, canonical profile/learnings, and all legacy sources.
+- Tech Lead approved Phase 6C2 closure after the focused UI cutover wiring, regression rerun, and staged-diff secret review.
+- Confirmed Phase 6C2 closes with commit and push only; Phase 6C3 remains blocked.
+- Proposed next task: `Phase 6C3 - Project And Collector UI Wiring`.
+- Phase 6C3 remains blocked pending a separate Tech Lead execution prompt.
+
 ### Repository History And Secret Audit + Initial GitHub Push
 - Audited the complete tracked tree and all history reachable from `master` before publication.
 - Confirmed no tracked file exists under `.local/`, `channels/`, `secrets/`, root `projects/`, or the local runtime token path.

@@ -27,6 +27,9 @@ class UiFrontendContractTests(unittest.TestCase):
             "state.channels",
             "state.isLoadingChannels",
             "state.isLoadingSummary",
+            "oauthAction",
+            "metricsAction",
+            "actionFeedback",
         ]:
             self.assertIn(token, self.html)
 
@@ -59,6 +62,8 @@ class UiFrontendContractTests(unittest.TestCase):
             "new AbortController()",
             "requestId !== state.summaryRequestId",
             "slug !== state.selectedChannelSlug",
+            "state.oauthAction.requestId !== requestId",
+            "state.metricsAction.requestId !== requestId",
         ]:
             self.assertIn(token, self.html)
 
@@ -68,7 +73,31 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("Channel disconnected", self.html)
         self.assertIn("This selected channel is not currently connected.", self.html)
 
-    def test_not_yet_cut_over_controls_are_disabled_and_do_not_call_legacy_mutations(self):
+    def test_oauth_ui_uses_selected_slug_and_canonical_v2_route(self):
+        self.assertIn("oauth/start?channel_slug=${encodeURIComponent(slug)}&mode=${encodeURIComponent(mode)}", self.html)
+        self.assertIn('label: busy ? (isConnected ? "Starting reconnect..." : "Starting connection...") : (isConnected ? "Reconnect Channel" : "Connect Channel")', self.html)
+        self.assertIn('mode: "reconnect"', self.html)
+        self.assertNotIn('window.open("/oauth/start"', self.html)
+
+    def test_metrics_ui_uses_selected_slug_and_canonical_post_route(self):
+        self.assertIn('channels/${encodeURIComponent(slug)}/sync_metrics', self.html)
+        self.assertIn('method: "POST"', self.html)
+        self.assertIn("window_days", self.html)
+        self.assertIn("recent_count", self.html)
+        self.assertIn("Metrics sync is available only when the selected channel is connected.", self.html)
+
+    def test_duplicate_and_stale_action_requests_are_blocked(self):
+        for token in [
+            "state.oauthAction.busy && state.oauthAction.slug === state.selectedChannelSlug",
+            "state.metricsAction.busy && state.metricsAction.slug === state.selectedChannelSlug",
+            "if (oauth.disabled)",
+            "if (metrics.disabled)",
+            "clearActionFeedback();",
+            "await refreshSelectedSummaryForAction(slug);",
+        ]:
+            self.assertIn(token, self.html)
+
+    def test_not_yet_cut_over_controls_remain_disabled_and_legacy_mutations_are_absent(self):
         self.assertGreaterEqual(self.html.count('data-cutover-state="disabled"'), 6)
         for path in [
             "/oauth/start",
@@ -79,11 +108,23 @@ class UiFrontendContractTests(unittest.TestCase):
         ]:
             self.assertNotIn(path, self.html)
         self.assertIn("Available after channel workflow cutover.", self.html)
+        self.assertIn("Project workflow cutover is not active yet.", self.html)
+
+    def test_frontend_contains_no_live_credential_material(self):
+        forbidden = [
+            "Bearer ey",
+            "refresh_token\":",
+            "client_secret\":",
+            "authorization_code",
+        ]
+        for token in forbidden:
+            self.assertNotIn(token, self.html)
 
     def test_visible_ui_still_signals_embedded_collector_context(self):
         self.assertIn("Mist of Ages Research", self.html)
         self.assertIn("Refresh Channels", self.html)
         self.assertIn("Selected Channel Summary", self.html)
+        self.assertIn("Selected Channel Actions", self.html)
 
 
 if __name__ == "__main__":

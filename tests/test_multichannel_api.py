@@ -383,6 +383,12 @@ class MultiChannelApiTests(unittest.TestCase):
             self.assertEqual(status, 302)
             self.assertIn("redirect_url", data)
 
+    def test_json_clients_prefer_oauth_redirect_payload_over_http_redirect(self):
+        self.assertTrue(ui_server._client_prefers_json_redirect({"Accept": "application/json"}))
+        self.assertTrue(ui_server._client_prefers_json_redirect({"Accept": "text/plain, application/json"}))
+        self.assertFalse(ui_server._client_prefers_json_redirect({"Accept": "text/html"}))
+        self.assertFalse(ui_server._client_prefers_json_redirect({}))
+
     def test_project_detail_is_channel_scoped(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

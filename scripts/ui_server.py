@@ -968,6 +968,17 @@ def _safe_open_path(root: Path | str, target: Path, opener) -> dict:
     return {"ok": True}
 
 
+def _client_prefers_json_redirect(headers) -> bool:
+    if not headers:
+        return False
+    accept = ""
+    try:
+        accept = headers.get("Accept", "")
+    except Exception:
+        accept = ""
+    return "application/json" in (accept or "").lower()
+
+
 def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, context: dict | None = None) -> tuple[int, dict]:
     ctx = context or APP_CONTEXT
     root = ctx["root"]
@@ -1207,10 +1218,11 @@ HTML_PAGE = r"""<!doctype html>
       </select>
       <div class="status" id="channelState" style="margin-top:12px"></div>
       <div class="row" style="margin-top:12px">
-        <button id="connectChannelBtn" disabled data-cutover-state="disabled">Connect Channel</button>
+        <button id="connectChannelBtn" disabled>Connect Channel</button>
+        <button id="syncMetricsBtn" class="secondary" disabled>Sync Metrics</button>
         <button class="ghost" id="openLearningsBtn" disabled data-cutover-state="disabled">Open Learnings</button>
       </div>
-      <p class="meta">OAuth and learnings actions stay disabled until later cutover phases.</p>
+      <p class="meta">OAuth and metrics actions now use selected-channel `/api/v2/` routes. Learnings and project/collector actions stay disabled until later phases.</p>
     </aside>
 
     <section>
@@ -1219,9 +1231,27 @@ HTML_PAGE = r"""<!doctype html>
       <div id="summaryPanel" class="result"></div>
 
       <div class="stack" style="margin-top:18px">
+        <div class="card">
+          <h3>Selected Channel Actions</h3>
+          <div id="actionState" class="status"></div>
+          <div class="row" style="margin-top:12px">
+            <div style="flex:1">
+              <label for="recent">Recent Channel Videos</label>
+              <input id="recent" type="number" min="1" max="50" value="10">
+            </div>
+            <div style="flex:1">
+              <label for="window">Performance Window</label>
+              <select id="window">
+                <option value="7">7 days</option>
+                <option value="28" selected>28 days</option>
+                <option value="90">90 days</option>
+              </select>
+            </div>
+          </div>
+        </div>
         <div class="notice">
           <strong>Project workflow cutover is not active yet.</strong>
-          <span class="meta">Project creation, transcript save, validation, metrics sync, OAuth connect, and open-path actions are held back until later phases.</span>
+          <span class="meta">Project creation, transcript save, validation, collector submission, and open-path actions are still held back until later phases.</span>
         </div>
         <div class="card">
           <h3>Create Research Project</h3>
@@ -1229,20 +1259,6 @@ HTML_PAGE = r"""<!doctype html>
           <input id="url" placeholder="Available after channel workflow cutover" disabled>
           <label for="name">Project Name (optional)</label>
           <input id="name" placeholder="Available after channel workflow cutover" disabled>
-          <div class="row">
-            <div style="flex:1">
-              <label for="recent">Recent Channel Videos</label>
-              <input id="recent" type="number" min="1" max="50" value="10" disabled>
-            </div>
-            <div style="flex:1">
-              <label for="window">Performance Window</label>
-              <select id="window" disabled>
-                <option value="7">7 days</option>
-                <option value="28" selected>28 days</option>
-                <option value="90">90 days</option>
-              </select>
-            </div>
-          </div>
           <div class="row" style="margin-top:14px">
             <button id="createBtn" disabled data-cutover-state="disabled">Create Research Project</button>
           </div>
@@ -1275,7 +1291,10 @@ const state = {
   isLoadingSummary: false,
   errorMessage: "",
   summaryRequestId: 0,
-  summaryAbortController: null
+  summaryAbortController: null,
+  oauthAction: { busy: false, slug: null, requestId: 0 },
+  metricsAction: { busy: false, slug: null, requestId: 0 },
+  actionFeedback: { kind: "", slug: null, text: "" }
 };
 
 function escapeHtml(value) {
@@ -1349,6 +1368,58 @@ async function v2Api(path, options = {}) {
   return {};
 }
 
+function selectedChannelRecord() {
+  if (state.selectedChannelSummary && state.selectedChannelSummary.channel) {
+    return state.selectedChannelSummary.channel;
+  }
+  return state.channels.find((item) => item.channel_slug === state.selectedChannelSlug) || null;
+}
+
+function clearActionFeedback() {
+  state.actionFeedback = { kind: "", slug: null, text: "" };
+}
+
+function setActionFeedback(kind, slug, text) {
+  state.actionFeedback = { kind, slug, text };
+}
+
+function oauthButtonModel() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Connect Channel", mode: null, helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
+    return { disabled: true, label: "Connect Channel", mode: null, helper: "Load the selected channel summary before starting OAuth." };
+  }
+  const isConnected = channel.status === "CONNECTED";
+  const busy = state.oauthAction.busy && state.oauthAction.slug === state.selectedChannelSlug;
+  return {
+    disabled: busy,
+    label: busy ? (isConnected ? "Starting reconnect..." : "Starting connection...") : (isConnected ? "Reconnect Channel" : "Connect Channel"),
+    mode: "reconnect",
+    helper: isConnected ? "Use the canonical reconnect route for the selected channel." : "This channel workspace exists but is not connected yet. Start the canonical OAuth flow for this selected channel."
+  };
+}
+
+function metricsButtonModel() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Sync Metrics", helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
+    return { disabled: true, label: "Sync Metrics", helper: "Load the selected channel summary before syncing metrics." };
+  }
+  if (channel.status !== "CONNECTED") {
+    return { disabled: true, label: "Sync Metrics", helper: "Metrics sync is available only when the selected channel is connected." };
+  }
+  const busy = state.metricsAction.busy && state.metricsAction.slug === state.selectedChannelSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Syncing Metrics..." : "Sync Metrics",
+    helper: "Sync channel metrics for the selected canonical channel only."
+  };
+}
+
 function setSelectedChannelSlug(nextSlug) {
   if (!nextSlug) {
     localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
@@ -1359,6 +1430,7 @@ function setSelectedChannelSlug(nextSlug) {
   }
   state.selectedChannelSummary = null;
   state.errorMessage = "";
+  clearActionFeedback();
   if (state.summaryAbortController) state.summaryAbortController.abort();
   render();
   if (state.selectedChannelSlug) {
@@ -1405,6 +1477,36 @@ function renderChannelState() {
     <div class="meta">${escapeHtml(summary ? summary.display_name : state.selectedChannelSlug)}</div>
     <div class="meta mono">${escapeHtml(summary ? summary.channel_slug : state.selectedChannelSlug)}</div>
     ${disconnected ? '<div class="meta">This channel is disconnected. Read-only summary is available, but workflow actions stay unavailable.</div>' : ""}
+  `;
+}
+
+function renderActionState() {
+  const target = document.getElementById("actionState");
+  const oauthButton = document.getElementById("connectChannelBtn");
+  const metricsButton = document.getElementById("syncMetricsBtn");
+  const recent = document.getElementById("recent");
+  const windowSelect = document.getElementById("window");
+  const oauth = oauthButtonModel();
+  const metrics = metricsButtonModel();
+  const canEditMetricsInputs = !!state.selectedChannelSlug && !!state.selectedChannelSummary;
+  oauthButton.disabled = oauth.disabled;
+  oauthButton.textContent = oauth.label;
+  metricsButton.disabled = metrics.disabled;
+  metricsButton.textContent = metrics.label;
+  recent.disabled = !canEditMetricsInputs || (state.metricsAction.busy && state.metricsAction.slug === state.selectedChannelSlug);
+  windowSelect.disabled = !canEditMetricsInputs || (state.metricsAction.busy && state.metricsAction.slug === state.selectedChannelSlug);
+
+  const feedback = state.actionFeedback.slug === state.selectedChannelSlug ? state.actionFeedback : { kind: "", text: "" };
+  const feedbackHtml = feedback.text
+    ? `<div class="check"><strong>${feedback.kind === "error" ? "Action Error" : "Action Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(feedback.text)}</div>`
+    : `<div class="meta">Use the selected canonical channel for OAuth and metrics actions. Project and collector actions remain disabled.</div>`;
+
+  target.innerHTML = `
+    <div class="check"><strong>OAuth</strong>${pill(oauth.disabled ? "WAITING" : "READY")}</div>
+    <div class="meta">${escapeHtml(oauth.helper)}</div>
+    <div class="check"><strong>Metrics</strong>${pill(metrics.disabled ? "WAITING" : "READY")}</div>
+    <div class="meta">${escapeHtml(metrics.helper)}</div>
+    ${feedbackHtml}
   `;
 }
 
@@ -1481,7 +1583,104 @@ function renderSelectedChannelSummary() {
 function render() {
   syncChannelSelector();
   renderChannelState();
+  renderActionState();
   renderSelectedChannelSummary();
+}
+
+async function refreshSelectedSummaryForAction(slug) {
+  if (!slug || slug !== state.selectedChannelSlug) return;
+  await loadSelectedChannelSummary();
+}
+
+async function startOAuthAction() {
+  const oauth = oauthButtonModel();
+  const slug = state.selectedChannelSlug;
+  if (!slug || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    setActionFeedback("error", slug, "Select a channel and wait for its summary before starting OAuth.");
+    render();
+    return;
+  }
+  if (oauth.disabled) {
+    if (!(state.oauthAction.busy && state.oauthAction.slug === slug)) {
+      setActionFeedback("error", slug, oauth.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.oauthAction.requestId + 1;
+  const mode = oauth.mode;
+  state.oauthAction = { busy: true, slug, requestId };
+  setActionFeedback("info", slug, "Starting OAuth for the selected channel...");
+  render();
+
+  try {
+    const data = await v2Api(`oauth/start?channel_slug=${encodeURIComponent(slug)}&mode=${encodeURIComponent(mode)}`);
+    if (state.oauthAction.requestId !== requestId || state.oauthAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    if (typeof data.redirect_url !== "string" || !data.redirect_url) {
+      throw new Error("OAuth start did not return a usable redirect URL.");
+    }
+    const popup = window.open(data.redirect_url, "_blank", "noopener");
+    if (!popup) {
+      throw new Error("OAuth start was accepted, but the browser blocked the new tab.");
+    }
+    setActionFeedback("success", slug, "OAuth start accepted for the selected channel. Finish the flow in the opened browser tab.");
+    await refreshSelectedSummaryForAction(slug);
+  } catch (error) {
+    if (state.oauthAction.requestId !== requestId || state.oauthAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    setActionFeedback("error", slug, describeError(error, "Could not start OAuth for the selected channel."));
+  } finally {
+    if (state.oauthAction.requestId === requestId && state.oauthAction.slug === slug) {
+      state.oauthAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function syncMetricsAction() {
+  const metrics = metricsButtonModel();
+  const slug = state.selectedChannelSlug;
+  if (!slug || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    setActionFeedback("error", slug, "Select a channel and wait for its summary before syncing metrics.");
+    render();
+    return;
+  }
+  if (metrics.disabled) {
+    if (!(state.metricsAction.busy && state.metricsAction.slug === slug)) {
+      setActionFeedback("error", slug, metrics.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.metricsAction.requestId + 1;
+  const priorSummary = state.selectedChannelSummary;
+  const windowDays = Number(document.getElementById("window").value || 28);
+  const recentCount = Number(document.getElementById("recent").value || 10);
+  state.metricsAction = { busy: true, slug, requestId };
+  setActionFeedback("info", slug, "Starting metrics sync for the selected channel...");
+  render();
+
+  try {
+    await v2Api(`channels/${encodeURIComponent(slug)}/sync_metrics`, {
+      method: "POST",
+      body: JSON.stringify({ window_days: windowDays, recent_count: recentCount })
+    });
+    if (state.metricsAction.requestId !== requestId || state.metricsAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    await refreshSelectedSummaryForAction(slug);
+    if (state.selectedChannelSlug === slug) {
+      setActionFeedback("success", slug, "Metrics sync completed for the selected channel.");
+    }
+  } catch (error) {
+    if (state.metricsAction.requestId !== requestId || state.metricsAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    state.selectedChannelSummary = priorSummary;
+    setActionFeedback("error", slug, describeError(error, "Could not sync metrics for the selected channel."));
+  } finally {
+    if (state.metricsAction.requestId === requestId && state.metricsAction.slug === slug) {
+      state.metricsAction.busy = false;
+      render();
+    }
+  }
 }
 
 async function loadSelectedChannelSummary() {
@@ -1562,6 +1761,8 @@ function refreshStatus() {
 document.getElementById("channelSelect").addEventListener("change", (event) => {
   setSelectedChannelSlug(event.target.value || null);
 });
+document.getElementById("connectChannelBtn").addEventListener("click", startOAuthAction);
+document.getElementById("syncMetricsBtn").addEventListener("click", syncMetricsAction);
 
 loadChannels();
 </script>
@@ -1599,9 +1800,12 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path.startswith("/api/v2/"):
                 status, data = dispatch_v2_request("GET", self.path, context=APP_CONTEXT)
                 if status in {301, 302, 303, 307, 308} and "redirect_url" in data:
-                    self.send_response(status)
-                    self.send_header("Location", data["redirect_url"])
-                    self.end_headers()
+                    if _client_prefers_json_redirect(self.headers):
+                        self.send_json(data, 200)
+                    else:
+                        self.send_response(status)
+                        self.send_header("Location", data["redirect_url"])
+                        self.end_headers()
                 else:
                     self.send_json(data, status)
                 return
