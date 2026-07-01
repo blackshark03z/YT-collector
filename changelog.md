@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 5A - Legacy Migration Dry Run
+- Added `scripts/legacy_migration.py`.
+- Added `tests/test_legacy_migration.py`.
+- Added sanitized `migration_dry_run.md` from the real repository dry run.
+- Added a read-only migration planner, report renderer, and `--dry-run` CLI with no apply mode.
+- Verified legacy Mist of Ages identity, learnings, OAuth-token structure, protected exclusions, and canonical destination state without mutating runtime data.
+- Real repository dry run returned `READY_FOR_REAL_MIGRATION`.
+- Tech Lead approved the Phase 5A dry-run result and closed the phase without starting Phase 5B.
+- No legacy source, token, project, transcript, workflow artifact, or protected folder content was modified.
+- Deferred all real migration, canonical data creation, metrics sync, OAuth reconnect, and UI cutover work.
+
 ### Phase 4B1 - OAuth Browser and UI-Support Backend
 - Added `scripts/channel_oauth_browser.py`.
 - Added `tests/test_channel_oauth_browser.py`.
