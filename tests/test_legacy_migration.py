@@ -125,6 +125,15 @@ class LegacyMigrationTests(unittest.TestCase):
     def build_plan(self, root: Path):
         return legacy_migration.build_legacy_migration_plan(root, planned_at=FIXED_TIME)
 
+    def expected_hashes(self, root: Path):
+        return {
+            ".local/mist_of_ages_channel.json": file_hash(root / ".local" / "mist_of_ages_channel.json"),
+            "channel/mist_of_ages/channel_learnings_master.md": file_hash(
+                root / "channel" / "mist_of_ages" / "channel_learnings_master.md"
+            ),
+            "youtube_oauth_token.json": file_hash(root / "youtube_oauth_token.json"),
+        }
+
     def test_module_import_has_no_side_effects(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -408,13 +417,14 @@ class LegacyMigrationTests(unittest.TestCase):
         script = ROOT / "scripts" / "legacy_migration.py"
         result = subprocess.run([sys.executable, str(script), "--root", str(root)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 2)
-        self.assertIn("Dry-run mode is required", result.stdout)
-        apply_result = subprocess.run(
+        self.assertIn("Choose exactly one mode", result.stdout)
+        both_result = subprocess.run(
             [sys.executable, str(script), "--root", str(root), "--dry-run", "--apply"],
             capture_output=True,
             text=True,
         )
-        self.assertNotEqual(apply_result.returncode, 0)
+        self.assertEqual(both_result.returncode, 2)
+        self.assertIn("Choose exactly one mode", both_result.stdout)
 
     def test_cli_exit_codes_for_ready_and_blocked_plans(self):
         script = ROOT / "scripts" / "legacy_migration.py"
@@ -438,6 +448,182 @@ class LegacyMigrationTests(unittest.TestCase):
         )
         self.assertNotEqual(blocked.returncode, 0)
         self.assertIn("BLOCKED", blocked.stdout)
+
+    def test_successful_apply_creates_exact_canonical_file_set(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        result = legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        workspace = root / "channels" / "mist_of_ages"
+        token = root / "secrets" / "youtube" / "mist_of_ages_oauth_token.json"
+        self.assertEqual(result["status"], "CONNECTED")
+        self.assertEqual(
+            sorted(path.relative_to(root).as_posix() for path in workspace.rglob("*") if path.is_file()) + [token.relative_to(root).as_posix()],
+            [
+                "channels/mist_of_ages/channel.json",
+                "channels/mist_of_ages/channel_learnings_master.md",
+                "channels/mist_of_ages/channel_profile.md",
+                "secrets/youtube/mist_of_ages_oauth_token.json",
+            ],
+        )
+        self.assertFalse((workspace / "metrics").exists())
+        self.assertFalse((workspace / "projects").exists())
+
+    def test_apply_refuses_overwrite_and_second_apply(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        with self.assertRaises(legacy_migration.LegacyMigrationError) as ctx:
+            legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        self.assertIn("refuses", str(ctx.exception))
+
+    def test_apply_source_hash_precondition_failure(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        bad_hashes = dict(self.expected_hashes(root))
+        bad_hashes["youtube_oauth_token.json"] = "0" * 64
+        with self.assertRaises(legacy_migration.LegacyMigrationError) as ctx:
+            legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=bad_hashes)
+        self.assertIn("hash mismatch", str(ctx.exception).lower())
+        self.assertFalse((root / "channels" / "mist_of_ages").exists())
+
+    def test_apply_invalid_identity_source_is_rejected(self):
+        tmp, root = self.make_repo(identity_payload={"id": "UC123"})
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaises(legacy_migration.LegacyMigrationError):
+            legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+
+    def test_apply_invalid_token_source_is_rejected(self):
+        tmp, root = self.make_repo(token_payload={"access_token": "ACCESS_SECRET_VALUE"})
+        self.addCleanup(tmp.cleanup)
+        with self.assertRaises(legacy_migration.LegacyMigrationError) as ctx:
+            legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes={
+                ".local/mist_of_ages_channel.json": file_hash(root / ".local" / "mist_of_ages_channel.json"),
+                "channel/mist_of_ages/channel_learnings_master.md": file_hash(root / "channel" / "mist_of_ages" / "channel_learnings_master.md"),
+                "youtube_oauth_token.json": file_hash(root / "youtube_oauth_token.json"),
+            })
+        self.assertNotIn("ACCESS_SECRET_VALUE", str(ctx.exception))
+
+    def test_apply_atomic_write_failure_rolls_back(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        calls = {"count": 0}
+
+        def flaky_writer(path, data):
+            calls["count"] += 1
+            if calls["count"] == 3:
+                raise OSError("boom")
+            legacy_migration._write_bytes_atomic(path, data)
+
+        with self.assertRaises(legacy_migration.LegacyMigrationError):
+            legacy_migration.apply_legacy_migration(
+                root,
+                planned_at=FIXED_TIME,
+                expected_source_hashes=self.expected_hashes(root),
+                write_bytes_atomic=flaky_writer,
+            )
+        self.assertFalse((root / "channels" / "mist_of_ages").exists())
+        self.assertFalse((root / "secrets").exists())
+
+    def test_apply_partial_operation_rollback_removes_created_files_only(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        preexisting = root / "secrets"
+        preexisting.mkdir()
+        calls = {"count": 0}
+
+        def flaky_writer(path, data):
+            calls["count"] += 1
+            if calls["count"] == 4:
+                raise OSError("boom")
+            legacy_migration._write_bytes_atomic(path, data)
+
+        with self.assertRaises(legacy_migration.LegacyMigrationError):
+            legacy_migration.apply_legacy_migration(
+                root,
+                planned_at=FIXED_TIME,
+                expected_source_hashes=self.expected_hashes(root),
+                write_bytes_atomic=flaky_writer,
+            )
+        self.assertTrue(preexisting.exists())
+        self.assertFalse((root / "channels" / "mist_of_ages").exists())
+        self.assertFalse((root / "secrets" / "youtube").exists())
+
+    def test_apply_preserves_legacy_sources(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        before = {
+            "identity": file_hash(root / ".local" / "mist_of_ages_channel.json"),
+            "learnings": file_hash(root / "channel" / "mist_of_ages" / "channel_learnings_master.md"),
+            "token": file_hash(root / "youtube_oauth_token.json"),
+        }
+        legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        after = {
+            "identity": file_hash(root / ".local" / "mist_of_ages_channel.json"),
+            "learnings": file_hash(root / "channel" / "mist_of_ages" / "channel_learnings_master.md"),
+            "token": file_hash(root / "youtube_oauth_token.json"),
+        }
+        self.assertEqual(before, after)
+
+    def test_apply_protected_path_exclusion(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        write_text(root / "jesus" / "nested.txt", "do not inspect\n")
+        original_iterdir = Path.iterdir
+
+        def guard_iterdir(path_obj):
+            if path_obj.resolve() == (root / "jesus").resolve():
+                raise AssertionError("jesus directory was enumerated")
+            return original_iterdir(path_obj)
+
+        with mock.patch("pathlib.Path.iterdir", guard_iterdir):
+            legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+
+    def test_apply_token_secrecy_in_cli_output_and_files(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        script = ROOT / "scripts" / "legacy_migration.py"
+        hashes = self.expected_hashes(root)
+        hash_args = []
+        for rel_path, value in hashes.items():
+            hash_args.extend(["--expected-source-hash", f"{rel_path}={value}"])
+        result = subprocess.run(
+            [sys.executable, str(script), "--root", str(root), "--channel-slug", "mist_of_ages", "--apply", *hash_args],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("ACCESS_SECRET_VALUE", result.stdout)
+        self.assertNotIn("REFRESH_SECRET_VALUE", result.stdout)
+        payload = (root / "secrets" / "youtube" / "mist_of_ages_oauth_token.json").read_text(encoding="utf-8")
+        self.assertIn("ACCESS_SECRET_VALUE", payload)
+
+    def test_apply_no_project_creation_for_empty_inventory(self):
+        tmp, root = self.make_repo(projects=[])
+        self.addCleanup(tmp.cleanup)
+        legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        self.assertFalse((root / "channels" / "mist_of_ages" / "projects").exists())
+
+    def test_apply_channel_json_and_profile_are_valid(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        channel_json = json.loads((root / "channels" / "mist_of_ages" / "channel.json").read_text(encoding="utf-8"))
+        self.assertEqual(channel_json["youtube_channel_id"], "UC123")
+        self.assertEqual(channel_json["display_name"], "Mist of Ages")
+        self.assertEqual(channel_json["youtube_handle"], "@mistofages")
+        self.assertEqual(channel_json["status"], "CONNECTED")
+        profile = (root / "channels" / "mist_of_ages" / "channel_profile.md").read_text(encoding="utf-8")
+        self.assertIn("Mist of Ages", profile)
+        self.assertIn("@mistofages", profile)
+
+    def test_apply_learnings_and_token_preserve_source_bytes(self):
+        tmp, root = self.make_repo()
+        self.addCleanup(tmp.cleanup)
+        source_learnings = (root / "channel" / "mist_of_ages" / "channel_learnings_master.md").read_bytes()
+        source_token = (root / "youtube_oauth_token.json").read_bytes()
+        legacy_migration.apply_legacy_migration(root, planned_at=FIXED_TIME, expected_source_hashes=self.expected_hashes(root))
+        self.assertEqual(source_learnings, (root / "channels" / "mist_of_ages" / "channel_learnings_master.md").read_bytes())
+        self.assertEqual(source_token, (root / "secrets" / "youtube" / "mist_of_ages_oauth_token.json").read_bytes())
 
     def test_no_runtime_paths_are_touched_in_temp_repo(self):
         tmp, root = self.make_repo()

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 5B - Apply Legacy Mist of Ages Migration
+- Extended `scripts/legacy_migration.py` with an explicit rollback-safe apply API and `--apply` CLI mode.
+- Expanded `tests/test_legacy_migration.py` to cover apply success, refusal to overwrite, source-hash gates, rollback, source preservation, secrecy, and second-apply safety.
+- Verified the real repository gates, then ran exactly one authorized real apply command.
+- Created `channels/mist_of_ages/channel.json`, `channels/mist_of_ages/channel_profile.md`, `channels/mist_of_ages/channel_learnings_master.md`, and `secrets/youtube/mist_of_ages_oauth_token.json`.
+- Preserved all authorized legacy sources byte-for-byte.
+- Did not inspect `jesus/`, did not modify `implement.docx`, and did not create metrics files or projects.
+- Validated canonical channel identity, canonical token structure, byte-identical learnings copy, and safe second-apply refusal.
+- No rollback was needed.
+- Deferred selected-channel metrics sync and UI cutover.
+
 ### Phase 5A - Legacy Migration Dry Run
 - Added `scripts/legacy_migration.py`.
 - Added `tests/test_legacy_migration.py`.

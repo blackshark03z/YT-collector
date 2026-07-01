@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 5A - Legacy Migration Dry Run
+Phase 5B - Apply Legacy Mist of Ages Migration
 
 ## Phase Status
 COMPLETE
@@ -22,9 +22,9 @@ TECH LEAD APPROVED
 
 ## Repository Baseline
 - Branch: master
-- HEAD: 1b6128f
-- Subject: feat: add multichannel oauth browser backend
-- Working tree: project_status.md modified; scripts/legacy_migration.py, tests/test_legacy_migration.py, and migration_dry_run.md untracked; implement.docx remains untracked
+- HEAD: c70e305
+- Subject: feat: add legacy migration dry run
+- Working tree: canonical migrated files exist but are uncommitted; `scripts/legacy_migration.py`, `tests/test_legacy_migration.py`, `project_status.md`, `changelog.md`, and `next_task.md` are modified; implement.docx remains untracked
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -34,6 +34,7 @@ TECH LEAD APPROVED
 - Phase 4A: channel metrics service and additive `/api/v2/` backend completed and verified locally
 - Phase 4B1: OAuth browser flow and UI-support backend endpoints completed and committed
 - Phase 5A: legacy Mist of Ages dry-run planner, report, and real-repository dry run completed without mutation
+- Phase 5B: authorized real Mist of Ages migration completed locally with validation and second-apply refusal
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
@@ -42,10 +43,10 @@ TECH LEAD APPROVED
 - Projects: explicit channel-scoped project service exists with atomic project creation, transcript save protection, validation, and channel snapshot copying
 - UI: current running HTML and JavaScript remain unchanged; additive `/api/v2/` backend now includes OAuth start and UI-support read/open endpoints alongside legacy routes
 - Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically
-- Migration: read-only legacy migration planner exists; real-repository dry run reports `READY_FOR_REAL_MIGRATION`; no apply mode exists yet
+- Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token were created without touching legacy sources; metrics and projects remain deferred
 
 ## Tests
-- Legacy migration planner: `python -m unittest tests.test_legacy_migration` passing (`30/30`)
+- Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
 - OAuth: `python -m unittest tests.test_channel_oauth` passing (`37/37`)
 - OAuth browser flow: `python -m unittest tests.test_channel_oauth_browser` passing (`24/24`)
@@ -72,20 +73,41 @@ TECH LEAD APPROVED
 - Blockers: none
 - Warnings: none
 
-## Non-Mutation Evidence
-- `.local/mist_of_ages_channel.json` hash unchanged across the real dry run
-- `channel/mist_of_ages/channel_learnings_master.md` hash unchanged across the real dry run
-- `youtube_oauth_token.json` hash unchanged across the real dry run
-- `projects/` inventory unchanged across the real dry run
-- `jesus/` existence metadata unchanged across the real dry run
-- No `channels/mist_of_ages/` or `secrets/youtube/mist_of_ages_oauth_token.json` path was created
+## Real Apply
+- Command: `python scripts\legacy_migration.py --root . --channel-slug mist_of_ages --apply`
+- Result: `APPLIED`
+- Canonical files created:
+  - `channels/mist_of_ages/channel.json`
+  - `channels/mist_of_ages/channel_profile.md`
+  - `channels/mist_of_ages/channel_learnings_master.md`
+  - `secrets/youtube/mist_of_ages_oauth_token.json`
+- Rollback required: no
+- Second apply attempt: refused safely without overwriting canonical destinations
+
+## Validation
+- Canonical `channel.json` is valid and points to `UCYVuamt3HabLFAicDxcsMdg` / `Mist of Ages` / `@mistofages`
+- Canonical channel status is `CONNECTED`
+- Canonical profile was generated successfully
+- Canonical learnings file is byte-identical to the legacy source
+- Canonical OAuth token is structurally valid and byte-identical to the legacy token source
+- Refresh token remains present
+- No metrics files exist yet
+- No canonical projects were created
+
+## Legacy Source Preservation
+- `.local/mist_of_ages_channel.json` hash unchanged across dry run and apply
+- `channel/mist_of_ages/channel_learnings_master.md` hash unchanged across dry run and apply
+- `youtube_oauth_token.json` hash unchanged across dry run and apply
+- `projects/` inventory unchanged
+- `jesus/` existence metadata unchanged
+- `implement.docx` remained untouched and untracked
 
 ## Real Data State
-- Real OAuth token moved: no
+- Real OAuth token moved: yes, into canonical secret destination only
 - Real OAuth browser flow used: no
 - Real OAuth reconnect performed: no
-- Real channel workspace created: no
-- Real canonical token created: no
+- Real channel workspace created: yes
+- Real canonical token created: yes
 - Real metrics synced: no
 - Real project created through `/api/v2/`: no
 - Legacy projects migrated: no
@@ -93,10 +115,10 @@ TECH LEAD APPROVED
 - Live API used: no
 
 ## Risks / Blockers
-- No blocker was found in the dry run, but real migration is still unapproved.
+- No blocker was found in the authorized apply.
 - Canonical metrics remain absent by design and must be generated by a selected-channel sync after migration.
 - `/api/v2/` is still additive only; the current UI still points at legacy routes.
 - ADR-002 blocks UI cutover until legacy-to-canonical migration review.
 
 ## Next Gate
-Phase 5A is closed. Phase 5B remains blocked pending a separate Tech Lead execution prompt. UI cutover remains blocked.
+Review Phase 5B migration results, then decide whether to authorize a separate selected-channel metrics sync. UI cutover remains blocked.
