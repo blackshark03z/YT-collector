@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "channel_defaults": {
+    "mist_of_ages": {
+      "workflow_id": "mist_of_ages_assisted_content"
+    }
+  },
+  "workflows": {
+    "mist_of_ages_assisted_content": {
+      "display_name": "Mist of Ages Assisted Content Workflow",
+      "default_version": "1",
+      "legacy_unpinned_version": "1",
+      "versions": {
+        "1": {
+          "status": "ACTIVE",
+          "definition_path": "mist_of_ages_assisted_content/v1/workflow.json",
+          "definition_sha256": "BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E"
+        }
+      }
+    }
+  }
+}

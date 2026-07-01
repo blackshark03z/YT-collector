@@ -12,19 +12,19 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 6C4 - End-to-End UI Smoke and Legacy Dependency Closure
+Phase 7B - Versioned Workflow Foundation and Read API
 
 ## Phase Status
 COMPLETE
 
 ## Approval
-TECH_LEAD_APPROVED
+IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
 
 ## Repository Baseline
 - Branch: master
-- HEAD: `df7244f`
-- Subject: `feat: wire project and collector UI to v2`
-- Working tree before Phase 6C4 implementation: only unrelated untracked `implement.docx`
+- HEAD: `04e6b0e`
+- Subject: `docs: close phase 6c4 mvp acceptance`
+- Working tree before Phase 7B implementation: only unrelated untracked `implement.docx`
 
 ## MVP Status
 MVP_ACCEPTED
@@ -57,6 +57,36 @@ MVP_ACCEPTED
 - Phase 6C2: embedded production UI now wires selected-channel OAuth and metrics actions to canonical V2 routes with separate action state, duplicate/stale-response protection, focused frontend contract coverage, and local non-external smoke evidence
 - Phase 6C3: embedded production UI now wires canonical selected-channel project listing, project creation, project detail reads, transcript save, and validation using V2 routes with duplicate/stale-response protection and isolated temporary-root smoke evidence
 - Phase 6C4: final MVP cutover verification completed with active UI-route audit, legacy-dependency classification, real read-only smoke, temporary-root end-to-end smoke, narrow frontend cleanup, and MVP readiness documentation
+- Phase 7B: versioned workflow registry/definition foundation, immutable project workflow binding, legacy synthesized binding reads, workflow state read synthesis, and channel-scoped workflow read API completed locally without runtime mutation
+
+## Phase 7B Scope
+- Added file-driven workflow loading in `workflows/registry.json` and `workflows/mist_of_ages_assisted_content/v1/workflow.json`.
+- Added generic workflow registry, definition, digest, binding, and state validation in `scripts/channel_workflow.py`.
+- Added immutable `workflow_binding` capture at project creation time only when the selected channel has a configured default workflow.
+- Preserved backward-compatible `project.json` schema version `2`; existing legacy projects without a binding remain readable.
+- Added `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow` with explicit channel/project scoping, synthesized legacy binding support, and no filesystem writes.
+- Kept workflow execution, artifact writes, approvals, retries, stale propagation, prompt bundles, and UI changes out of scope.
+
+## Phase 7B Evidence
+- Production workflow registry path: `workflows/registry.json`
+- Production workflow definition path: `workflows/mist_of_ages_assisted_content/v1/workflow.json`
+- Production definition SHA-256: `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`
+- Focused workflow tests: `python -m unittest tests.test_channel_workflow` passing (`13/13`)
+- Focused project regression: `python -m unittest tests.test_channel_projects` passing (`43/43`)
+- Focused V2 API regression: `python -m unittest tests.test_multichannel_api` passing (`48/48`)
+- Verification-round focused workflow tests: `python -m unittest tests.test_channel_workflow` passing (`17/17`, `1` symlink-capability skip on unsupported Windows environments)
+- Compile check: `python -m py_compile scripts\channel_workflow.py scripts\channel_projects.py scripts\ui_server.py tests\test_channel_workflow.py` passing
+- Full offline regression: `python -m unittest discover -s tests` passing (`281/281`, `1` skipped)
+- Temporary v2 fixture test proved the generic loader/read model handled eight steps, changed order, changed model, added artifact, and default-version pinning without changing application workflow business logic.
+- Schema-version decision: `project.json.schema_version` remains `2` because Phase 7B adds only an optional additive `workflow_binding` field, existing readers already tolerate extra keys, and both legacy and new version-2 projects remain distinguishable by `workflow_binding` presence.
+- `legacy_unpinned_version` is compatibility-pinned for legacy unbound projects and must remain stable unless a separately approved migration plan changes legacy-project behavior.
+- Legacy synthesized-binding GET coverage proved no `project.json` rewrite and no `workflow_state.json` creation during reads.
+- Runtime isolation coverage continued to use temporary roots only and preserved the real Mist of Ages runtime snapshot.
+
+## Phase 7B Blocker
+- Authoritative Prompt 1-7 bodies are still not present in the repository.
+- `prompt_set.status` therefore remains `MISSING` and `bundle_available` remains `false`.
+- This is not a blocker for Phase 7B read architecture, but it blocks prompt-bundle generation in a later phase.
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes

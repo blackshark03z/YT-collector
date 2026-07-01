@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 7B - Versioned Workflow Foundation and Read API
+- Added production workflow registry data at `workflows/registry.json`.
+- Added production Mist of Ages workflow definition data at `workflows/mist_of_ages_assisted_content/v1/workflow.json`.
+- Added `scripts/channel_workflow.py` for generic registry loading, versioned definition validation, digest verification, immutable workflow binding resolution, and workflow state read synthesis.
+- Added immutable `workflow_binding` capture to new projects in `scripts/channel_projects.py` only when the selected channel has a configured default workflow; channels without a configured workflow still create projects without an implicit fallback binding.
+- Preserved backward compatibility for legacy projects with no stored binding and synthesized `binding_source: LEGACY_SYNTHESIZED` at read time without rewriting `project.json`.
+- Added `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow` in `scripts/ui_server.py`.
+- Kept project detail, transcript, validation, legacy routes, and visible UI behavior unchanged.
+- Added focused workflow coverage in `tests/test_channel_workflow.py` for registry validation, definition validation, immutable binding behavior, legacy synthesized binding behavior, workflow state synthesis/validation, API isolation, updateability via a temporary v2 fixture, and runtime preservation.
+- Re-ran focused regressions successfully: workflow (`13/13`), projects (`43/43`), and V2 API (`48/48`).
+- Verification round confirmed `project.json.schema_version` stays at `2` because `workflow_binding` is an additive optional field and existing version-2 readers already ignore extra keys safely.
+- Verification round added explicit coverage proving `legacy_unpinned_version` remains the compatibility-pinned source for legacy unbound projects when only `default_version` changes.
+- Verification round added CWD-independence coverage, exact-byte digest coverage, definition-path resolution escape coverage where symlinks are supported, and full temporary-project tree before/after checks proving workflow GET creates no file or directory.
+- Full offline regression now passes via `python -m unittest discover -s tests` with `281/281` passing and `1` environment-dependent skip.
+- Verified production v1 definition digest `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Confirmed temporary workflow reads do not create `workflow_state.json` and do not write synthesized bindings into legacy projects.
+- Confirmed all write tests used temporary roots and did not mutate the real Mist of Ages runtime or `implement.docx`.
+- Prompt-set blocker remains explicit: authoritative Prompt 1-7 bodies are still absent, so `prompt_set.status` remains `MISSING` and bundle generation stays deferred.
+
 ### Post-MVP Planning Document Preservation
 - Preserved the intentional post-MVP planning document as `docs/post_mvp/video_production_optimization_proposals.md`.
 - Kept the proposal in documented-only state: `DOCUMENTED_FOR_LATER_RESEARCH`.

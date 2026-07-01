@@ -4,61 +4,43 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-POST_MVP_REPOSITORY_CLEANUP_PENDING
+Phase 7C - Prompt Bundle Inputs and Workflow Execution Write Foundation
 
 ## Do Not Start Yet
-Do not begin post-MVP feature development. The proposal has been preserved as documentation only, and the next action is a conservative repository cleanup rerun from the new baseline.
+Do not begin Phase 7C until a separate Tech Lead execution prompt authorizes it.
 
 ## Proposed Objective
-Rerun the conservative post-MVP repository cleanup audit after preserving the planning document, while continuing to protect runtime data, legacy sources, rollback capability, and unrelated local files.
+Use the Phase 7B registry/definition foundation to prepare the next narrow backend layer for workflow execution reads and future writes, while still keeping runtime safety, version pinning, and channel isolation intact.
 
-## Expected Files
-- `docs/post_mvp/video_production_optimization_proposals.md`
-- unchanged ignored canonical runtime files
-- unchanged project status documentation
+## Preconditions
+- authoritative Prompt 1-7 source bodies must be provided or explicitly approved as external inputs
+- prompt bundle source-of-truth and storage rules must be approved
+- workflow execution write semantics must be approved separately
 
-## Required Tests
-- preserve the accepted MVP baseline without introducing runtime mutation
-- preserve the documented-only proposal state with no implementation authorization
-- preserve the release baseline tag and protected runtime ignores
-- canonical runtime files remain ignored
-- cleanup rerun starts from a verified baseline
-
-## Stop Conditions
-- canonical workspace or token is missing or invalid
-- unexpected tracked or untracked files appear beyond the approved baseline
-- any legacy source changed unexpectedly
-- secret or runtime data becomes staged without authorization
+## Required Focus
+- preserve immutable project workflow bindings
+- preserve `LEGACY_SYNTHESIZED` read behavior for unbound legacy projects
+- preserve zero-write GET behavior
+- preserve channel-scoped `/api/v2/` ownership checks
+- keep visible frontend cutover out of scope unless separately authorized
 
 ## Forbidden Work
-- do not implement any proposal from the preserved planning document
-- do not perform unapproved runtime mutation beyond the accepted MVP baseline
-- do not run another real sync unless separately authorized by the execution prompt
-- do not reconnect OAuth unless separately authorized by the execution prompt
-- do not mutate protected `jesus/`
-- do not remove legacy routes
+- do not invent Prompt 1-7 bodies
+- do not auto-migrate existing projects to a new workflow version
+- do not add prompt editing UI
+- do not add AI API calls
+- do not add approval/retry/stale propagation unless separately approved
+- do not mutate protected runtime data outside approved temporary-root tests
 
 ## Verification Requirements
-- confirm the preserved proposal remains documentation only
-- confirm no implementation authorization is recorded for any proposed module
-- confirm canonical metrics files remain valid under the canonical channel workspace only
-- confirm the canonical token remains structurally valid and ignored
-- confirm legacy sources remain unchanged
-- confirm cleanup can be rerun from the new baseline
-
-## Migration Baseline
-- canonical Mist of Ages workspace now exists
-- canonical OAuth token now exists
-- canonical metrics now exist from one authorized sync
-- canonical projects are still absent
-- MVP final acceptance is complete with decision `ACCEPTED_WITH_MINOR_NON_BLOCKING_WARNINGS`
-- release baseline tag `v0.1.0` is the approved MVP reference point
-- no GitHub Release was created
-- post-MVP proposal document is preserved at `docs/post_mvp/video_production_optimization_proposals.md`
-- no proposal implementation is authorized
+- confirm authoritative prompt inputs exist before any prompt-bundle work starts
+- confirm workflow version pinning still survives registry default changes
+- confirm `legacy_unpinned_version` remains compatibility-pinned for legacy unbound projects unless a separately approved migration plan says otherwise
+- confirm write tests use temporary roots only
+- confirm real Mist of Ages runtime and token files remain untouched
 
 ## Reasoning Effort
 High
 
 ## Exact First Action
-Verify the new documentation baseline, then rerun the conservative repository cleanup audit without touching runtime data or unrelated local files.
+Verify the baseline after Phase 7B, then request or locate the authoritative Prompt 1-7 source inputs before any Phase 7C execution work begins.

@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_workflow, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -917,6 +917,10 @@ def _map_project_error(exc: Exception) -> V2Error:
     return _v2_error("INVALID_REQUEST", message, 400)
 
 
+def _map_workflow_error(exc: channel_workflow.ChannelWorkflowError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
 def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
     channel = _load_channel_or_error(root, channel_slug)
     paths = channel_workspace.canonical_channel_paths(root, channel_slug)
@@ -944,6 +948,7 @@ def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
 
 
 def _load_project_or_error(root: Path | str, channel_slug: str, project_slug: str) -> dict:
+    _load_channel_or_error(root, channel_slug)
     try:
         return channel_projects.load_channel_project(root, channel_slug, project_slug)
     except channel_projects.ChannelProjectError as exc:
@@ -1098,6 +1103,21 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 item["has_content"] = (project_path / "content.md").exists()
                 item["has_publishing_package"] = (project_path / "publishing_package.md").exists()
                 return 200, {"project": item}
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "workflow" and method == "GET":
+                project_slug = parts[5]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                try:
+                    workflow = channel_workflow.build_workflow_read_model(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        project,
+                        project_dir,
+                    )
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
+                return 200, workflow
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
                 project_slug = parts[5]
                 try:

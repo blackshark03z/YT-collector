@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from scripts import channel_workspace
+from scripts import channel_workflow, channel_workspace
 
 
 PLACEHOLDER_TEXT = "Paste the manually collected transcript below."
@@ -350,6 +350,11 @@ def _validate_project_metadata(root: Path | str, channel_slug: str, project_slug
     parsed = datetime.fromisoformat(captured_at)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ChannelProjectError("channel_snapshot.captured_at must be timezone-aware.")
+    if "workflow_binding" in data and data["workflow_binding"] is not None:
+        try:
+            channel_workflow.validate_project_workflow_binding(data["workflow_binding"])
+        except channel_workflow.ChannelWorkflowError as exc:
+            raise ChannelProjectError(exc.message) from exc
 
 
 def create_channel_project(
@@ -373,6 +378,10 @@ def create_channel_project(
     if not channel.get("youtube_channel_id"):
         raise ChannelProjectError("Selected channel workspace has no valid youtube_channel_id.")
     workspace = channel_workspace.canonical_channel_paths(root, channel_slug)
+    try:
+        workflow_binding = channel_workflow.get_channel_default_workflow(root, channel_slug)
+    except channel_workflow.ChannelWorkflowError as exc:
+        raise ChannelProjectError(exc.message) from exc
     learnings_bytes = _read_required_snapshot(
         workspace.channel_learnings_master, name="channel learnings"
     )
@@ -458,6 +467,8 @@ def create_channel_project(
                 "captured_at": snapshot_time,
             },
         }
+        if workflow_binding is not None:
+            project_json["workflow_binding"] = workflow_binding
         (temp_dir / "project.json").write_text(
             json.dumps(project_json, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",
