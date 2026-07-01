@@ -1,43 +1,41 @@
 # Next Task
 
 ## Status
-BLOCKED_PENDING_PHASE_4A_REVIEW
+BLOCKED_PENDING_PHASE_4B1_REVIEW
 
 ## Proposed Phase
-Phase 4B - OAuth Browser Integration and Minimal Multi-Channel UI
+Phase 5A - Legacy Migration Dry Run
 
 ## Do Not Start Yet
-Wait for Tech Lead approval after Phase 4A review.
+Wait for Tech Lead approval after Phase 4B1 review.
 
 ## Proposed Objective
-Integrate the approved additive `/api/v2/` backend into the existing UI with minimal channel controls and OAuth browser integration while preserving legacy fallback during the cutover.
+Produce a dry-run-only migration report for the legacy Mist of Ages identity, learnings, metrics references, and project locations into the canonical `channels/mist_of_ages/` structure without mutating any real data.
 
 ## Expected Files
-- `scripts/ui_server.py`
-- `README.md`
-- `tests/` files covering integrated server behavior and route safety
+- migration dry-run planning/reporting files
+- focused migration tests or dry-run fixtures
+- documentation updates recording dry-run evidence only
 
 ## Required Tests
-- channel selector and status integration
-- add/connect/reconnect channel flows using mocked services
-- selected-channel metrics sync flow from the UI
-- channel-scoped project create/list/load/save/validate route coverage
-- regression for legacy collector behavior that must remain stable during integration
+- legacy source discovery without mutation
+- canonical destination planning without mutation
+- hash/count evidence generation
+- transcript/workflow/final-output preservation checks
 - compilation and `git diff --check`
 
 ## Stop Conditions
-- integration requires migration of real data
-- running UI behavior regresses for existing single-channel use
-- channel ownership can be bypassed through HTTP routes
+- any step attempts real data movement
+- hash/count evidence is incomplete
+- canonical ownership cannot be proven
 - secret or runtime data becomes staged
-- OAuth browser integration requires moving the real global token prematurely
 
 ## Forbidden Work
-- do not migrate legacy data
+- do not mutate legacy data
 - do not move the real global OAuth token
-- do not perform live OAuth or live API calls
-- do not redesign the frontend beyond the minimal approved server integration
-- do not remove legacy routes in Phase 4B
+- do not perform live OAuth, live API calls, or live UI cutover
+- do not create a real canonical channel workspace
+- do not remove legacy routes
 
 ## Exact First Action
-Audit the additive `/api/v2/` endpoints against the current UI controls and identify the smallest safe bridge for channel selection, OAuth connect/reconnect, metrics sync, and channel-scoped project actions.
+Enumerate the exact legacy Mist of Ages sources and exact canonical destinations, then produce a dry-run mapping and evidence plan before touching any real file.

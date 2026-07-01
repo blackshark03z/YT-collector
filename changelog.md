@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 4B1 - OAuth Browser and UI-Support Backend
+- Added `scripts/channel_oauth_browser.py`.
+- Added `tests/test_channel_oauth_browser.py`.
+- Modified `scripts/channel_oauth.py` to harden rollback when a newly created workspace fails after token preparation.
+- Modified `tests/test_channel_oauth.py` to cover reconnect rollback and new-workspace rollback behavior.
+- Modified `scripts/ui_server.py` to add additive `/api/v2/oauth/start`, project detail, transcript read, and safe open endpoints without changing legacy HTML, JavaScript, or routes.
+- Modified `tests/test_multichannel_api.py` to cover the expanded V2 endpoint surface and path-opening safety.
+- Added ADR-002 to require migration review before V2 UI cutover.
+- Tests passed for browser state isolation, callback handling, transaction hardening, and UI-support V2 dispatch.
+- No live OAuth, no real browser launch, no Google API calls, and no real token movement occurred.
+- Deferred migration dry-run and all UI cutover work.
+
 ### Phase 4A - Channel Metrics and V2 Backend
 - Added `architecture_decisions.md` with ADR-001 for additive backend-before-UI rollout.
 - Added `scripts/channel_metrics.py`.

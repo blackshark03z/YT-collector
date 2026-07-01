@@ -308,6 +308,32 @@ class ChannelOAuthTests(unittest.TestCase):
                     )
             self.assertEqual(token_path.read_bytes(), original)
 
+    def test_token_preparation_failure_preserves_existing_token_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            token_path = channel_workspace.canonical_channel_paths(root, "mist_of_ages").oauth_token_file
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_bytes(
+                (json.dumps(token_response(access_token="old", refresh_token="old-refresh", expires_in=3600) | {"expires_at": "2026-07-01T00:00:00+00:00"}) + "\n").encode("utf-8")
+            )
+            original_token = token_path.read_bytes()
+            channel_json = (root / "channels" / "mist_of_ages" / "channel.json").read_bytes()
+            with mock.patch("scripts.channel_oauth.save_channel_token", side_effect=RuntimeError("write failed")):
+                transport = FakeTransport(
+                    [
+                        (lambda m, u, h, d: m == "POST", token_response(access_token="new", refresh_token="new-refresh")),
+                        (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                    ]
+                )
+                with self.assertRaises(RuntimeError):
+                    channel_oauth.connect_channel_from_authorization_code(
+                        root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=False
+                    )
+            self.assertEqual(token_path.read_bytes(), original_token)
+            self.assertEqual((root / "channels" / "mist_of_ages" / "channel.json").read_bytes(), channel_json)
+
     def test_duplicate_youtube_identity_under_another_slug_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -323,6 +349,95 @@ class ChannelOAuthTests(unittest.TestCase):
                 channel_oauth.connect_channel_from_authorization_code(
                     root, "second_channel", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=True
                 )
+
+    def test_new_workspace_connection_success_commits_all_required_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            transport = FakeTransport(
+                [
+                    (lambda m, u, h, d: m == "POST", token_response()),
+                    (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                ]
+            )
+            result = channel_oauth.connect_channel_from_authorization_code(
+                root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=True
+            )
+            self.assertTrue((root / "channels" / "mist_of_ages" / "channel.json").exists())
+            self.assertTrue((root / "secrets" / "youtube" / "mist_of_ages_oauth_token.json").exists())
+            self.assertEqual(result["status"], "CONNECTED")
+
+    def test_new_workspace_failure_leaves_no_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            transport = FakeTransport(
+                [
+                    (lambda m, u, h, d: m == "POST", token_response()),
+                    (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                ]
+            )
+            with mock.patch("scripts.channel_workspace.update_channel_connection_metadata", side_effect=channel_workspace.ChannelWorkspaceError("boom")):
+                with self.assertRaises(channel_workspace.ChannelWorkspaceError):
+                    channel_oauth.connect_channel_from_authorization_code(
+                        root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=True
+                    )
+            self.assertFalse((root / "secrets" / "youtube" / "mist_of_ages_oauth_token.json").exists())
+
+    def test_new_workspace_failure_removes_newly_created_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            transport = FakeTransport(
+                [
+                    (lambda m, u, h, d: m == "POST", token_response()),
+                    (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                ]
+            )
+            with mock.patch("scripts.channel_workspace.update_channel_connection_metadata", side_effect=channel_workspace.ChannelWorkspaceError("boom")):
+                with self.assertRaises(channel_workspace.ChannelWorkspaceError):
+                    channel_oauth.connect_channel_from_authorization_code(
+                        root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=True
+                    )
+            self.assertFalse((root / "channels" / "mist_of_ages").exists())
+
+    def test_failure_does_not_remove_pre_existing_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            transport = FakeTransport(
+                [
+                    (lambda m, u, h, d: m == "POST", token_response()),
+                    (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                ]
+            )
+            with mock.patch("scripts.channel_workspace.update_channel_connection_metadata", side_effect=channel_workspace.ChannelWorkspaceError("boom")):
+                with self.assertRaises(channel_workspace.ChannelWorkspaceError):
+                    channel_oauth.connect_channel_from_authorization_code(
+                        root, "mist_of_ages", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=False
+                    )
+            self.assertTrue((root / "channels" / "mist_of_ages").exists())
+
+    def test_channel_a_failure_does_not_modify_channel_b(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            channel_workspace.create_channel_workspace(root, "channel_a", "A", "UC123", "@A")
+            channel_workspace.create_channel_workspace(root, "channel_b", "B", "UC456", "@B")
+            b_json = (root / "channels" / "channel_b" / "channel.json").read_bytes()
+            transport = FakeTransport(
+                [
+                    (lambda m, u, h, d: m == "POST", token_response()),
+                    (lambda m, u, h, d: m == "GET", identity_response(channel_id="UC123")),
+                ]
+            )
+            with mock.patch("scripts.channel_workspace.update_channel_connection_metadata", side_effect=channel_workspace.ChannelWorkspaceError("boom")):
+                with self.assertRaises(channel_workspace.ChannelWorkspaceError):
+                    channel_oauth.connect_channel_from_authorization_code(
+                        root, "channel_a", "auth-code", "http://127.0.0.1:8765/callback", transport, create_if_missing=False
+                    )
+            self.assertEqual((root / "channels" / "channel_b" / "channel.json").read_bytes(), b_json)
 
     def test_zero_channel_api_response_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

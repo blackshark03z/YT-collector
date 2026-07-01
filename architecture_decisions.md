@@ -22,3 +22,27 @@ Legacy data migration remains a later phase.
 - Multi-channel backend can be tested independently.
 - Some temporary duplication with legacy helpers is acceptable.
 - Legacy routes are not removed until migration and live smoke pass.
+
+## ADR-002 - Migrate Canonical Mist of Ages Data Before UI Cutover
+
+### Status
+Accepted
+
+### Context
+The new V2 backend uses `channels/<slug>/`, but the real Mist of Ages
+learnings, identity and OAuth token still exist in legacy locations.
+
+Switching the UI before migration could expose an empty canonical state,
+encourage duplicate channel creation, or snapshot the wrong learnings.
+
+### Decision
+Complete and validate the legacy-to-canonical Mist of Ages migration before
+switching the daily-use UI to the V2 backend.
+
+OAuth browser integration may be implemented first, but no live connection
+or UI cutover occurs before migration review.
+
+### Consequences
+- Phase 4B1 completes backend OAuth and UI-support endpoints only.
+- The next phase is migration dry-run, not UI cutover.
+- UI cutover occurs only after migration and canonical-data validation pass.

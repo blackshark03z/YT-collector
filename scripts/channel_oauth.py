@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import urllib.parse
 from dataclasses import dataclass
@@ -354,6 +355,8 @@ def connect_channel_from_authorization_code(
     slug = channel_workspace.validate_channel_slug(channel_slug)
     token = exchange_authorization_code(root, authorization_code, redirect_uri, transport)
     identity = fetch_authenticated_channel_identity(token["access_token"], transport)
+    workspace_paths = channel_workspace.canonical_channel_paths(root, slug)
+    workspace_preexisted = workspace_paths.channel_dir.exists()
 
     try:
         existing = channel_workspace.load_channel(root, slug)
@@ -398,6 +401,8 @@ def connect_channel_from_authorization_code(
         )
     except Exception:
         _restore_token_bytes(token_path, previous_token_bytes)
+        if not workspace_preexisted:
+            shutil.rmtree(workspace_paths.channel_dir, ignore_errors=True)
         raise
     return {
         "channel_slug": updated["channel_slug"],

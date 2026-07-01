@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_projects, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -846,6 +846,9 @@ def build_app_context(
     recent_videos_fetcher=None,
     analytics_fetcher=None,
     reporting_fetcher=None,
+    oauth_flow_starter=None,
+    oauth_transport=None,
+    path_opener=None,
 ) -> dict:
     return {
         "root": Path(root or ROOT).resolve(),
@@ -856,6 +859,9 @@ def build_app_context(
         "recent_videos_fetcher": recent_videos_fetcher or default_recent_videos_fetcher,
         "analytics_fetcher": analytics_fetcher or default_analytics_fetcher,
         "reporting_fetcher": reporting_fetcher or default_reporting_fetcher,
+        "oauth_flow_starter": oauth_flow_starter or channel_oauth_browser.start_oauth_browser_flow,
+        "oauth_transport": oauth_transport or default_transport,
+        "path_opener": path_opener or (lambda path: os.startfile(str(path))),
     }
 
 
@@ -930,12 +936,38 @@ def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
     }
 
 
+def _load_project_or_error(root: Path | str, channel_slug: str, project_slug: str) -> dict:
+    try:
+        return channel_projects.load_channel_project(root, channel_slug, project_slug)
+    except channel_projects.ChannelProjectError as exc:
+        raise _map_project_error(exc) from exc
+
+
+def _safe_open_path(root: Path | str, target: Path, opener) -> dict:
+    resolved_root = Path(root).resolve()
+    resolved_target = target.resolve()
+    try:
+        resolved_target.relative_to(resolved_root)
+    except ValueError as exc:
+        raise _v2_error("PATH_OPEN_FAILED", "Requested path is outside the repository root.", 400) from exc
+    banned_parts = {"secrets", "youtube_oauth_client.json", "youtube_oauth_token.json", "youtube_api_key.txt"}
+    lowered = {part.lower() for part in resolved_target.parts}
+    if "secrets" in lowered:
+        raise _v2_error("PATH_OPEN_FAILED", "Secret paths cannot be opened through the API.", 403)
+    try:
+        opener(resolved_target)
+    except Exception as exc:
+        raise _v2_error("PATH_OPEN_FAILED", "The requested path could not be opened.", 500) from exc
+    return {"ok": True}
+
+
 def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, context: dict | None = None) -> tuple[int, dict]:
     ctx = context or APP_CONTEXT
     root = ctx["root"]
     payload = payload or {}
     parsed = urllib.parse.urlparse(path)
     route = parsed.path
+    query = urllib.parse.parse_qs(parsed.query)
     parts = [part for part in route.split("/") if part]
     if len(parts) < 2 or parts[0] != "api" or parts[1] != "v2":
         raise _v2_error("INVALID_REQUEST", "Invalid v2 route.", 404)
@@ -945,6 +977,26 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
             channels = channel_workspace.list_channels(root)
             return 200, {"channels": [_sanitize_channel_summary(root, channel) for channel in channels]}
 
+        if method == "GET" and parts == ["api", "v2", "oauth", "start"]:
+            channel_slug = (query.get("channel_slug") or [""])[0]
+            mode = (query.get("mode") or [""])[0]
+            try:
+                flow = ctx["oauth_flow_starter"](
+                    root=root,
+                    channel_slug=channel_slug,
+                    mode=mode,
+                    transport=ctx["oauth_transport"],
+                )
+            except channel_oauth_browser.OAuthFlowInvalidError as exc:
+                if "already exists" in str(exc):
+                    raise _v2_error("CHANNEL_ALREADY_EXISTS", "Channel workspace already exists.", 409) from exc
+                if "does not exist" in str(exc):
+                    raise _v2_error("CHANNEL_NOT_FOUND", "Selected channel was not found for reconnect.", 404) from exc
+                raise _v2_error("OAUTH_FLOW_INVALID", str(exc), 400) from exc
+            except channel_oauth.OAuthConfigurationError as exc:
+                raise _v2_error("OAUTH_CONNECTION_FAILED", str(exc), 500) from exc
+            return 302, {"redirect_url": flow.authorization_url}
+
         if len(parts) >= 4 and parts[0:3] == ["api", "v2", "channels"]:
             channel_slug = parts[3]
             if method == "GET" and len(parts) == 4:
@@ -952,6 +1004,10 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
             if method == "GET" and len(parts) == 5 and parts[4] == "projects":
                 _load_channel_or_error(root, channel_slug)
                 return 200, {"projects": channel_projects.list_channel_projects(root, channel_slug)}
+            if method == "POST" and len(parts) == 5 and parts[4] == "open":
+                channel = _load_channel_or_error(root, channel_slug)
+                target = channel_workspace.canonical_channel_paths(root, channel["channel_slug"]).channel_dir
+                return 200, _safe_open_path(root, target, ctx["path_opener"])
             if method == "POST" and len(parts) == 5 and parts[4] == "sync_metrics":
                 _load_channel_or_error(root, channel_slug)
                 window_days = int(payload.get("window_days", 90))
@@ -1002,6 +1058,28 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_projects.ChannelProjectError as exc:
                     raise _map_project_error(exc) from exc
                 return 200, {"project": channel_projects.list_channel_projects(root, channel_slug)[0]}
+            if len(parts) == 6 and parts[4] == "projects" and method == "GET":
+                project_slug = parts[5]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_path = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                summary = channel_projects.list_channel_projects(root, channel_slug)
+                item = next((entry for entry in summary if entry["project_slug"] == project_slug), None)
+                if not item:
+                    item = {
+                        "project_slug": project["project_slug"],
+                        "channel_slug": project["channel_slug"],
+                        "youtube_channel_id": project["youtube_channel_id"],
+                        "source_video_id": project["source_video_id"],
+                        "source_video_url": project["source_video_url"],
+                        "status": project["status"],
+                        "workflow_input_status": project["workflow_input_status"],
+                        "runnable": project["runnable"],
+                        "created_at": project["created_at"],
+                        "updated_at": project["updated_at"],
+                    }
+                item["has_content"] = (project_path / "content.md").exists()
+                item["has_publishing_package"] = (project_path / "publishing_package.md").exists()
+                return 200, {"project": item}
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
                 project_slug = parts[5]
                 try:
@@ -1015,6 +1093,36 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_projects.ChannelProjectError as exc:
                     raise _map_project_error(exc) from exc
                 return 200, result
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "GET":
+                project_slug = parts[5]
+                try:
+                    channel_projects.load_channel_project(root, channel_slug, project_slug)
+                except channel_projects.ChannelProjectError as exc:
+                    mapped = _map_project_error(exc)
+                    if mapped.code == "PROJECT_NOT_FOUND":
+                        raise _v2_error("TRANSCRIPT_NOT_FOUND", "Transcript file was not found.", 404) from exc
+                    raise mapped from exc
+                transcript_path = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug / "research" / "competitor_transcript.md"
+                if not transcript_path.exists():
+                    raise _v2_error("TRANSCRIPT_NOT_FOUND", "Transcript file was not found.", 404)
+                content = transcript_path.read_text(encoding="utf-8")
+                return 200, {
+                    "transcript": content,
+                    "is_template": channel_projects.is_transcript_template(transcript_path),
+                    "has_real_content": channel_projects.transcript_has_real_content(transcript_path),
+                }
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "open" and method == "POST":
+                project_slug = parts[5]
+                _load_project_or_error(root, channel_slug, project_slug)
+                target = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                return 200, _safe_open_path(root, target, ctx["path_opener"])
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "open_transcript" and method == "POST":
+                project_slug = parts[5]
+                _load_project_or_error(root, channel_slug, project_slug)
+                target = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug / "research" / "competitor_transcript.md"
+                if not target.exists():
+                    raise _v2_error("TRANSCRIPT_NOT_FOUND", "Transcript file was not found.", 404)
+                return 200, _safe_open_path(root, target, ctx["path_opener"])
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "validate" and method == "POST":
                 project_slug = parts[5]
                 try:
@@ -1275,8 +1383,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path.startswith("/api/v2/"):
-                status, data = dispatch_v2_request("GET", parsed.path, context=APP_CONTEXT)
-                self.send_json(data, status)
+                status, data = dispatch_v2_request("GET", self.path, context=APP_CONTEXT)
+                if status in {301, 302, 303, 307, 308} and "redirect_url" in data:
+                    self.send_response(status)
+                    self.send_header("Location", data["redirect_url"])
+                    self.end_headers()
+                else:
+                    self.send_json(data, status)
                 return
             if parsed.path == "/":
                 body = HTML_PAGE.encode("utf-8")

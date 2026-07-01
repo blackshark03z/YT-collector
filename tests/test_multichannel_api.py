@@ -309,6 +309,182 @@ class MultiChannelApiTests(unittest.TestCase):
         self.assertIn("api_key", ui_server.app_status())
         self.assertTrue(callable(ui_server.create_project))
 
+    def test_oauth_start_dispatch_create_rejects_existing_workspace(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request("GET", "/api/v2/oauth/start?channel_slug=channel_a&mode=create", context=ui_server.build_app_context(root=root, oauth_flow_starter=lambda **kwargs: (_ for _ in ()).throw(__import__("scripts.channel_oauth_browser", fromlist=[""]).OAuthFlowInvalidError("Channel workspace already exists."))))
+            self.assertEqual(ctx.exception.code, "CHANNEL_ALREADY_EXISTS")
+
+    def test_oauth_start_dispatch_returns_redirect(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status, data = ui_server.dispatch_v2_request(
+                "GET",
+                "/api/v2/oauth/start?channel_slug=channel_a&mode=create",
+                context=ui_server.build_app_context(
+                    root=root,
+                    oauth_flow_starter=lambda **kwargs: type("Flow", (), {"authorization_url": "https://accounts.google.com/o/oauth2/auth?state=abc"})(),
+                ),
+            )
+            self.assertEqual(status, 302)
+            self.assertIn("redirect_url", data)
+
+    def test_project_detail_is_channel_scoped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            status, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
+            self.assertEqual(status, 200)
+            self.assertEqual(data["project"]["channel_slug"], "channel_a")
+
+    def test_project_detail_contains_no_absolute_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
+            dumped = json.dumps(data)
+            self.assertNotIn(str(root), dumped)
+
+    def test_project_detail_reports_final_output_existence_correctly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            (project_dir / "content.md").write_text("x", encoding="utf-8")
+            _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
+            self.assertTrue(data["project"]["has_content"])
+            self.assertFalse(data["project"]["has_publishing_package"])
+
+    def test_transcript_read_returns_template_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            status, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", context=ctx)
+            self.assertEqual(status, 200)
+            self.assertTrue(data["is_template"])
+            self.assertFalse(data["has_real_content"])
+
+    def test_transcript_read_returns_real_content_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", {"transcript": "real transcript " * 10}, context=ctx)
+            _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", context=ctx)
+            self.assertFalse(data["is_template"])
+            self.assertTrue(data["has_real_content"])
+
+    def test_cross_channel_transcript_read_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            make_channel(root, "channel_b", "UC2")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            with self.assertRaises(ui_server.V2Error):
+                ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_b/projects/{created['project_slug']}/transcript", context=ctx)
+
+    def test_missing_transcript_maps_to_stable_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            transcript = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"] / "research" / "competitor_transcript.md"
+            transcript.unlink()
+            with self.assertRaises(ui_server.V2Error) as err:
+                ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", context=ctx)
+            self.assertEqual(err.exception.code, "TRANSCRIPT_NOT_FOUND")
+
+    def test_open_channel_resolves_correct_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            seen = {}
+            status, _ = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/open", context=ui_server.build_app_context(root=root, path_opener=lambda path: seen.setdefault("path", path)))
+            self.assertEqual(status, 200)
+            self.assertEqual(seen["path"], channel_workspace.canonical_channel_paths(root, "channel_a").channel_dir.resolve())
+
+    def test_open_project_resolves_correct_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: None)
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            seen = {}
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: seen.setdefault("path", path))
+            status, _ = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/open", context=ctx)
+            self.assertEqual(status, 200)
+            self.assertEqual(seen["path"], (channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]).resolve())
+
+    def test_open_transcript_resolves_correct_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            seen = {}
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: seen.setdefault("path", path))
+            status, _ = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/open_transcript", context=ctx)
+            self.assertEqual(status, 200)
+            self.assertTrue(str(seen["path"]).endswith("competitor_transcript.md"))
+
+    def test_path_opener_receives_only_canonical_descendant_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            seen = {}
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/open", context=ui_server.build_app_context(root=root, path_opener=lambda path: seen.setdefault("path", path)))
+            seen["path"].resolve().relative_to(root.resolve())
+
+    def test_secret_paths_cannot_be_opened(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with self.assertRaises(ui_server.V2Error) as err:
+                ui_server._safe_open_path(root, root / "secrets" / "youtube" / "x.json", lambda path: None)
+            self.assertEqual(err.exception.code, "PATH_OPEN_FAILED")
+
+    def test_cross_channel_open_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            make_channel(root, "channel_b", "UC2")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            with self.assertRaises(ui_server.V2Error):
+                ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_b/projects/{created['project_slug']}/open", context=ctx)
+
+    def test_path_open_failure_is_sanitized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            with self.assertRaises(ui_server.V2Error) as err:
+                ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/open", context=ui_server.build_app_context(root=root, path_opener=lambda path: (_ for _ in ()).throw(RuntimeError("secret fail"))))
+            self.assertEqual(err.exception.code, "PATH_OPEN_FAILED")
+            self.assertNotIn("secret", err.exception.message.lower())
+
+    def test_existing_v2_endpoints_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            status, data = ui_server.dispatch_v2_request("GET", "/api/v2/channels", context=ui_server.build_app_context(root=root))
+            self.assertEqual(status, 200)
+            self.assertIn("channels", data)
+
+    def test_existing_legacy_routes_remain_unchanged(self):
+        self.assertIn("Connect Channel", ui_server.HTML_PAGE)
+
     def test_no_real_api_network_request_occurs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -328,6 +504,14 @@ class MultiChannelApiTests(unittest.TestCase):
             make_channel(root, "channel_a", "UC1")
             ui_server.dispatch_v2_request("GET", "/api/v2/channels", context=ui_server.build_app_context(root=root))
             self.assertFalse((ROOT / "channels").exists())
+
+    def test_no_real_os_folder_file_is_opened(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            called = {"count": 0}
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/open", context=ui_server.build_app_context(root=root, path_opener=lambda path: called.__setitem__("count", called["count"] + 1)))
+            self.assertEqual(called["count"], 1)
 
 
 if __name__ == "__main__":
