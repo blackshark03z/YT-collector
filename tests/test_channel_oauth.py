@@ -555,6 +555,120 @@ class ChannelOAuthTests(unittest.TestCase):
             token = channel_oauth.exchange_authorization_code(root, "auth-code", "http://127.0.0.1:8765/callback", transport)
             self.assertIn("+00:00", token["expires_at"])
 
+    def test_load_channel_token_accepts_epoch_expires_at_from_migrated_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            token_path = channel_workspace.canonical_channel_paths(root, "mist_of_ages").oauth_token_file
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_text(
+                json.dumps(
+                    {
+                        "access_token": "old-access",
+                        "refresh_token": "refresh-a",
+                        "expires_in": 3600,
+                        "expires_at": 1893456000.0,
+                        "token_type": "Bearer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            token = channel_oauth.load_channel_token(root, "mist_of_ages")
+            self.assertEqual(token["access_token"], "old-access")
+            self.assertIsInstance(token["expires_at"], str)
+            self.assertIn("+00:00", token["expires_at"])
+
+    def test_load_channel_token_keeps_iso_expires_at_supported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            token_path = channel_workspace.canonical_channel_paths(root, "mist_of_ages").oauth_token_file
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_text(
+                json.dumps(
+                    {
+                        "access_token": "old-access",
+                        "refresh_token": "refresh-a",
+                        "expires_in": 3600,
+                        "expires_at": "2030-01-01T00:00:00+00:00",
+                        "token_type": "Bearer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            token = channel_oauth.load_channel_token(root, "mist_of_ages")
+            self.assertEqual(token["expires_at"], "2030-01-01T00:00:00+00:00")
+
+    def test_access_token_reader_accepts_future_epoch_expires_at_without_refresh(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            token_path = channel_workspace.canonical_channel_paths(root, "mist_of_ages").oauth_token_file
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_text(
+                json.dumps(
+                    {
+                        "access_token": "old-access",
+                        "refresh_token": "refresh-a",
+                        "expires_in": 3600,
+                        "expires_at": 4102444800.0,
+                        "token_type": "Bearer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            token = channel_oauth.get_access_token_for_channel(root, "mist_of_ages", FakeTransport([]))
+            self.assertEqual(token, "old-access")
+
+    def test_invalid_expires_at_fails_safely_without_token_echo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            token_path = channel_workspace.canonical_channel_paths(root, "mist_of_ages").oauth_token_file
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            token_path.write_text(
+                json.dumps(
+                    {
+                        "access_token": "secret-access-value",
+                        "refresh_token": "secret-refresh-value",
+                        "expires_in": 3600,
+                        "expires_at": {"bad": "value"},
+                        "token_type": "Bearer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(channel_oauth.MalformedTokenError) as ctx:
+                channel_oauth.load_channel_token(root, "mist_of_ages")
+            self.assertIn("expires_at", str(ctx.exception))
+            self.assertNotIn("secret-access-value", str(ctx.exception))
+            self.assertNotIn("secret-refresh-value", str(ctx.exception))
+
+    def test_missing_canonical_token_does_not_fallback_to_legacy_root_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_client_config(root / "youtube_oauth_client.json")
+            channel_workspace.create_channel_workspace(root, "mist_of_ages", "Mist", "UC123", "@Mist")
+            (root / "youtube_oauth_token.json").write_text(
+                json.dumps(
+                    {
+                        "access_token": "legacy-access",
+                        "refresh_token": "legacy-refresh",
+                        "expires_in": 3600,
+                        "expires_at": "2030-01-01T00:00:00+00:00",
+                        "token_type": "Bearer",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(channel_oauth.TokenMissingError):
+                channel_oauth.get_access_token_for_channel(root, "mist_of_ages", FakeTransport([]))
+
     def test_token_json_is_newline_terminated(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

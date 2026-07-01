@@ -261,7 +261,6 @@ def sync_channel_metrics(
             root,
             channel_slug,
             youtube_channel_id=channel["youtube_channel_id"],
-            status="READY",
             last_metrics_sync_at=utc_now_iso(),
         )
     finally:

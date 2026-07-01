@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,6 +129,56 @@ class MultiChannelApiTests(unittest.TestCase):
             )
             self.assertEqual(status, 200)
             self.assertEqual(called["slug"], "channel_a")
+
+    def test_default_recent_videos_fetcher_uses_bearer_auth_for_video_details(self):
+        seen = []
+
+        def fake_request_json(url, headers=None, data=None):
+            seen.append({"url": url, "headers": headers or {}})
+            if "/channels?" in url:
+                return {"items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UPLOADS123"}}}]}
+            if "/playlistItems?" in url:
+                return {"items": [{"contentDetails": {"videoId": "VIDEO12345A"}}]}
+            if "/videos?" in url:
+                return {"items": [{"id": "VIDEO12345A", "snippet": {}, "statistics": {}}]}
+            raise AssertionError(url)
+
+        with mock.patch("scripts.ui_server.request_json", side_effect=fake_request_json):
+            payload = ui_server.default_recent_videos_fetcher(
+                root=ROOT,
+                channel_slug="mist_of_ages",
+                access_token="token-a",
+                recent_count=12,
+                channel={"youtube_channel_id": "UC123"},
+            )
+
+        self.assertEqual([item["id"] for item in payload["items"]], ["VIDEO12345A"])
+        self.assertEqual(len(seen), 3)
+        self.assertTrue(all(call["headers"].get("Authorization") == "Bearer token-a" for call in seen))
+        self.assertTrue(all("key=" not in call["url"] for call in seen))
+
+    def test_default_recent_videos_fetcher_does_not_call_global_api_key_helper(self):
+        def fake_request_json(url, headers=None, data=None):
+            if "/channels?" in url:
+                return {"items": [{"contentDetails": {"relatedPlaylists": {"uploads": "UPLOADS123"}}}]}
+            if "/playlistItems?" in url:
+                return {"items": [{"contentDetails": {"videoId": "VIDEO12345A"}}]}
+            if "/videos?" in url:
+                return {"items": [{"id": "VIDEO12345A", "snippet": {}, "statistics": {}}]}
+            raise AssertionError(url)
+
+        with mock.patch("scripts.ui_server.request_json", side_effect=fake_request_json), mock.patch(
+            "scripts.ui_server.data_api", side_effect=AssertionError("global api-key helper should not be used")
+        ):
+            payload = ui_server.default_recent_videos_fetcher(
+                root=ROOT,
+                channel_slug="mist_of_ages",
+                access_token="token-a",
+                recent_count=12,
+                channel={"youtube_channel_id": "UC123"},
+            )
+
+        self.assertEqual([item["id"] for item in payload["items"]], ["VIDEO12345A"])
 
     def test_sync_a_cannot_invoke_b_token_provider(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -373,6 +373,51 @@ class ChannelMetricsTests(unittest.TestCase):
             self.assertIsNone(before)
             self.assertIsNotNone(after)
 
+    def test_success_preserves_connected_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            channel_workspace.update_channel_connection_metadata(
+                root,
+                "channel_a",
+                youtube_channel_id="UC1",
+                display_name="Channel A",
+                youtube_handle="@channel_a",
+            )
+            before = channel_workspace.load_channel(root, "channel_a")["status"]
+            channel_metrics.sync_channel_metrics(
+                root, "channel_a",
+                analytics_fetcher=lambda **kwargs: analytics_payload(),
+                recent_videos_fetcher=lambda **kwargs: recent_payload(),
+                reporting_fetcher=lambda **kwargs: complete_reach_payload(),
+                token_provider=lambda root, slug: "token-a",
+            )
+            after = channel_workspace.load_channel(root, "channel_a")["status"]
+            self.assertEqual(before, "CONNECTED")
+            self.assertEqual(after, "CONNECTED")
+
+    def test_success_preserves_non_connected_channel_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            channel_workspace.update_channel_metrics_metadata(
+                root,
+                "channel_a",
+                youtube_channel_id="UC1",
+                status="ERROR_API",
+                last_metrics_sync_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_metrics.sync_channel_metrics(
+                root, "channel_a",
+                analytics_fetcher=lambda **kwargs: analytics_payload(),
+                recent_videos_fetcher=lambda **kwargs: recent_payload(),
+                reporting_fetcher=lambda **kwargs: complete_reach_payload(),
+                token_provider=lambda root, slug: "token-a",
+            )
+            after = channel_workspace.load_channel(root, "channel_a")
+            self.assertEqual(after["status"], "ERROR_API")
+            self.assertIsNotNone(after["last_metrics_sync_at"])
+
     def test_metadata_unchanged_on_total_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -748,7 +748,14 @@ def default_recent_videos_fetcher(
     )
     ids = [item.get("contentDetails", {}).get("videoId") for item in playlist_payload.get("items", [])]
     ids = [item for item in ids if item]
-    videos = data_api("videos", {"part": "snippet,statistics", "id": ",".join(ids)}) if ids else {"items": []}
+    videos = (
+        request_json(
+            f"{DATA_API}/videos?{urllib.parse.urlencode({'part': 'snippet,statistics', 'id': ','.join(ids)})}",
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        if ids
+        else {"items": []}
+    )
     return {"items": videos.get("items", [])}
 
 

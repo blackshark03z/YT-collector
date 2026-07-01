@@ -335,7 +335,7 @@ def update_channel_metrics_metadata(
     slug: str,
     *,
     youtube_channel_id: str,
-    status: str = "READY",
+    status: str | None = None,
     last_metrics_sync_at: str | None = None,
 ) -> dict[str, Any]:
     channel_slug = validate_channel_slug(slug)
@@ -346,7 +346,8 @@ def update_channel_metrics_metadata(
         raise ChannelWorkspaceError("Refusing to change youtube_channel_id for an existing workspace.")
 
     updated = dict(current)
-    updated["status"] = status.strip()
+    if status is not None:
+        updated["status"] = status.strip()
     updated["last_metrics_sync_at"] = last_metrics_sync_at or utc_now_iso()
     validated = validate_channel_metadata(updated, expected_slug=channel_slug)
     paths = canonical_channel_paths(root, channel_slug)

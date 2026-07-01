@@ -12,19 +12,19 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 5B1 - Post-Migration Regression Isolation Fix
+Phase 6A1 - Resolve Metrics-Sync Status Semantics and Close Phase 6A
 
 ## Phase Status
 COMPLETE
 
 ## Approval
-TECH LEAD APPROVED
+TECH LEAD APPROVED FOR COMMIT
 
 ## Repository Baseline
 - Branch: master
-- HEAD: 001ceb6
-- Subject: feat: add safe legacy migration apply
-- Working tree: test-isolation fixes and status documents are modified; canonical runtime files remain ignored; `implement.docx` remains untracked
+- HEAD: d55ca6c
+- Subject: test: isolate multichannel tests from runtime workspace
+- Working tree: narrow OAuth, metrics-path, and metrics-status fixes plus status documents are modified; canonical metrics runtime files exist and remain ignored; canonical token and channel metadata reflect the authorized real sync and local status correction; `implement.docx` remains untracked
 
 ## Completed
 - Phase 0: read-only architecture audit completed
@@ -36,26 +36,29 @@ TECH LEAD APPROVED
 - Phase 5A: legacy Mist of Ages dry-run planner, report, and real-repository dry run completed without mutation
 - Phase 5B: authorized real Mist of Ages migration completed locally with validation and second-apply refusal
 - Phase 5B1: post-migration regression isolation fix completed and verified without mutating canonical runtime data
+- Phase 6A: one selected-channel metrics sync completed locally for canonical Mist of Ages; narrow runtime compatibility fixes remain uncommitted for Tech Lead review
+- Phase 6A1: metrics-sync status semantics resolved conservatively; canonical Mist of Ages status restored to `CONNECTED`; approved fixes and tests are ready to commit
 
 ## Current Architecture
 - Channel workspace: explicit filesystem-based `channels/<slug>/...` model with atomic metadata writes
-- OAuth: isolated per-channel OAuth service exists, not yet integrated into the running server
+- OAuth: isolated per-channel OAuth service now accepts migrated canonical tokens whose `expires_at` arrived as epoch seconds as well as ISO timestamps
 - OAuth browser: loopback-only one-shot OAuth browser flow exists for `/api/v2/oauth/start`, with isolated state, timeout, and rollback-safe connection handling
 - Projects: explicit channel-scoped project service exists with atomic project creation, transcript save protection, validation, and channel snapshot copying
 - UI: current running HTML and JavaScript remain unchanged; additive `/api/v2/` backend now includes OAuth start and UI-support read/open endpoints alongside legacy routes
-- Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically
-- Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are now isolated from real runtime state; metrics and projects remain deferred
+- Metrics: isolated per-channel metrics sync service writes channel-level CSV, reporting state, and sanitized raw snapshots atomically; successful sync now preserves the existing channel status instead of overwriting OAuth/connectivity state
+- Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are isolated from real runtime state
 
 ## Tests
 - Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
-- OAuth: `python -m unittest tests.test_channel_oauth` passing (`37/37`)
+- OAuth: `python -m unittest tests.test_channel_oauth` passing (`42/42`)
 - OAuth browser flow: `python -m unittest tests.test_channel_oauth_browser` passing (`24/24`)
 - Project service: `python -m unittest tests.test_channel_projects` passing (`43/43`)
-- Metrics service: `python -m unittest tests.test_channel_metrics` passing (`25/25`)
-- V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`44/44`)
+- Metrics service: `python -m unittest tests.test_channel_metrics` passing (`27/27`)
+- V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`46/46`)
 - Legacy collector: `python -m unittest tests.test_collector` passing (`5/5`)
-- Compilation: `python -m py_compile scripts\legacy_migration.py scripts\channel_workspace.py scripts\channel_oauth.py scripts\channel_oauth_browser.py scripts\channel_projects.py scripts\channel_metrics.py scripts\ui_server.py tests\runtime_isolation_helpers.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_projects.py tests\test_channel_metrics.py tests\test_multichannel_api.py` passing
+- Full regression total: `245/245` passing with no skips or xfails
+- Compilation: `python -m py_compile scripts\legacy_migration.py scripts\channel_workspace.py scripts\channel_oauth.py scripts\channel_oauth_browser.py scripts\channel_projects.py scripts\channel_metrics.py scripts\ui_server.py tests\runtime_isolation_helpers.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_projects.py tests\test_channel_metrics.py tests\test_multichannel_api.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
 
 ## Phase 5B1 Root Cause
@@ -66,6 +69,49 @@ TECH LEAD APPROVED
 - Added a test-only runtime snapshot helper to capture canonical-runtime and legacy-source hashes without reading protected content recursively.
 - Replaced obsolete repository-absence assertions with before/after invariance checks around temp-fixture execution.
 - Kept all test fixtures isolated from the existing canonical workspace and token while preserving the real migrated runtime state unchanged.
+
+## Phase 6A Pre-Sync Gates
+- Verified branch `master` and exact HEAD `d55ca6c`.
+- Confirmed only unrelated untracked `implement.docx` existed before the Phase 6A code fixes.
+- Validated canonical `channel.json` for `mist_of_ages` with `UCYVuamt3HabLFAicDxcsMdg` / `Mist of Ages` / `@mistofages` and baseline status `CONNECTED`.
+- Confirmed the canonical token file existed, was valid JSON, contained the required OAuth structure, and retained a refresh token.
+- Confirmed canonical metrics and canonical projects were absent before the sync attempt.
+- Captured runtime snapshots for canonical identity, profile, learnings, token, and all three legacy sources before any external call.
+- Re-ran the required focused regression set before the real sync attempt.
+
+## Phase 6A Runtime Compatibility Fix
+- `scripts/channel_oauth.py` now accepts migrated canonical tokens whose `expires_at` field is epoch seconds instead of rejecting them before refresh logic can run.
+- `scripts/ui_server.py` now keeps the selected-channel recent-video metrics path on bearer-token calls all the way through video detail lookup instead of falling back to the global API-key helper.
+- `scripts/channel_workspace.py` and `scripts/channel_metrics.py` now preserve the existing channel status on successful metrics sync instead of silently rewriting it to `READY`.
+- Added focused regression coverage for all three fixes in `tests/test_channel_oauth.py`, `tests/test_multichannel_api.py`, and `tests/test_channel_metrics.py`.
+
+## Phase 6A Real Sync
+- Invocation path: existing additive route `POST /api/v2/channels/mist_of_ages/sync_metrics`.
+- Result: HTTP `200` with selected channel `mist_of_ages` and YouTube channel `UCYVuamt3HabLFAicDxcsMdg`.
+- Metrics result: `rows_written = 10`, overall status `PENDING`, metrics status `PENDING_REACH`.
+- Reporting result: reach report type was detected and persisted; reach metrics remain pending in the current implementation.
+- Non-interactive token refresh: occurred successfully through the existing OAuth library during the authorized sync.
+- Interactive reconnect: not required.
+
+## Phase 6A Validation
+- Metrics were written only under `channels/mist_of_ages/metrics/`.
+- Persisted files are valid in the project-approved formats: CSV plus sanitized JSON state and raw snapshots.
+- `reporting_state.json` identifies `mist_of_ages` and `UCYVuamt3HabLFAicDxcsMdg`.
+- `last_metrics_sync_at` was recorded and the persisted metrics re-read correctly through `GET /api/v2/channels/mist_of_ages`.
+- Metrics CSV still contains `10` data rows.
+- No canonical project directory was created.
+- Canonical profile and canonical learnings remained unchanged.
+- Canonical token remained structurally valid after the non-interactive refresh and retained a refresh token.
+- Legacy sources remained unchanged.
+- `jesus/` was not recursively inspected.
+- `implement.docx` remained untouched and untracked.
+
+## Phase 6A1 Status-Semantics Finding
+- The current architecture lists channel states including `CONNECTED` and `READY`, but it does not explicitly define a documented transition from `CONNECTED` to `READY` after a successful initial metrics sync.
+- Existing migration, OAuth, and channel metadata flows consistently use `CONNECTED` to describe authenticated channel state.
+- No existing project-creation guard or channel-read path demonstrated that `READY` is required after metrics sync.
+- Conservative decision: successful metrics sync must preserve the existing channel status and update only metrics-specific metadata such as `last_metrics_sync_at`.
+- For the real Mist of Ages runtime, local metadata was corrected back to `CONNECTED` without changing metrics artifacts or making any external API call.
 
 ## Real Dry Run
 - Command: `python scripts\legacy_migration.py --root . --channel-slug mist_of_ages --dry-run --report migration_dry_run.md`
@@ -109,6 +155,8 @@ TECH LEAD APPROVED
 - `channel/mist_of_ages/channel_learnings_master.md` hash unchanged across dry run and apply
 - `youtube_oauth_token.json` hash unchanged across dry run and apply
 - Canonical runtime files unchanged during Phase 5B1 test-isolation correction
+- Canonical profile and canonical learnings remained unchanged during the authorized Phase 6A sync
+- Legacy token source remained unchanged while the canonical token refreshed non-interactively
 - `projects/` inventory unchanged
 - `jesus/` existence metadata unchanged
 - `implement.docx` remained untouched and untracked
@@ -119,18 +167,19 @@ TECH LEAD APPROVED
 - Real OAuth reconnect performed: no
 - Real channel workspace created: yes
 - Real canonical token created: yes
-- Real metrics synced: no
+- Real metrics synced: yes, one authorized selected-channel sync for canonical Mist of Ages
 - Real project created through `/api/v2/`: no
 - Legacy projects migrated: no
 - Manual content touched: no
-- Live API used: no
+- Live API used: yes, one authorized metrics sync and non-interactive token refresh only
 
 ## Risks / Blockers
-- No blocker was found in the authorized apply.
-- Canonical metrics remain absent by design and must be generated by a selected-channel sync after migration.
+- No blocker remains for proving selected-channel metrics sync on canonical Mist of Ages.
+- The authorized sync succeeded only after narrow, uncommitted runtime compatibility fixes for migrated token timestamps and bearer-only video detail fetches.
+- Final Phase 6A semantics preserve `CONNECTED` after successful metrics sync; `READY` remains listed in architecture notes but is not used as an automatic post-sync transition.
 - `/api/v2/` is still additive only; the current UI still points at legacy routes.
 - ADR-002 blocks UI cutover until legacy-to-canonical migration review.
-- UI cutover remained explicitly blocked during and after the Phase 5B1 regression-isolation correction.
+- UI cutover remained explicitly blocked during and after the Phase 6A sync.
 
 ## Next Gate
-Review the completed Phase 5B and Phase 5B1 results, then decide whether to authorize a separate selected-channel metrics sync. UI cutover remains blocked.
+Phase 6A is closed after commit. Any follow-up work requires a separate Tech Lead prompt; UI cutover remains blocked.

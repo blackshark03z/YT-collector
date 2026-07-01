@@ -1,57 +1,57 @@
 # Next Task
 
 ## Status
-BLOCKED_PENDING_PHASE_5B1_REVIEW
+BLOCKED_PENDING_SEPARATE_TECH_LEAD_PROMPT
 
 ## Proposed Phase
-Phase 6A - Selected-Channel Metrics Sync
+Phase 6B - Await Next Authorized Step
 
 ## Do Not Start Yet
-Wait for Tech Lead review of the completed Phase 5B1 regression-isolation correction.
+Wait for a separate Tech Lead prompt before any additional runtime, UI, migration, or workflow action.
 
 ## Proposed Objective
-Run the first selected-channel metrics sync against the canonical Mist of Ages workspace after migration, without UI cutover.
+Hold the repo at the committed Phase 6A boundary with canonical metrics present, canonical token valid, legacy sources preserved, and UI cutover still blocked.
 
 ## Expected Files
-- metrics sync evidence files under `channels/mist_of_ages/metrics/`
-- focused sync validation tests if the implementation changes
-- updated status documents with post-migration metrics evidence only
+- no new files unless separately authorized
+- canonical metrics and canonical token remaining ignored at runtime
+- status documents reflecting the closed Phase 6A boundary
 
 ## Required Tests
-- canonical workspace and token precondition verification
-- selected-channel metrics sync success/failure handling
-- no legacy-source mutation verification
-- regression suite remains isolated from existing canonical runtime data
-- no UI cutover verification
-- compilation and `git diff --check`
+- verify the committed Phase 6A baseline before any new work
+- confirm canonical runtime files still exist and remain ignored
+- confirm legacy sources remain unchanged
+- confirm no UI cutover occurred
 
 ## Stop Conditions
 - canonical workspace or token is missing or invalid
-- selected-channel isolation cannot be guaranteed
-- any legacy source changes unexpectedly
-- secret or runtime data becomes staged
+- committed Phase 6A boundary no longer matches the approved state
+- any legacy source changed unexpectedly
+- secret or runtime data becomes staged without authorization
 
 ## Forbidden Work
 - do not perform UI cutover
 - do not create projects
+- do not run another real sync unless separately authorized
 - do not reconnect OAuth unless separately authorized
 - do not mutate protected `jesus/`
 - do not remove legacy routes
 
 ## Verification Requirements
-- confirm canonical `channel.json` and canonical token remain valid
-- confirm metrics files are created only under the canonical channel workspace
+- confirm canonical metrics files remain valid under the canonical channel workspace only
+- confirm the canonical token remains structurally valid after non-interactive refresh
 - confirm legacy sources remain unchanged
-- confirm status docs reflect the first real metrics sync result
+- confirm status docs reflect the closed Phase 6A result
+- keep channel status semantics at preserved `CONNECTED` unless a future prompt explicitly changes the architecture decision
 
 ## Migration Baseline
 - canonical Mist of Ages workspace now exists
 - canonical OAuth token now exists
-- canonical metrics are still absent
+- canonical metrics now exist from one authorized sync
 - canonical projects are still absent
 
 ## Reasoning Effort
 High
 
 ## Exact First Action
-Verify the canonical Mist of Ages workspace and token, then decide whether to authorize a selected-channel metrics sync before any UI work.
+Wait for the next Tech Lead prompt and verify the committed baseline before acting.

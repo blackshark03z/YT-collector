@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Phase 6A - Selected-Channel Metrics Sync
+- Modified `scripts/channel_oauth.py` to accept migrated canonical tokens whose `expires_at` field is stored as epoch seconds.
+- Modified `scripts/channel_workspace.py` and `scripts/channel_metrics.py` so successful metrics sync preserves the current channel status and updates only metrics metadata.
+- Modified `scripts/ui_server.py` so the selected-channel recent-video metrics path uses the canonical bearer token for video-detail lookup instead of the global API-key helper.
+- Modified `tests/test_channel_oauth.py`, `tests/test_multichannel_api.py`, and `tests/test_channel_metrics.py` with focused regression coverage for migrated token compatibility, bearer-only metrics fetch behavior, and preserved channel-status semantics.
+- Re-ran the required focused regression suite successfully after the narrow Phase 6A fixes.
+- Executed one authorized real sync through `POST /api/v2/channels/mist_of_ages/sync_metrics`.
+- Persisted canonical metrics only under `channels/mist_of_ages/metrics/`, including CSV, reporting state, and sanitized raw snapshots.
+- Reach reporting remained `PENDING` with the report type detected and stored by the existing implementation.
+- A non-interactive canonical token refresh occurred successfully; the legacy token source remained unchanged.
+- Resolved Phase 6A1 status semantics conservatively by preserving `CONNECTED` after successful metrics sync and restoring the real Mist of Ages runtime metadata locally without another API call.
+- No project was created and UI cutover remained blocked.
+
 ### Phase 5B1 - Fix Post-Migration Regression Isolation
 - Added `tests/runtime_isolation_helpers.py`.
 - Modified `tests/test_channel_oauth.py`, `tests/test_multichannel_api.py`, `tests/test_channel_metrics.py`, and `tests/test_channel_projects.py`.

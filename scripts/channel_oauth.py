@@ -127,6 +127,18 @@ def _expires_at_from_now(expires_in: Any) -> str:
     return (utc_now() + timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
 
 
+def _normalize_expires_at(value: Any) -> str:
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+    elif isinstance(value, (int, float)):
+        parsed = datetime.fromtimestamp(float(value), tz=timezone.utc)
+    else:
+        raise MalformedTokenError("Token expires_at must be an ISO timestamp or epoch seconds.")
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise MalformedTokenError("Token expires_at must be timezone-aware.")
+    return parsed.replace(microsecond=0).isoformat()
+
+
 def _validate_token_payload(data: dict[str, Any], *, require_refresh_token: bool = False) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise MalformedTokenError("Token payload is malformed.")
@@ -139,9 +151,7 @@ def _validate_token_payload(data: dict[str, Any], *, require_refresh_token: bool
     if require_refresh_token and not isinstance(data.get("refresh_token"), str):
         raise ReconnectRequiredError("Token refresh requires reconnect because no refresh token is stored.")
     if "expires_at" in data:
-        parsed = datetime.fromisoformat(data["expires_at"])
-        if parsed.tzinfo is None or parsed.utcoffset() is None:
-            raise MalformedTokenError("Token expires_at must be timezone-aware.")
+        data["expires_at"] = _normalize_expires_at(data["expires_at"])
     return data
 
 
@@ -275,11 +285,9 @@ def _restore_token_bytes(path: Path, previous_bytes: bytes | None) -> None:
 
 def token_needs_refresh(token: dict[str, Any], *, safety_margin_seconds: int = 300) -> bool:
     expires_at = token.get("expires_at")
-    if not isinstance(expires_at, str):
+    if expires_at is None:
         raise MalformedTokenError("Token payload is missing expires_at.")
-    parsed = datetime.fromisoformat(expires_at)
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise MalformedTokenError("Token expires_at must be timezone-aware.")
+    parsed = datetime.fromisoformat(_normalize_expires_at(expires_at))
     return parsed <= utc_now() + timedelta(seconds=safety_margin_seconds)
 
 
