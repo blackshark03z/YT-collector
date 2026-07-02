@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 7C2A - Read-Only Workflow UI and Copy Bundle
+- Modified the embedded production UI in `scripts/ui_server.py` to add a read-only workflow panel inside the selected project detail area without introducing a second frontend stack.
+- Added selected-project workflow loading through `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow` after successful project-detail load.
+- Rendered workflow binding, version, prompt-set availability, current lifecycle state, current step, next step, blocking reason, and generic step rows directly from workflow API data.
+- Added explicit selected-step state with current-step defaulting, first-step fallback, and immediate loaded-bundle invalidation on step, project, channel, or workflow change.
+- Added read-only bundle request flow to `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/bundle` only when the user clicks `Build Complete Bundle`.
+- Added safe plain-text bundle preview, bundle metadata display, and `Copy Complete Bundle` behavior using the exact full bundle string returned by the API.
+- Added stale-response and stale-identity protection so older workflow or bundle responses cannot overwrite the current selected channel/project/step state or remain copyable.
+- Added a copy-time identity guard and invalid-bundle rejection so stale or internally inconsistent bundles are cleared instead of copied.
+- Added fallback clipboard handling that still copies the exact stored bundle string when `navigator.clipboard` is unavailable or rejects, while cleaning up the temporary element and restoring focus.
+- Kept required-input handling on Policy B: Build remains available and the controlled `BUNDLE_REQUIRED_INPUT_MISSING` message is surfaced from the server when required inputs are missing.
+- Added focused safe error summaries for workflow and prompt-bundle domain errors, including unavailable prompt sets, missing required inputs, missing project context, invalid workflow state, unknown step, and generic bundle failures.
+- Extended `tests/test_ui_frontend_contract.py` with focused contract coverage plus a Node-backed runtime harness for workflow routes, generic step rendering, stale workflow/bundle protection, inert HTML preview behavior, exact copy behavior, and clipboard fallback cleanup.
+- Re-ran focused workflow, prompt-bundle, V2 API, and frontend-contract suites successfully, then re-ran the full offline regression suite successfully (`305/305`, `1` skipped).
+- Confirmed production workflow defaults remained pinned to `default_version = 1` and `legacy_unpinned_version = 1`.
+- Confirmed workflow v1 SHA-256 `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`, workflow v2 SHA-256 `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`, and prompt manifest SHA-256 `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602` remained unchanged.
+- Preserved the real Mist of Ages runtime, ignored token files, protected legacy sources, and unrelated `implement.docx` without mutation.
+- Kept pasted-output handling, output parsing, artifact writes, workflow-state writes, approval/retry flows, migration, and model/API calls out of scope.
+
 ### Phase 7C1 - Versioned Prompt Set Ingestion and Bundle Backend
 - Verified the approved source document `Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx` by exact SHA-256 `3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772`.
 - Added `scripts/prompt_source_ingest.py` to verify the approved DOCX, extract the authoritative Prompt 1-7 bodies, and normalize them deterministically into canonical UTF-8 Markdown files.

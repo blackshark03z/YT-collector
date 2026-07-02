@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C1 - Versioned Prompt Set Ingestion and Bundle Backend
+Phase 7C2A - Read-Only Workflow UI and Copy Bundle
 
 ## Phase Status
 COMPLETE
@@ -59,6 +59,45 @@ MVP_ACCEPTED
 - Phase 6C4: final MVP cutover verification completed with active UI-route audit, legacy-dependency classification, real read-only smoke, temporary-root end-to-end smoke, narrow frontend cleanup, and MVP readiness documentation
 - Phase 7B: versioned workflow registry/definition foundation, immutable project workflow binding, legacy synthesized binding reads, workflow state read synthesis, and channel-scoped workflow read API completed locally without runtime mutation
 - Phase 7C1: authoritative Mist of Ages prompt-set ingestion, immutable workflow v2, generic prompt-manifest validation, prompt-bundle builder, and read-only bundle API completed locally without runtime mutation
+- Phase 7C2A: embedded read-only workflow panel, selected-step bundle preview/copy flow, and stale-response-safe bundle UI completed locally without runtime mutation
+
+## Phase 7C2A Scope
+- Extended the embedded visible UI in `scripts/ui_server.py` only; no second frontend app and no backend write endpoint were added.
+- Added read-only selected-project workflow state for workflow binding, workflow version, prompt-set availability, current lifecycle state, current step status, next step, and blocking reason.
+- Rendered workflow steps from the workflow definition order instead of a hard-coded step count, with selected-step detail for model, conversation requirement, inputs, outputs, and resulting lifecycle state.
+- Added explicit read-only bundle request flow to `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/bundle` only after the user clicks `Build Complete Bundle`.
+- Added exact bundle preview and `Copy Complete Bundle` behavior that uses the full bundle string held in application state rather than reconstructing content from DOM fragments.
+- Added stale-response and stale-identity invalidation for workflow loads and bundle loads across channel change, project change, workflow reload, and step change, plus a copy-time identity guard.
+- Added bundle integrity checks so inconsistent bundle metadata is rejected instead of silently accepted.
+- Added clipboard fallback behavior that still copies the exact stored bundle string when `navigator.clipboard` is unavailable or rejects.
+- Added safe user-facing workflow and prompt-bundle error summaries for controlled domain errors without exposing absolute paths, traceback text, or token material.
+- Kept required-input handling on Policy B: Build remains available for prompt-set-ready steps and the server-owned `BUNDLE_REQUIRED_INPUT_MISSING` response is shown as a controlled user message.
+- Kept all Phase 7C2A behavior zero-write: no workflow-state creation, no artifact writes, no pasted-output handling, no parser, no approval flow, and no model/API calls.
+
+## Phase 7C2A Evidence
+- Phase 7C1 push completed before implementation; local `HEAD` now matches `origin/master` at pushed commit `9341deaa2e2e059fe21360241bae30b08d4aa81d`.
+- Embedded UI contract now includes canonical workflow read and bundle read routes only for the selected channel/project/step context.
+- Focused frontend contract plus runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`27` run, `27` passed, `0` failures, `0` errors, `0` skipped).
+- Focused workflow regression: `python -m unittest tests.test_channel_workflow` passing (`17/17`, `1` symlink-capability skip on unsupported Windows environments).
+- Focused prompt-bundle regression: `python -m unittest tests.test_channel_prompt_bundle` passing (`19/19`).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`48/48`).
+- Explicit JavaScript runtime harness: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests` passing (`5` run, `5` passed, `0` failures, `0` errors, `0` skipped); the harness executes the embedded UI script with a mocked DOM/fetch/clipboard environment through the local Node runtime.
+- JavaScript syntax check for the embedded UI script passed locally through a local parse-only Node check.
+- Compile check: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py` passing.
+- Full offline regression: `python -m unittest discover -s tests` passing (`305/305`, `1` skipped).
+- Diff check: `git diff --check` passing with only LF/CRLF working-copy warnings from Git on modified tracked files.
+- Production workflow defaults remain unchanged: `default_version = 1`, `legacy_unpinned_version = 1`.
+- Workflow v1 SHA-256 remained `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Workflow v2 SHA-256 remained `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`.
+- Prompt manifest SHA-256 remained `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- All UI/bundle safety checks continued to use temporary roots or embedded contract inspection only; the real Mist of Ages runtime snapshot remained unchanged.
+
+## Phase 7C2A Gate
+- Read-only workflow inspection and exact bundle copy are now implemented locally.
+- Phase 7C2B remains blocked pending a separate Tech Lead execution prompt for pasted AI output plus in-memory parse/preview only.
+- Phase 7C2C remains blocked pending a later separate Tech Lead execution prompt for artifact writes, revisions, and workflow-state mutation.
+- No Phase 7C2A commit has been created.
+- No Phase 7C2A push has been performed.
 
 ## Phase 7C1 Scope
 - Verified the approved source document `Mist_of_Ages_Prompt_Content_AI_Toi_Uu_V2.docx` by exact SHA-256 `3D63D7049BA69CFF7B87537429D145B742394138864BB06F41E0B21FEA0EC772`.
@@ -126,7 +165,7 @@ MVP_ACCEPTED
 - Migration: `scripts/legacy_migration.py` now supports dry-run and rollback-safe apply; canonical Mist of Ages workspace and token remain in place without touching legacy sources; post-migration tests are isolated from real runtime state
 
 ## Tests
-- UI frontend contract: `python -m unittest tests.test_ui_frontend_contract` passing (`17/17`)
+- UI frontend contract and Node-backed runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`27` run, `27` passed, `0` failures, `0` errors, `0` skipped)
 - Legacy migration planner/apply: `python -m unittest tests.test_legacy_migration` passing (`43/43`)
 - Channel workspace: `python -m unittest tests.test_channel_workspace` passing (`15/15`)
 - OAuth: `python -m unittest tests.test_channel_oauth` passing (`42/42`)
@@ -135,7 +174,7 @@ MVP_ACCEPTED
 - Metrics service: `python -m unittest tests.test_channel_metrics` passing (`27/27`)
 - V2 backend API: `python -m unittest tests.test_multichannel_api` passing (`48/48`)
 - Legacy collector: `python -m unittest tests.test_collector` passing (`5/5`)
-- Full Phase 6C4 regression total: `264/264` passing with no skips or xfails
+- Full offline regression total after Phase 7C2A: `305/305` passing with `1` skipped environment-dependent test
 - Compilation: `python -m py_compile scripts\ui_server.py tests\test_ui_frontend_contract.py tests\test_multichannel_api.py tests\test_legacy_migration.py tests\test_channel_workspace.py tests\test_channel_oauth.py tests\test_channel_oauth_browser.py tests\test_channel_metrics.py tests\test_channel_projects.py tests\test_collector.py` passing
 - Diff check: `git diff --check` passing
 

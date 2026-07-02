@@ -1349,25 +1349,34 @@ const state = {
   selectedProjectDetail: null,
   selectedProjectTranscript: null,
   selectedProjectValidation: null,
+  selectedProjectWorkflow: null,
+  selectedWorkflowStepId: null,
+  selectedWorkflowBundle: null,
   transcriptDraft: "",
   isLoadingChannels: false,
   isLoadingSummary: false,
   isLoadingProjects: false,
   isLoadingProjectDetail: false,
+  isLoadingWorkflow: false,
   errorMessage: "",
   projectListError: "",
   projectDetailError: "",
+  workflowError: "",
+  bundleError: "",
   summaryRequestId: 0,
   summaryAbortController: null,
   projectListRequestId: 0,
   projectDetailRequestId: 0,
+  workflowRequestId: 0,
+  bundleAction: { busy: false, channelSlug: null, projectSlug: null, stepId: null, requestId: 0 },
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
   actionFeedback: { kind: "", slug: null, text: "" },
   createProjectAction: { busy: false, slug: null, requestId: 0 },
   transcriptSaveAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
   validationAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
-  projectFeedback: { kind: "", channelSlug: null, projectSlug: null, text: "" }
+  projectFeedback: { kind: "", channelSlug: null, projectSlug: null, text: "" },
+  bundleFeedback: { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" }
 };
 
 function escapeHtml(value) {
@@ -1399,6 +1408,23 @@ function describeError(error, fallback) {
   if (!error) return fallback;
   if (error.name === "AbortError") return "Request was replaced by a newer channel selection.";
   return error.message || fallback;
+}
+
+function workflowErrorSummary(error, fallback) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  const known = {
+    WORKFLOW_NOT_CONFIGURED: "No workflow is configured for this channel yet.",
+    WORKFLOW_STATE_INVALID: "The saved workflow state could not be read safely.",
+    PROMPT_SET_UNAVAILABLE: "Prompt bundle unavailable for this workflow version.",
+    PROMPT_MANIFEST_INVALID: "The workflow prompt manifest is not currently usable.",
+    PROMPT_FILE_NOT_FOUND: "A workflow prompt file is missing.",
+    PROMPT_FILE_DIGEST_MISMATCH: "A workflow prompt file did not match its expected digest.",
+    WORKFLOW_STEP_NOT_FOUND: "The selected workflow step is no longer available.",
+    BUNDLE_REQUIRED_INPUT_MISSING: "Required workflow inputs are still missing for this step.",
+    BUNDLE_PROJECT_CONTEXT_MISSING: "A required project context value is missing for this workflow step.",
+    PROMPT_BUNDLE_INVALID: "The workflow bundle response was not valid.",
+  };
+  return known[code] || describeError(error, fallback);
 }
 
 async function v2Api(path, options = {}) {
@@ -1476,8 +1502,14 @@ function clearProjectSelectionState() {
   state.selectedProjectDetail = null;
   state.selectedProjectTranscript = null;
   state.selectedProjectValidation = null;
+  state.selectedProjectWorkflow = null;
+  state.selectedWorkflowStepId = null;
+  state.selectedWorkflowBundle = null;
   state.transcriptDraft = "";
   state.projectDetailError = "";
+  state.workflowError = "";
+  state.bundleError = "";
+  state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
 }
 
 function clearProjectState() {
@@ -1492,6 +1524,178 @@ function selectedProjectSummaryRecord() {
     return state.selectedProjectDetail.project;
   }
   return state.projects.find((item) => item.project_slug === state.selectedProjectSlug) || null;
+}
+
+function clearBundleFeedback() {
+  state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
+}
+
+function setBundleFeedback(kind, channelSlug, projectSlug, stepId, text) {
+  state.bundleFeedback = { kind, channelSlug, projectSlug, stepId, text };
+}
+
+function bundleFeedbackForSelection() {
+  const feedback = state.bundleFeedback;
+  if (!feedback.text) return { kind: "", text: "" };
+  if (feedback.channelSlug !== state.selectedChannelSlug || feedback.projectSlug !== state.selectedProjectSlug) return { kind: "", text: "" };
+  if (feedback.stepId && feedback.stepId !== state.selectedWorkflowStepId) return { kind: "", text: "" };
+  return feedback;
+}
+
+function invalidateLoadedBundle() {
+  state.selectedWorkflowBundle = null;
+  state.bundleError = "";
+  clearBundleFeedback();
+}
+
+function clearWorkflowState() {
+  state.selectedProjectWorkflow = null;
+  state.selectedWorkflowStepId = null;
+  state.isLoadingWorkflow = false;
+  state.workflowError = "";
+  invalidateLoadedBundle();
+}
+
+function workflowDefinition() {
+  return state.selectedProjectWorkflow && state.selectedProjectWorkflow.definition ? state.selectedProjectWorkflow.definition : null;
+}
+
+function workflowStepList() {
+  const definition = workflowDefinition();
+  return definition && Array.isArray(definition.steps) ? definition.steps : [];
+}
+
+function workflowArtifactMap() {
+  const workflow = state.selectedProjectWorkflow;
+  const artifacts = workflow && Array.isArray(workflow.artifacts) ? workflow.artifacts : [];
+  const mapped = {};
+  for (const artifact of artifacts) {
+    if (artifact && artifact.artifact_id) mapped[artifact.artifact_id] = artifact;
+  }
+  return mapped;
+}
+
+function selectedWorkflowStepRecord() {
+  return workflowStepList().find((step) => step.step_id === state.selectedWorkflowStepId) || null;
+}
+
+function bundleIdentityForSelection(stepIdArg) {
+  const workflow = state.selectedProjectWorkflow;
+  const binding = workflow && workflow.binding ? workflow.binding : null;
+  const definition = workflow && workflow.definition ? workflow.definition : null;
+  const stepId = stepIdArg || state.selectedWorkflowStepId;
+  if (!binding || !definition || !state.selectedChannelSlug || !state.selectedProjectSlug || !stepId) return null;
+  return {
+    channel_slug: state.selectedChannelSlug,
+    project_slug: state.selectedProjectSlug,
+    workflow_id: binding.workflow_id,
+    workflow_version: binding.workflow_version,
+    step_id: stepId,
+    workflow_definition_sha256: binding.workflow_definition_sha256
+  };
+}
+
+function bundleMatchesSelection(bundle) {
+  if (!bundle || !bundle.identity) return false;
+  const current = bundleIdentityForSelection();
+  if (!current) return false;
+  return (
+    bundle.identity.channel_slug === current.channel_slug
+    && bundle.identity.project_slug === current.project_slug
+    && bundle.identity.workflow_id === current.workflow_id
+    && bundle.identity.workflow_version === current.workflow_version
+    && bundle.identity.step_id === current.step_id
+    && bundle.identity.workflow_definition_sha256 === current.workflow_definition_sha256
+  );
+}
+
+function bundleValidationError(bundle) {
+  if (!bundle || typeof bundle !== "object") return "Load a valid bundle for the selected step before copying.";
+  if (typeof bundle.bundle !== "string") return "The loaded workflow bundle is missing its text payload.";
+  if (typeof bundle.bundle_character_count !== "number") return "The loaded workflow bundle is missing a valid character count.";
+  if (bundle.bundle.length !== bundle.bundle_character_count) return "The loaded workflow bundle metadata is inconsistent.";
+  return "";
+}
+
+function activeBundleRecord() {
+  if (!bundleMatchesSelection(state.selectedWorkflowBundle)) return null;
+  if (bundleValidationError(state.selectedWorkflowBundle)) return null;
+  return state.selectedWorkflowBundle;
+}
+
+function setSelectedWorkflowStepId(nextStepId) {
+  const normalized = nextStepId && workflowStepList().some((step) => step.step_id === nextStepId) ? nextStepId : null;
+  if (normalized === state.selectedWorkflowStepId) return;
+  state.selectedWorkflowStepId = normalized;
+  invalidateLoadedBundle();
+  render();
+}
+
+function describeConversationConstraint(step) {
+  if (!step || !Array.isArray(step.constraints) || step.constraints.length === 0) {
+    return "No same-conversation requirement";
+  }
+  return step.constraints.map((constraint) => {
+    if (constraint && constraint.type === "SAME_MODEL_CONVERSATION_REQUIRED" && constraint.group_id) {
+      return `Continue in the same ${step.required_model || "selected"} conversation: ${constraint.group_id}`;
+    }
+    if (constraint && constraint.group_id) return `${constraint.type || "Constraint"}: ${constraint.group_id}`;
+    return constraint && constraint.type ? String(constraint.type) : "Constraint required";
+  }).join(" | ");
+}
+
+function artifactListForIds(ids) {
+  const artifactsById = workflowArtifactMap();
+  return (Array.isArray(ids) ? ids : []).map((artifactId) => artifactsById[artifactId] || {
+    artifact_id: artifactId,
+    display_name: artifactId,
+    relative_path: "",
+    required: true,
+    exists: false
+  });
+}
+
+function stepAvailabilitySummary(step) {
+  const workflow = state.selectedProjectWorkflow;
+  if (!workflow || !step) return "Waiting for workflow data";
+  const promptSet = workflow.definition && workflow.definition.prompt_set ? workflow.definition.prompt_set : {};
+  if (promptSet.status !== "AVAILABLE" || !promptSet.bundle_available) {
+    return "Prompt bundle unavailable for this workflow version.";
+  }
+  const requiredArtifacts = artifactListForIds(step.input_artifact_ids);
+  if (requiredArtifacts.some((artifact) => !artifact.exists)) return "Required inputs missing";
+  if (workflow.state && workflow.state.current_step_id === step.step_id) {
+    return `Current step: ${workflow.state.current_step_status || "UNKNOWN"}`;
+  }
+  return "Ready to request bundle";
+}
+
+function bundleButtonModel() {
+  const workflow = state.selectedProjectWorkflow;
+  const step = selectedWorkflowStepRecord();
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !step) {
+    return { disabled: true, label: "Build Complete Bundle", helper: "Load a selected project workflow before requesting a bundle." };
+  }
+  const promptSet = workflow.definition && workflow.definition.prompt_set ? workflow.definition.prompt_set : {};
+  if (promptSet.status !== "AVAILABLE" || !promptSet.bundle_available) {
+    return { disabled: true, label: "Build Complete Bundle", helper: "Prompt bundle unavailable for this workflow version." };
+  }
+  const busy = state.bundleAction.busy
+    && state.bundleAction.channelSlug === state.selectedChannelSlug
+    && state.bundleAction.projectSlug === state.selectedProjectSlug
+    && state.bundleAction.stepId === step.step_id;
+  return {
+    disabled: busy,
+    label: busy ? "Building bundle..." : "Build Complete Bundle",
+    helper: busy ? "Loading the exact workflow bundle for the selected step..." : "Request the complete bundle for the selected step only when you need it."
+  };
+}
+
+function copyBundleButtonModel() {
+  if (!activeBundleRecord()) {
+    return { disabled: true, label: "Copy Complete Bundle", helper: "Load a valid bundle for the selected step before copying." };
+  }
+  return { disabled: false, label: "Copy Complete Bundle", helper: "Copy the exact full bundle returned by the local API." };
 }
 
 function oauthButtonModel() {
@@ -1633,6 +1837,7 @@ function setSelectedProjectSlug(nextSlug) {
   state.selectedProjectDetail = null;
   state.selectedProjectTranscript = null;
   state.selectedProjectValidation = null;
+  clearWorkflowState();
   state.projectDetailError = "";
   state.transcriptDraft = "";
   clearProjectFeedback();
@@ -1876,6 +2081,56 @@ function renderProjectDetailState() {
   }
 
   const detail = state.selectedProjectDetail.project || {};
+  const workflow = state.selectedProjectWorkflow;
+  const workflowState = workflow && workflow.state ? workflow.state : {};
+  const binding = workflow && workflow.binding ? workflow.binding : {};
+  const definition = workflow && workflow.definition ? workflow.definition : {};
+  const promptSet = definition.prompt_set || {};
+  const workflowSteps = workflowStepList();
+  const selectedStep = selectedWorkflowStepRecord();
+  const bundle = activeBundleRecord();
+  const bundleFeedback = bundleFeedbackForSelection();
+  const bundleButton = bundleButtonModel();
+  const copyButton = copyBundleButtonModel();
+  const currentStepLabel = workflowSteps.find((step) => step.step_id === workflowState.current_step_id);
+  const nextStepLabel = workflowSteps.find((step) => step.step_id === workflowState.next_step_id);
+  const workflowErrorHtml = state.workflowError
+    ? `<div class="notice"><strong>Workflow unavailable</strong><span class="meta">${escapeHtml(state.workflowError)}</span></div>`
+    : "";
+  const bundleFeedbackHtml = bundleFeedback.text
+    ? `<div class="check"><strong>${bundleFeedback.kind === "error" ? "Bundle Error" : "Bundle Status"}</strong>${pill(bundleFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(bundleFeedback.text)}</div>`
+    : `<div class="meta">${escapeHtml(state.bundleError || bundleButton.helper || copyButton.helper)}</div>`;
+  const workflowRows = workflowSteps.map((step) => {
+    const selected = step.step_id === state.selectedWorkflowStepId;
+    return `
+      <button
+        type="button"
+        class="${selected ? "" : "secondary"}"
+        data-workflow-step-id="${escapeHtml(step.step_id)}"
+        style="width:100%;text-align:left"
+      >
+        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong>${pill(selected ? "SELECTED" : "READY")}</div>
+        <div class="meta">Required model: ${escapeHtml(step.required_model || "Unspecified")}</div>
+        <div class="meta">Resulting state: ${escapeHtml(step.resulting_lifecycle_state || "Unknown")}</div>
+        <div class="meta">Availability: ${escapeHtml(stepAvailabilitySummary(step))}</div>
+      </button>
+    `;
+  }).join("");
+  const renderArtifacts = (items, requiredLabel) => {
+    if (!items.length) {
+      return `<div class="notice"><strong>No ${requiredLabel.toLowerCase()} artifacts</strong><span class="meta">This step does not declare any ${requiredLabel.toLowerCase()} artifacts.</span></div>`;
+    }
+    return items.map((artifact) => `
+      <div class="check">
+        <div>
+          <strong>${escapeHtml(artifact.display_name || artifact.artifact_id || "Artifact")}</strong>
+          <div class="meta mono">${escapeHtml(artifact.relative_path || "")}</div>
+          <div class="meta">${escapeHtml(requiredLabel)} input</div>
+        </div>
+        <div>${pill(artifact.exists ? "FOUND" : "MISSING")}</div>
+      </div>
+    `).join("");
+  };
   panel.innerHTML = `
     <div class="summary-grid">
       <div class="card"><strong>Project Slug</strong><div class="meta mono">${escapeHtml(detail.project_slug || "")}</div></div>
@@ -1891,7 +2146,115 @@ function renderProjectDetailState() {
       <strong>Source Video URL</strong>
       <div class="meta"><a href="${escapeHtml(detail.source_video_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(detail.source_video_url || "Unavailable")}</a></div>
     </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <strong>Workflow Panel</strong>
+          <div class="meta">Read-only workflow detail for the selected canonical project.</div>
+        </div>
+        <div>${pill(state.isLoadingWorkflow ? "LOADING" : (workflow ? "READY" : "WAITING"))}</div>
+      </div>
+      ${workflowErrorHtml}
+      ${workflow && !state.workflowError ? `
+        <div class="summary-grid" style="margin-top:12px">
+          <div class="card"><strong>Workflow</strong><div class="meta">${escapeHtml(definition.display_name || binding.workflow_id || "")}</div></div>
+          <div class="card"><strong>Workflow ID</strong><div class="meta mono">${escapeHtml(binding.workflow_id || "")}</div></div>
+          <div class="card"><strong>Workflow Version</strong><div class="meta">${escapeHtml(binding.workflow_version || "")}</div></div>
+          <div class="card"><strong>Binding Source</strong><div>${pill(binding.binding_source || "UNKNOWN")}</div></div>
+          <div class="card"><strong>Prompt Set</strong><div>${pill(promptSet.status || "UNKNOWN")}</div><div class="meta">${escapeHtml(promptSet.bundle_available ? "Bundle available" : "Prompt bundle unavailable for this workflow version.")}</div></div>
+          <div class="card"><strong>Execution Mode</strong><div class="meta">${escapeHtml(definition.execution_mode || "Unknown")}</div></div>
+          <div class="card"><strong>Current Lifecycle</strong><div class="meta">${escapeHtml(workflowState.current_lifecycle_state || "Not started")}</div></div>
+          <div class="card"><strong>Current Step</strong><div class="meta">${escapeHtml(currentStepLabel ? currentStepLabel.display_name : (workflowState.current_step_id || "Unknown"))}</div><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
+          <div class="card"><strong>Current Step Status</strong><div>${pill(workflowState.current_step_status || "UNKNOWN")}</div></div>
+          <div class="card"><strong>Next Step</strong><div class="meta">${escapeHtml(nextStepLabel ? nextStepLabel.display_name : (workflowState.next_step_id || "None"))}</div><div class="meta mono">${escapeHtml(workflowState.next_step_id || "")}</div></div>
+        </div>
+        ${workflowState.blocking_reason ? `<div class="notice" style="margin-top:12px"><strong>Blocking Reason</strong><span class="meta">${escapeHtml(workflowState.blocking_reason)}</span></div>` : ""}
+        <div class="card" style="margin-top:12px">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+            <div>
+              <strong>Workflow Steps</strong>
+              <div class="meta">Generated from the workflow definition in step order.</div>
+            </div>
+            <div class="meta">${escapeHtml(String(workflowSteps.length))} step(s)</div>
+          </div>
+          <label for="workflowStepSelect">Selected Workflow Step</label>
+          <select id="workflowStepSelect">
+            ${workflowSteps.map((step) => `<option value="${escapeHtml(step.step_id)}"${step.step_id === state.selectedWorkflowStepId ? " selected" : ""}>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</option>`).join("")}
+          </select>
+          <div class="stack" style="margin-top:12px">${workflowRows}</div>
+        </div>
+        ${selectedStep ? `
+          <div class="card" style="margin-top:12px">
+            <strong>Selected Step Detail</strong>
+            <div class="summary-grid" style="margin-top:12px">
+              <div class="card"><strong>Required Model</strong><div class="meta">${escapeHtml(selectedStep.required_model || "Unspecified")}</div></div>
+              <div class="card"><strong>Conversation Requirement</strong><div class="meta">${escapeHtml(describeConversationConstraint(selectedStep))}</div></div>
+              <div class="card"><strong>Resulting Lifecycle State</strong><div class="meta">${escapeHtml(selectedStep.resulting_lifecycle_state || "Unknown")}</div></div>
+              <div class="card"><strong>Output Artifacts</strong><div class="meta">${escapeHtml(String((selectedStep.output_artifact_ids || []).length))}</div></div>
+            </div>
+            <div class="row" style="margin-top:12px">
+              <button type="button" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
+              <button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>
+            </div>
+            <div class="status" style="margin-top:12px" role="status" aria-live="polite">${bundleFeedbackHtml}</div>
+            <div class="summary-grid" style="margin-top:12px">
+              <div class="card">
+                <strong>Required Input Artifacts</strong>
+                <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.input_artifact_ids), "Required")}</div>
+              </div>
+              <div class="card">
+                <strong>Optional Input Artifacts</strong>
+                <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.optional_input_artifact_ids), "Optional")}</div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:12px">
+              <strong>Output Artifact IDs</strong>
+              <div class="stack" style="margin-top:12px">
+                ${(selectedStep.output_artifact_ids || []).length
+                  ? selectedStep.output_artifact_ids.map((artifactId) => {
+                    const artifact = workflowArtifactMap()[artifactId];
+                    return `<div class="check"><div><strong>${escapeHtml(artifact ? artifact.display_name : artifactId)}</strong><div class="meta mono">${escapeHtml(artifact ? artifact.relative_path : artifactId)}</div></div><div>${pill("OUTPUT")}</div></div>`;
+                  }).join("")
+                  : `<div class="notice"><strong>No output artifacts</strong><span class="meta">This step does not declare output artifacts.</span></div>`
+                }
+              </div>
+            </div>
+            <div class="card" style="margin-top:12px">
+              <strong>Bundle Preview</strong>
+              <div class="meta">The preview below is plain text from the API. Copy Complete Bundle uses the exact full stored bundle.</div>
+              ${bundle ? `
+                <div class="summary-grid" style="margin-top:12px">
+                  <div class="card"><strong>Bundle SHA-256</strong><div class="meta mono">${escapeHtml(bundle.bundle_sha256 || "")}</div></div>
+                  <div class="card"><strong>Character Count</strong><div class="meta">${escapeHtml(String(bundle.bundle_character_count ?? ""))}</div></div>
+                  <div class="card"><strong>Required Model</strong><div class="meta">${escapeHtml(bundle.required_model || "")}</div></div>
+                  <div class="card"><strong>Prompt File SHA-256</strong><div class="meta mono">${escapeHtml(bundle.prompt_file_sha256 || "")}</div></div>
+                  <div class="card"><strong>Input Artifact IDs</strong><div class="meta">${escapeHtml((bundle.input_artifact_ids || []).join(", ") || "None")}</div></div>
+                  <div class="card"><strong>Missing Optional Inputs</strong><div class="meta">${escapeHtml((bundle.missing_optional_inputs || []).join(", ") || "None")}</div></div>
+                  <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(bundle.output_contract && bundle.output_contract.response_mode ? bundle.output_contract.response_mode : "Unknown")}</div></div>
+                </div>
+                <label for="bundlePreviewText" style="margin-top:12px">Complete Prompt Bundle Preview</label>
+                <textarea id="bundlePreviewText" readonly spellcheck="false"></textarea>
+              ` : `
+                <div class="notice" style="margin-top:12px">
+                  <strong>No bundle loaded</strong>
+                  <span class="meta">Select a step, then click Build Complete Bundle to preview and copy the exact full response.</span>
+                </div>
+              `}
+            </div>
+          </div>
+        ` : ""}
+      ` : `
+        <div class="notice" style="margin-top:12px">
+          <strong>Workflow loading</strong>
+          <span class="meta">${escapeHtml(state.isLoadingWorkflow ? "Fetching the selected project workflow..." : "Workflow data will appear here after the selected project detail loads.")}</span>
+        </div>
+      `}
+    </div>
   `;
+  const bundlePreviewText = document.getElementById("bundlePreviewText");
+  if (bundlePreviewText && bundle) {
+    bundlePreviewText.value = typeof bundle.bundle === "string" ? bundle.bundle : "";
+  }
 
   if (!state.selectedProjectValidation) {
     validationPanel.innerHTML = `
@@ -2209,12 +2572,14 @@ async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
   state.selectedProjectTranscript = null;
   state.selectedProjectValidation = null;
   state.transcriptDraft = "";
+  clearWorkflowState();
   render();
 
   try {
     const detail = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}`);
     if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
     state.selectedProjectDetail = detail;
+    await loadSelectedProjectWorkflow(projectSlug, channelSlug);
 
     try {
       const transcript = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript`);
@@ -2239,6 +2604,184 @@ async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
       render();
     }
   }
+}
+
+async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg) {
+  const channelSlug = channelSlugArg || state.selectedChannelSlug;
+  const projectSlug = projectSlugArg || state.selectedProjectSlug;
+  if (!channelSlug || !projectSlug || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+
+  const requestId = ++state.workflowRequestId;
+  state.isLoadingWorkflow = true;
+  state.workflowError = "";
+  state.selectedProjectWorkflow = null;
+  state.selectedWorkflowStepId = null;
+  invalidateLoadedBundle();
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow`);
+    if (requestId !== state.workflowRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectWorkflow = data;
+    const definitionSteps = data && data.definition && Array.isArray(data.definition.steps) ? data.definition.steps : [];
+    const currentStepId = data && data.state && typeof data.state.current_step_id === "string" ? data.state.current_step_id : null;
+    const hasCurrentStep = currentStepId && definitionSteps.some((step) => step.step_id === currentStepId);
+    state.selectedWorkflowStepId = hasCurrentStep ? currentStepId : (definitionSteps[0] ? definitionSteps[0].step_id : null);
+  } catch (error) {
+    if (requestId !== state.workflowRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectWorkflow = null;
+    state.selectedWorkflowStepId = null;
+    state.workflowError = workflowErrorSummary(error, "Could not load the selected project workflow.");
+  } finally {
+    if (requestId === state.workflowRequestId) {
+      state.isLoadingWorkflow = false;
+      render();
+    }
+  }
+}
+
+async function buildBundleAction() {
+  const channelSlug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const step = selectedWorkflowStepRecord();
+  const button = bundleButtonModel();
+  if (!channelSlug || !projectSlug || !state.selectedProjectWorkflow || !step) {
+    setBundleFeedback("error", channelSlug, projectSlug, state.selectedWorkflowStepId, "Load a selected project workflow before requesting a bundle.");
+    render();
+    return;
+  }
+  if (button.disabled) {
+    if (!(state.bundleAction.busy && state.bundleAction.channelSlug === channelSlug && state.bundleAction.projectSlug === projectSlug && state.bundleAction.stepId === step.step_id)) {
+      setBundleFeedback("error", channelSlug, projectSlug, step.step_id, button.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.bundleAction.requestId + 1;
+  state.bundleAction = { busy: true, channelSlug, projectSlug, stepId: step.step_id, requestId };
+  state.bundleError = "";
+  state.selectedWorkflowBundle = null;
+  setBundleFeedback("info", channelSlug, projectSlug, step.step_id, "Building the exact prompt bundle for the selected workflow step...");
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle`);
+    if (
+      state.bundleAction.requestId !== requestId
+      || state.bundleAction.channelSlug !== channelSlug
+      || state.bundleAction.projectSlug !== projectSlug
+      || state.bundleAction.stepId !== step.step_id
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+    ) return;
+    const nextBundle = {
+      ...data,
+      identity: {
+        channel_slug: data.channel_slug,
+        project_slug: data.project_slug,
+        workflow_id: data.binding && data.binding.workflow_id,
+        workflow_version: data.binding && data.binding.workflow_version,
+        workflow_definition_sha256: data.binding && data.binding.workflow_definition_sha256,
+        step_id: data.step_id,
+        bundle_sha256: data.bundle_sha256
+      }
+    };
+    const validationError = bundleValidationError(nextBundle);
+    if (validationError) {
+      invalidateLoadedBundle();
+      state.bundleError = validationError;
+      setBundleFeedback("error", channelSlug, projectSlug, step.step_id, validationError);
+      render();
+      return;
+    }
+    state.selectedWorkflowBundle = nextBundle;
+    setBundleFeedback("success", channelSlug, projectSlug, step.step_id, "Complete bundle loaded and ready to copy.");
+  } catch (error) {
+    if (
+      state.bundleAction.requestId !== requestId
+      || state.bundleAction.channelSlug !== channelSlug
+      || state.bundleAction.projectSlug !== projectSlug
+      || state.bundleAction.stepId !== step.step_id
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+    ) return;
+    state.bundleError = workflowErrorSummary(error, "Could not build the selected workflow bundle.");
+    setBundleFeedback("error", channelSlug, projectSlug, step.step_id, state.bundleError);
+  } finally {
+    if (
+      state.bundleAction.requestId === requestId
+      && state.bundleAction.channelSlug === channelSlug
+      && state.bundleAction.projectSlug === projectSlug
+      && state.bundleAction.stepId === step.step_id
+    ) {
+      state.bundleAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function fallbackCopyBundleText(bundleText) {
+  const helper = document.createElement("textarea");
+  const previousActive = document.activeElement && typeof document.activeElement.focus === "function" ? document.activeElement : null;
+  helper.value = bundleText;
+  helper.setAttribute("readonly", "readonly");
+  helper.style.position = "fixed";
+  helper.style.top = "-1000px";
+  helper.style.left = "-1000px";
+  document.body.appendChild(helper);
+  helper.focus();
+  helper.select();
+  try {
+    const copied = document.execCommand("copy");
+    if (!copied) throw new Error("Clipboard copy is unavailable in this browser.");
+  } finally {
+    document.body.removeChild(helper);
+    if (previousActive) previousActive.focus();
+  }
+}
+
+async function copyBundleAction() {
+  const bundle = state.selectedWorkflowBundle;
+  const channelSlug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const stepId = state.selectedWorkflowStepId;
+  if (!bundleMatchesSelection(bundle)) {
+    invalidateLoadedBundle();
+    setBundleFeedback("error", channelSlug, projectSlug, stepId, "The loaded bundle is stale. Build it again for the current selection.");
+    render();
+    return;
+  }
+  const validationError = bundleValidationError(bundle);
+  if (validationError) {
+    invalidateLoadedBundle();
+    setBundleFeedback("error", channelSlug, projectSlug, stepId, validationError);
+    render();
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        await navigator.clipboard.writeText(bundle.bundle);
+      } catch (error) {
+        await fallbackCopyBundleText(bundle.bundle);
+      }
+    } else {
+      await fallbackCopyBundleText(bundle.bundle);
+    }
+    if (!bundleMatchesSelection(bundle)) {
+      invalidateLoadedBundle();
+      setBundleFeedback("error", channelSlug, projectSlug, stepId, "The selected bundle changed before copy completed.");
+    } else {
+      setBundleFeedback("success", channelSlug, projectSlug, stepId, "Copied the exact complete bundle.");
+    }
+  } catch (error) {
+    setBundleFeedback("error", channelSlug, projectSlug, stepId, describeError(error, "Could not copy the complete bundle."));
+  }
+  render();
 }
 
 async function saveTranscriptAction() {
@@ -2449,6 +2992,25 @@ document.getElementById("projectListPanel").addEventListener("click", (event) =>
   const button = event.target.closest("[data-project-slug]");
   if (!button) return;
   setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
+});
+document.getElementById("projectDetailPanel").addEventListener("change", (event) => {
+  if (event.target.id === "workflowStepSelect") {
+    setSelectedWorkflowStepId(event.target.value || null);
+  }
+});
+document.getElementById("projectDetailPanel").addEventListener("click", (event) => {
+  const stepButton = event.target.closest("[data-workflow-step-id]");
+  if (stepButton) {
+    setSelectedWorkflowStepId(stepButton.getAttribute("data-workflow-step-id") || null);
+    return;
+  }
+  if (event.target.id === "buildBundleBtn") {
+    buildBundleAction();
+    return;
+  }
+  if (event.target.id === "copyBundleBtn") {
+    copyBundleAction();
+  }
 });
 
 loadChannels();

@@ -1,5 +1,10 @@
+import json
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -8,6 +13,244 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts import ui_server
+
+
+SCRIPT_MATCH = re.search(r"<script>\n(.*)\n</script>", ui_server.HTML_PAGE, re.DOTALL)
+assert SCRIPT_MATCH is not None
+UI_SCRIPT = SCRIPT_MATCH.group(1)
+
+
+def run_ui_runtime_scenario(body: str) -> dict:
+    node = shutil.which("node")
+    if node is None:
+        raise unittest.SkipTest("node runtime is not available")
+    harness = f"""
+const uiScript = {json.dumps(UI_SCRIPT)};
+const scenarioBody = {json.dumps(textwrap.dedent(body).strip())};
+
+function makeDeferred() {{
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {{
+    resolve = res;
+    reject = rej;
+  }});
+  return {{ promise, resolve, reject }};
+}}
+
+class Element {{
+  constructor(id = "") {{
+    this.id = id;
+    this._innerHTML = "";
+    this.textContent = "";
+    this.value = "";
+    this.disabled = false;
+    this.style = {{}};
+    this.attributes = {{}};
+    this.listeners = {{}};
+    this.children = [];
+    this.dataset = {{}};
+    this.selectionStart = 0;
+    this.selectionEnd = 0;
+  }}
+  set innerHTML(value) {{
+    this._innerHTML = String(value);
+  }}
+  get innerHTML() {{
+    return this._innerHTML;
+  }}
+  addEventListener(type, handler) {{
+    this.listeners[type] = handler;
+  }}
+  setAttribute(name, value) {{
+    this.attributes[name] = String(value);
+  }}
+  getAttribute(name) {{
+    return this.attributes[name] || null;
+  }}
+  focus() {{
+    document.activeElement = this;
+  }}
+  select() {{
+    this.selectionStart = 0;
+    this.selectionEnd = this.value.length;
+  }}
+  closest() {{
+    return null;
+  }}
+  appendChild(child) {{
+    this.children.push(child);
+    return child;
+  }}
+  removeChild(child) {{
+    this.children = this.children.filter((item) => item !== child);
+  }}
+}}
+
+const elements = new Map();
+function getElement(id) {{
+  if (!elements.has(id)) elements.set(id, new Element(id));
+  return elements.get(id);
+}}
+
+const bodyChildren = [];
+const document = {{
+  activeElement: null,
+  body: {{
+    appendChild(node) {{
+      bodyChildren.push(node);
+      return node;
+    }},
+    removeChild(node) {{
+      const index = bodyChildren.indexOf(node);
+      if (index >= 0) bodyChildren.splice(index, 1);
+      return node;
+    }},
+  }},
+  getElementById(id) {{
+    return getElement(id);
+  }},
+  createElement(tag) {{
+    return new Element(tag);
+  }},
+  execCommand(command) {{
+    execCommandCalls.push(command);
+    return execCommandResult;
+  }},
+}};
+
+const localStorageData = new Map();
+const localStorage = {{
+  getItem(key) {{
+    return localStorageData.has(key) ? localStorageData.get(key) : null;
+  }},
+  setItem(key, value) {{
+    localStorageData.set(key, String(value));
+  }},
+  removeItem(key) {{
+    localStorageData.delete(key);
+  }},
+}};
+
+let fetchCalls = [];
+let fetchHandler = async () => jsonResponse({{ channels: [] }});
+async function fetch(path, config = {{}}) {{
+  fetchCalls.push({{
+    path,
+    method: config.method || "GET",
+    body: config.body ?? null,
+  }});
+  return await fetchHandler(path, config);
+}}
+
+function jsonResponse(payload, options = {{}}) {{
+  return {{
+    ok: options.ok !== false,
+    status: options.status || (options.ok === false ? 409 : 200),
+    statusText: options.statusText || (options.ok === false ? "ERROR" : "OK"),
+    text: async () => JSON.stringify(payload),
+  }};
+}}
+
+function errorResponse(code, message, status = 409) {{
+  return jsonResponse({{ error: {{ code, message }} }}, {{ ok: false, status, statusText: "ERROR" }});
+}}
+
+let clipboardCalls = [];
+let clipboardReject = null;
+let execCommandCalls = [];
+let execCommandResult = true;
+const navigator = {{
+  clipboard: {{
+    async writeText(text) {{
+      if (clipboardReject) throw clipboardReject;
+      clipboardCalls.push(text);
+    }},
+  }},
+}};
+
+const openedUrls = [];
+const window = globalThis;
+window.open = (url) => {{
+  openedUrls.push(url);
+  return {{}};
+}};
+window.document = document;
+window.localStorage = localStorage;
+window.fetch = fetch;
+window.navigator = navigator;
+window.setTimeout = setTimeout;
+window.clearTimeout = clearTimeout;
+globalThis.document = document;
+globalThis.localStorage = localStorage;
+globalThis.fetch = fetch;
+globalThis.navigator = navigator;
+globalThis.window = window;
+
+[
+  "channelSelect",
+  "channelState",
+  "connectChannelBtn",
+  "syncMetricsBtn",
+  "recent",
+  "window",
+  "actionState",
+  "refreshProjectsBtn",
+  "createBtn",
+  "url",
+  "name",
+  "projectListState",
+  "projectListPanel",
+  "projectCreateState",
+  "projectDetailState",
+  "projectDetailPanel",
+  "validationPanel",
+  "transcript",
+  "saveTranscriptBtn",
+  "validateProjectBtn",
+  "summaryPanel",
+  "message",
+  "openLearningsBtn",
+  "openProjectBtn",
+  "openTranscriptBtn",
+].forEach(getElement);
+
+getElement("window").value = "28";
+getElement("recent").value = "10";
+document.activeElement = getElement("channelSelect");
+
+async function flush() {{
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}}
+
+function assert(condition, message) {{
+  if (!condition) throw new Error(message);
+}}
+
+(async () => {{
+  eval(uiScript + "\\n;globalThis.__scenarioPromise = (async () => {{\\n" + scenarioBody + "\\n}})();");
+  const result = await globalThis.__scenarioPromise;
+  process.stdout.write(JSON.stringify(result));
+}})().catch((error) => {{
+  console.error(error && error.stack ? error.stack : String(error));
+  process.exit(1);
+}});
+"""
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+        handle.write(harness)
+        harness_path = handle.name
+    try:
+        completed = subprocess.run(
+            [node, harness_path],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    finally:
+        Path(harness_path).unlink(missing_ok=True)
+    return json.loads(completed.stdout)
 
 
 class UiFrontendContractTests(unittest.TestCase):
@@ -31,6 +274,8 @@ class UiFrontendContractTests(unittest.TestCase):
                 "channels/${encodeURIComponent(slug)}/projects",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate",
             },
@@ -45,12 +290,16 @@ class UiFrontendContractTests(unittest.TestCase):
             "selectedProjectDetail",
             "selectedProjectTranscript",
             "selectedProjectValidation",
+            "selectedProjectWorkflow",
+            "selectedWorkflowStepId",
+            "selectedWorkflowBundle",
             "state.channels",
             "state.projects",
             "state.isLoadingChannels",
             "state.isLoadingSummary",
             "state.isLoadingProjects",
             "state.isLoadingProjectDetail",
+            "state.isLoadingWorkflow",
             "oauthAction",
             "metricsAction",
             "actionFeedback",
@@ -58,6 +307,8 @@ class UiFrontendContractTests(unittest.TestCase):
             "transcriptSaveAction",
             "validationAction",
             "projectFeedback",
+            "bundleAction",
+            "bundleFeedback",
         ]:
             self.assertIn(token, self.html)
 
@@ -89,6 +340,7 @@ class UiFrontendContractTests(unittest.TestCase):
             "summaryAbortController",
             "projectListRequestId",
             "projectDetailRequestId",
+            "workflowRequestId",
             "new AbortController()",
             "requestId !== state.summaryRequestId",
             "slug !== state.selectedChannelSlug",
@@ -98,6 +350,9 @@ class UiFrontendContractTests(unittest.TestCase):
             "state.transcriptSaveAction.requestId !== requestId",
             "state.validationAction.requestId !== requestId",
             "projectSlug !== state.selectedProjectSlug",
+            "state.bundleAction.requestId !== requestId",
+            "step.step_id !== state.selectedWorkflowStepId",
+            "bundleMatchesSelection(state.selectedWorkflowBundle)",
         ]:
             self.assertIn(token, self.html)
 
@@ -127,12 +382,62 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("No canonical projects yet", self.html)
         self.assertIn("setSelectedProjectSlug(", self.html)
 
+    def test_workflow_panel_uses_selected_project_workflow_and_bundle_routes(self):
+        self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow`)', self.html)
+        self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle`)', self.html)
+        self.assertIn("Workflow Panel", self.html)
+        self.assertIn("Workflow Steps", self.html)
+        self.assertIn("Selected Workflow Step", self.html)
+        self.assertIn("Build Complete Bundle", self.html)
+        self.assertIn("Copy Complete Bundle", self.html)
+        self.assertIn("Prompt bundle unavailable for this workflow version.", self.html)
+
+    def test_workflow_step_selection_clears_bundle_without_auto_fetch(self):
+        self.assertIn("setSelectedWorkflowStepId(nextStepId)", self.html)
+        self.assertIn("invalidateLoadedBundle();", self.html)
+        self.assertIn('if (event.target.id === "workflowStepSelect")', self.html)
+        self.assertIn('data-workflow-step-id="${escapeHtml(step.step_id)}"', self.html)
+        self.assertNotIn('workflowStepSelect")\n    buildBundleAction()', self.html)
+
+    def test_bundle_preview_and_copy_use_exact_state_bundle_text(self):
+        self.assertIn('<textarea id="bundlePreviewText" readonly spellcheck="false"></textarea>', self.html)
+        self.assertIn('bundlePreviewText.value = typeof bundle.bundle === "string" ? bundle.bundle : "";', self.html)
+        self.assertIn("navigator.clipboard.writeText(bundle.bundle)", self.html)
+        self.assertIn("await fallbackCopyBundleText(bundle.bundle);", self.html)
+        self.assertIn("bundle.bundle_character_count", self.html)
+        self.assertIn("bundle.bundle_sha256", self.html)
+        self.assertIn("bundle.prompt_file_sha256", self.html)
+        self.assertIn('role="status" aria-live="polite"', self.html)
+
+    def test_workflow_panel_renders_generic_step_and_constraint_data(self):
+        self.assertIn("Generated from the workflow definition in step order.", self.html)
+        self.assertIn("workflowSteps.length", self.html)
+        self.assertIn("describeConversationConstraint(step)", self.html)
+        self.assertIn("Continue in the same ${step.required_model || \"selected\"} conversation: ${constraint.group_id}", self.html)
+        self.assertIn("No same-conversation requirement", self.html)
+
+    def test_workflow_errors_are_mapped_to_safe_user_messages(self):
+        for token in [
+            "WORKFLOW_NOT_CONFIGURED",
+            "WORKFLOW_STATE_INVALID",
+            "PROMPT_SET_UNAVAILABLE",
+            "PROMPT_MANIFEST_INVALID",
+            "PROMPT_FILE_NOT_FOUND",
+            "PROMPT_FILE_DIGEST_MISMATCH",
+            "WORKFLOW_STEP_NOT_FOUND",
+            "BUNDLE_REQUIRED_INPUT_MISSING",
+            "BUNDLE_PROJECT_CONTEXT_MISSING",
+            "PROMPT_BUNDLE_INVALID",
+        ]:
+            self.assertIn(token, self.html)
+        self.assertIn("bundleValidationError(bundle)", self.html)
+        self.assertIn("The loaded workflow bundle metadata is inconsistent.", self.html)
+
     def test_project_creation_uses_exact_v2_route_and_supported_payload(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects`, {', self.html)
         self.assertIn('const payload = { url };', self.html)
         self.assertIn("payload.project_name = projectName;", self.html)
         self.assertIn("Project creation is available only when the selected channel is connected.", self.html)
-        self.assertNotIn("project_slug:", self.html)
 
     def test_transcript_and_validation_use_exact_v2_project_routes(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript`, {', self.html)
@@ -189,6 +494,413 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("Selected Channel Actions", self.html)
         self.assertIn("Research Projects", self.html)
         self.assertIn("Project Detail", self.html)
+        self.assertIn("Read-only workflow detail for the selected canonical project.", self.html)
+
+
+class UiFrontendRuntimeTests(unittest.TestCase):
+    def test_step_change_build_copy_and_inert_bundle_preview(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                workflow_definition_sha256: "abc123",
+                binding_source: "PROJECT_JSON",
+              },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow <Demo>",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [
+                  {
+                    step_id: "alpha-step",
+                    order: 1,
+                    display_name: "Alpha <Step>",
+                    required_model: "Gemini 2.5",
+                    input_artifact_ids: ["input_a"],
+                    optional_input_artifact_ids: ["optional_a"],
+                    output_artifact_ids: ["output_a"],
+                    resulting_lifecycle_state: "READY",
+                    constraints: [],
+                  },
+                  {
+                    step_id: "beta-step",
+                    order: 2,
+                    display_name: "Beta",
+                    required_model: "Claude 4",
+                    input_artifact_ids: [],
+                    optional_input_artifact_ids: [],
+                    output_artifact_ids: [],
+                    resulting_lifecycle_state: "DONE",
+                    constraints: [{ type: "SAME_MODEL_CONVERSATION_REQUIRED", group_id: "claude_group" }],
+                  },
+                ],
+              },
+              state: {
+                current_step_id: "alpha-step",
+                current_step_status: "READY",
+                next_step_id: "beta-step",
+                current_lifecycle_state: "INPUT_READY",
+              },
+              artifacts: [
+                { artifact_id: "input_a", display_name: "Input <A>", relative_path: "workflow/input_a.md", exists: true },
+                { artifact_id: "optional_a", display_name: "Optional", relative_path: "workflow/optional_a.md", exists: false },
+                { artifact_id: "output_a", display_name: "Output", relative_path: "workflow/output_a.md", exists: false },
+              ],
+            };
+            state.selectedWorkflowStepId = "alpha-step";
+            const bundleText = "Line 1\\n<img src=x onerror=alert(1)>\\n<script>throw new Error(\\"unsafe\\")</script>\\n& < > \\" '";
+            fetchHandler = async (path) => {
+              if (path.includes("/workflow/steps/alpha-step/bundle")) {
+                return jsonResponse({
+                  channel_slug: "channel-a",
+                  project_slug: "project-a",
+                  step_id: "alpha-step",
+                  binding: {
+                    workflow_id: "wf-demo",
+                    workflow_version: "2",
+                    workflow_definition_sha256: "abc123",
+                  },
+                  bundle: bundleText,
+                  bundle_sha256: "sha-alpha",
+                  bundle_character_count: bundleText.length,
+                  prompt_file_sha256: "prompt-sha",
+                  input_artifact_ids: ["input_a"],
+                  missing_optional_inputs: ["optional_a"],
+                  required_model: "Gemini 2.5",
+                  output_contract: { response_mode: "TEXT_ONLY" },
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            const beforeFetchCount = fetchCalls.length;
+            setSelectedWorkflowStepId("beta-step");
+            await flush();
+            const afterStepFetchCount = fetchCalls.length;
+            setSelectedWorkflowStepId("alpha-step");
+            await flush();
+            await buildBundleAction();
+            await flush();
+            const previewValue = document.getElementById("bundlePreviewText").value;
+            const panelHtml = document.getElementById("projectDetailPanel").innerHTML;
+            await copyBundleAction();
+            await flush();
+            return {
+              beforeFetchCount,
+              afterStepFetchCount,
+              bundleFetchCalls: fetchCalls.filter((call) => call.path.includes("/workflow/steps/alpha-step/bundle")).length,
+              bundlePath: fetchCalls.find((call) => call.path.includes("/workflow/steps/alpha-step/bundle")).path,
+              storedBundle: state.selectedWorkflowBundle.bundle,
+              previewValue,
+              panelContainsRawImg: panelHtml.includes("<img src=x onerror=alert(1)>"),
+              panelContainsEscapedStepName: panelHtml.includes("Alpha &lt;Step&gt;"),
+              clipboardCalls,
+              copyFeedback: state.bundleFeedback.text,
+            };
+            """
+        )
+        self.assertEqual(result["beforeFetchCount"], result["afterStepFetchCount"])
+        self.assertEqual(result["bundleFetchCalls"], 1)
+        self.assertEqual(
+            result["bundlePath"],
+            "/api/v2/channels/channel-a/projects/project-a/workflow/steps/alpha-step/bundle",
+        )
+        self.assertEqual(result["storedBundle"], result["previewValue"])
+        self.assertEqual(result["clipboardCalls"], [result["storedBundle"]])
+        self.assertFalse(result["panelContainsRawImg"])
+        self.assertTrue(result["panelContainsEscapedStepName"])
+        self.assertEqual(result["copyFeedback"], "Copied the exact complete bundle.")
+
+    def test_stale_workflow_response_is_ignored_after_project_change(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            const deferredA = makeDeferred();
+            const deferredB = makeDeferred();
+            fetchHandler = async (path) => {
+              if (path.endsWith("/projects/project-a/workflow")) return await deferredA.promise;
+              if (path.endsWith("/projects/project-b/workflow")) return await deferredB.promise;
+              return jsonResponse({ channels: [] });
+            };
+            const requestA = loadSelectedProjectWorkflow("project-a", "channel-a");
+            state.selectedProjectSlug = "project-b";
+            const requestB = loadSelectedProjectWorkflow("project-b", "channel-a");
+            deferredB.resolve(jsonResponse({
+              channel_slug: "channel-a",
+              project_slug: "project-b",
+              binding: { workflow_id: "wf-b", workflow_version: "2", workflow_definition_sha256: "sha-b", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-b",
+                workflow_version: "2",
+                display_name: "Workflow B",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "b-step", order: 1, display_name: "B Step", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "B", constraints: [] }],
+              },
+              state: { current_step_id: "b-step", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [],
+            }));
+            await flush();
+            deferredA.resolve(jsonResponse({
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-a", workflow_version: "2", workflow_definition_sha256: "sha-a", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-a",
+                workflow_version: "2",
+                display_name: "Workflow A",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "a-step", order: 1, display_name: "A Step", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "A", constraints: [] }],
+              },
+              state: { current_step_id: "a-step", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [],
+            }));
+            await Promise.all([requestA, requestB]);
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              workflowId: state.selectedProjectWorkflow.binding.workflow_id,
+              selectedStepId: state.selectedWorkflowStepId,
+              workflowError: state.workflowError,
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-b")
+        self.assertEqual(result["workflowId"], "wf-b")
+        self.assertEqual(result["selectedStepId"], "b-step")
+        self.assertEqual(result["workflowError"], "")
+
+    def test_stale_bundle_response_and_copy_time_identity_guard(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [
+                  { step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "ONE", constraints: [] },
+                  { step_id: "step-2", order: 2, display_name: "Step 2", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "TWO", constraints: [] },
+                ],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: "step-2", current_lifecycle_state: "INPUT_READY" },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            const deferred1 = makeDeferred();
+            const deferred2 = makeDeferred();
+            fetchHandler = async (path) => {
+              if (path.endsWith("/steps/step-1/bundle")) return await deferred1.promise;
+              if (path.endsWith("/steps/step-2/bundle")) return await deferred2.promise;
+              return jsonResponse({ channels: [] });
+            };
+            const first = buildBundleAction();
+            setSelectedWorkflowStepId("step-2");
+            const second = buildBundleAction();
+            deferred2.resolve(jsonResponse({
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-2",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "bundle-two",
+              bundle_sha256: "sha-two",
+              bundle_character_count: 10,
+              prompt_file_sha256: "prompt-two",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Claude",
+              output_contract: { response_mode: "TEXT_ONLY" },
+            }));
+            await flush();
+            deferred1.resolve(jsonResponse({
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "bundle-one",
+              bundle_sha256: "sha-one",
+              bundle_character_count: 10,
+              prompt_file_sha256: "prompt-one",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "TEXT_ONLY" },
+            }));
+            await Promise.all([first, second]);
+            await flush();
+            state.selectedWorkflowBundle.identity.project_slug = "other-project";
+            await copyBundleAction();
+            await flush();
+            return {
+              finalBundle: state.selectedWorkflowBundle,
+              clipboardCalls,
+              bundleFeedback: state.bundleFeedback.text,
+            };
+            """
+        )
+        self.assertIsNone(result["finalBundle"])
+        self.assertEqual(result["clipboardCalls"], [])
+        self.assertEqual(result["bundleFeedback"], "The loaded bundle is stale. Build it again for the current selection.")
+
+    def test_clipboard_fallback_restores_focus_and_cleans_up(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            const previouslyFocused = document.getElementById("saveTranscriptBtn");
+            previouslyFocused.focus();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "ONE", constraints: [] }] },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Line 1\\nLine 2 with unicode: Xin chào\\n  trailing  ",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Line 1\\nLine 2 with unicode: Xin chào\\n  trailing  ".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "TEXT_ONLY" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            clipboardReject = new Error("denied");
+            await copyBundleAction();
+            await flush();
+            return {
+              clipboardCalls,
+              execCommandCalls,
+              activeElementId: document.activeElement && document.activeElement.id,
+              bodyChildrenAfter: bodyChildren.length,
+              feedback: state.bundleFeedback.text,
+            };
+            """
+        )
+        self.assertEqual(result["clipboardCalls"], [])
+        self.assertEqual(result["execCommandCalls"], ["copy"])
+        self.assertEqual(result["activeElementId"], "saveTranscriptBtn")
+        self.assertEqual(result["bodyChildrenAfter"], 0)
+        self.assertEqual(result["feedback"], "Copied the exact complete bundle.")
+
+    def test_generic_workflow_rendering_v1_unavailable_and_required_input_policy(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-three", workflow_version: "1", workflow_definition_sha256: "sha-three", binding_source: "LEGACY_SYNTHESIZED" },
+              definition: {
+                workflow_id: "wf-three",
+                workflow_version: "1",
+                display_name: "Workflow Three",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "MISSING", bundle_available: false },
+                steps: [
+                  { step_id: "alpha", order: 1, display_name: "Alpha", required_model: "Model A", input_artifact_ids: ["input_alpha"], optional_input_artifact_ids: [], output_artifact_ids: ["out_alpha"], resulting_lifecycle_state: "A", constraints: [] },
+                  { step_id: "beta", order: 2, display_name: "Beta", required_model: "Model B", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["out_beta"], resulting_lifecycle_state: "B", constraints: [{ type: "SAME_MODEL_CONVERSATION_REQUIRED", group_id: "group-b" }] },
+                  { step_id: "gamma", order: 3, display_name: "Gamma", required_model: "Model C", input_artifact_ids: [], optional_input_artifact_ids: ["opt_gamma"], output_artifact_ids: [], resulting_lifecycle_state: "C", constraints: [] },
+                ],
+              },
+              state: { current_step_id: "missing-current", current_step_status: "BLOCKED", next_step_id: "gamma", current_lifecycle_state: "INPUT_READY", blocking_reason: "WAITING_FOR_INPUT" },
+              artifacts: [
+                { artifact_id: "input_alpha", display_name: "Input Alpha", relative_path: "workflow/input_alpha.md", exists: false },
+                { artifact_id: "out_alpha", display_name: "Output Alpha", relative_path: "workflow/out_alpha.md", exists: false },
+                { artifact_id: "out_beta", display_name: "Output Beta", relative_path: "workflow/out_beta.md", exists: false },
+                { artifact_id: "opt_gamma", display_name: "Optional Gamma", relative_path: "workflow/opt_gamma.md", exists: false },
+              ],
+            };
+            state.selectedWorkflowStepId = "alpha";
+            render();
+            const threeStepCount = (document.getElementById("projectDetailPanel").innerHTML.match(/data-workflow-step-id=/g) || []).length;
+            const nextStepRendered = document.getElementById("projectDetailPanel").innerHTML.includes("gamma");
+            const buildDisabledV1 = bundleButtonModel().disabled;
+            await buildBundleAction();
+            await flush();
+            const bundleCallCountV1 = fetchCalls.filter((call) => call.path.includes("/workflow/steps/")).length;
+
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-eight", workflow_version: "2", workflow_definition_sha256: "sha-eight", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-eight",
+                workflow_version: "2",
+                display_name: "Workflow Eight",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [
+                  { step_id: "one", order: 1, display_name: "One", required_model: "X", input_artifact_ids: ["req"], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "1", constraints: [] },
+                  { step_id: "two", order: 2, display_name: "Two", required_model: "Y", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "2", constraints: [] },
+                  { step_id: "three", order: 3, display_name: "Three", required_model: "Z", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "3", constraints: [] },
+                  { step_id: "four", order: 4, display_name: "Four", required_model: "Q", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "4", constraints: [] },
+                  { step_id: "five", order: 5, display_name: "Five", required_model: "R", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "5", constraints: [] },
+                  { step_id: "six", order: 6, display_name: "Six", required_model: "S", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "6", constraints: [] },
+                  { step_id: "seven", order: 7, display_name: "Seven", required_model: "T", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "7", constraints: [] },
+                  { step_id: "eight", order: 8, display_name: "Eight", required_model: "U", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "8", constraints: [] },
+                ],
+              },
+              state: { current_step_id: "unknown", current_step_status: "READY", next_step_id: "three", current_lifecycle_state: "READY" },
+              artifacts: [{ artifact_id: "req", display_name: "Required", relative_path: "workflow/req.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = workflowStepList()[0] ? workflowStepList()[0].step_id : null;
+            fetchHandler = async (path) => {
+              if (path.endsWith("/steps/one/bundle")) return errorResponse("BUNDLE_REQUIRED_INPUT_MISSING", "Required input missing at C:\\\\secret\\\\path", 409);
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            const eightStepCount = (document.getElementById("projectDetailPanel").innerHTML.match(/data-workflow-step-id=/g) || []).length;
+            await buildBundleAction();
+            await flush();
+            return {
+              threeStepCount,
+              eightStepCount,
+              selectedFallback: state.selectedWorkflowStepId,
+              nextStepRendered,
+              buildDisabledV1,
+              bundleCallCountV1,
+              requiredInputError: state.bundleFeedback.text,
+              bundleCallsTotal: fetchCalls.filter((call) => call.path.includes("/workflow/steps/")).length,
+            };
+            """
+        )
+        self.assertEqual(result["threeStepCount"], 3)
+        self.assertEqual(result["eightStepCount"], 8)
+        self.assertEqual(result["selectedFallback"], "one")
+        self.assertTrue(result["nextStepRendered"])
+        self.assertTrue(result["buildDisabledV1"])
+        self.assertEqual(result["bundleCallCountV1"], 0)
+        self.assertEqual(result["requiredInputError"], "Required workflow inputs are still missing for this step.")
+        self.assertEqual(result["bundleCallsTotal"], 1)
 
 
 if __name__ == "__main__":
