@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -929,6 +929,10 @@ def _map_output_parser_error(exc: channel_output_parser.ChannelOutputParserError
     return _v2_error(exc.code, exc.message, exc.status)
 
 
+def _map_workflow_write_error(exc: channel_workflow_write.ChannelWorkflowWriteError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
 def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
     channel = _load_channel_or_error(root, channel_slug)
     paths = channel_workspace.canonical_channel_paths(root, channel_slug)
@@ -1168,6 +1172,22 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, parsed_output
+            if len(parts) == 10 and parts[4] == "projects" and parts[6] == "workflow" and parts[7] == "steps" and parts[9] == "revisions" and method == "POST":
+                project_slug = parts[5]
+                step_id = parts[8]
+                try:
+                    status, data = channel_workflow_write.save_candidate(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        step_id,
+                        payload.get("bundle_sha256"),
+                        payload.get("output_text"),
+                        payload.get("expected_state_revision"),
+                    )
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
+                return status, data
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
                 project_slug = parts[5]
                 try:
@@ -1400,6 +1420,7 @@ const state = {
   workflowRequestId: 0,
   bundleAction: { busy: false, channelSlug: null, projectSlug: null, stepId: null, requestId: 0 },
   parseOutputAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 },
+  saveCandidateAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, rawOutputSha256: null, expectedStateRevision: null, requestId: 0 },
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
   actionFeedback: { kind: "", slug: null, text: "" },
@@ -1407,7 +1428,9 @@ const state = {
   transcriptSaveAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
   validationAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
   projectFeedback: { kind: "", channelSlug: null, projectSlug: null, text: "" },
-  bundleFeedback: { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" }
+  bundleFeedback: { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" },
+  candidateSaveFeedback: { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" },
+  lastSaveCandidateResult: null
 };
 
 function escapeHtml(value) {
@@ -1466,6 +1489,28 @@ function parseOutputErrorSummary(error, fallback) {
     OUTPUT_CONTRACT_INVALID: "This workflow step does not expose a usable output contract for preview.",
     PROMPT_OUTPUT_PARSE_FAILED: "The pasted output could not be parsed for preview.",
     WORKFLOW_STEP_NOT_FOUND: "The selected workflow step is no longer available.",
+  };
+  return known[code] || describeError(error, fallback);
+}
+
+function saveCandidateErrorSummary(error, fallback) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  const known = {
+    BUNDLE_IDENTITY_MISMATCH: "The loaded bundle is stale. Build it again before saving a candidate.",
+    OUTPUT_TEXT_REQUIRED: "Paste the AI output before saving a candidate.",
+    PROMPT_OUTPUT_INVALID: "The current parsed output is not valid enough to save as a candidate.",
+    OUTPUT_CONTRACT_INVALID: "This workflow step output contract is not currently writable.",
+    WORKFLOW_STATE_INVALID: "The saved workflow state could not be read safely.",
+    WORKFLOW_STATE_VERSION_UNSUPPORTED: "This workflow state version cannot be written safely yet.",
+    STATE_REVISION_CONFLICT: "The workflow changed before the candidate save completed. Refresh the workflow and try again.",
+    WORKFLOW_STEP_NOT_WRITABLE: "This workflow step is not currently writable.",
+    CANDIDATE_EXISTS: "A candidate already exists for this workflow step.",
+    PROJECT_WORKFLOW_BUSY: "Another workflow save is already running for this project.",
+    PROJECT_WORKFLOW_LOCK_STALE: "The workflow lock is stale and requires review before another save.",
+    WORKFLOW_RECOVERY_REQUIRED: "An incomplete workflow transaction requires review before another save.",
+    REVISION_STORAGE_INVALID: "The workflow revision storage paths are not safe to use.",
+    REVISION_ID_CONFLICT: "A workflow revision id conflict was detected.",
+    WORKFLOW_WRITE_FAILED: "The workflow candidate could not be saved safely.",
   };
   return known[code] || describeError(error, fallback);
 }
@@ -1589,6 +1634,22 @@ function bundleFeedbackForSelection() {
   return feedback;
 }
 
+function clearCandidateSaveFeedback() {
+  state.candidateSaveFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
+}
+
+function setCandidateSaveFeedback(kind, channelSlug, projectSlug, stepId, text) {
+  state.candidateSaveFeedback = { kind, channelSlug, projectSlug, stepId, text };
+}
+
+function candidateSaveFeedbackForSelection() {
+  const feedback = state.candidateSaveFeedback;
+  if (!feedback.text) return { kind: "", text: "" };
+  if (feedback.channelSlug !== state.selectedChannelSlug || feedback.projectSlug !== state.selectedProjectSlug) return { kind: "", text: "" };
+  if (feedback.stepId && feedback.stepId !== state.selectedWorkflowStepId) return { kind: "", text: "" };
+  return feedback;
+}
+
 function invalidateLoadedBundle() {
   state.selectedWorkflowBundle = null;
   state.bundleError = "";
@@ -1596,7 +1657,10 @@ function invalidateLoadedBundle() {
   state.parsedOutputResult = null;
   state.parsedOutputError = "";
   state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
+  state.saveCandidateAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, rawOutputSha256: null, expectedStateRevision: null, requestId: 0 };
+  state.lastSaveCandidateResult = null;
   clearBundleFeedback();
+  clearCandidateSaveFeedback();
 }
 
 function clearWorkflowState() {
@@ -1679,6 +1743,24 @@ function parsedOutputIdentityForSelection(outputTextArg) {
   const current = bundleIdentityForSelection();
   const outputText = outputTextArg !== undefined ? outputTextArg : state.pastedOutputDraft;
   if (!bundle || !current) return null;
+  const rawOutputText = typeof outputText === "string" ? outputText : "";
+  let rawOutputSha256 = "";
+  const currentParsed = state.parsedOutputResult;
+  if (
+    currentParsed
+    && currentParsed.identity
+    && currentParsed.raw_output
+    && typeof currentParsed.raw_output.sha256 === "string"
+    && currentParsed.identity.channel_slug === current.channel_slug
+    && currentParsed.identity.project_slug === current.project_slug
+    && currentParsed.identity.workflow_id === current.workflow_id
+    && currentParsed.identity.workflow_version === current.workflow_version
+    && currentParsed.identity.step_id === current.step_id
+    && currentParsed.identity.bundle_sha256 === bundle.bundle_sha256
+    && currentParsed.raw_output.character_count === rawOutputText.length
+  ) {
+    rawOutputSha256 = currentParsed.raw_output.sha256;
+  }
   return {
     channel_slug: current.channel_slug,
     project_slug: current.project_slug,
@@ -1686,7 +1768,8 @@ function parsedOutputIdentityForSelection(outputTextArg) {
     workflow_version: current.workflow_version,
     step_id: current.step_id,
     bundle_sha256: bundle.bundle_sha256,
-    output_text: typeof outputText === "string" ? outputText : ""
+    output_text: rawOutputText,
+    raw_output_sha256: rawOutputSha256
   };
 }
 
@@ -1741,6 +1824,22 @@ function artifactListForIds(ids) {
     required: true,
     exists: false
   });
+}
+
+function stepCandidateSummary(stepId) {
+  const workflow = state.selectedProjectWorkflow;
+  const stepStates = workflow && workflow.state && workflow.state.step_states ? workflow.state.step_states : {};
+  return stepStates && typeof stepStates === "object" ? (stepStates[stepId] || null) : null;
+}
+
+function stepStatusLabel(step) {
+  const candidate = step && stepCandidateSummary(step.step_id);
+  if (candidate && candidate.status) return candidate.status;
+  const workflow = state.selectedProjectWorkflow;
+  if (workflow && workflow.state && workflow.state.current_step_id === step.step_id) {
+    return workflow.state.current_step_status || "UNKNOWN";
+  }
+  return "READY";
 }
 
 function stepAvailabilitySummary(step) {
@@ -1807,6 +1906,40 @@ function parseOutputButtonModel() {
     disabled: busy,
     label: busy ? "Parsing Output..." : "Parse and Preview",
     helper: busy ? "Checking the pasted output against the current bundle..." : "Preview parsed output in memory only. Nothing is written to project files."
+  };
+}
+
+function saveCandidateButtonModel() {
+  const workflow = state.selectedProjectWorkflow;
+  const bundle = activeBundleRecord();
+  const step = selectedWorkflowStepRecord();
+  const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !bundle || !step || !parsedOutput) {
+    return { disabled: true, label: "Save Candidate", helper: "Parse a current valid output preview before saving a candidate." };
+  }
+  if (parsedOutput.status !== "VALID") {
+    return { disabled: true, label: "Save Candidate", helper: "Only a valid parsed output preview can be saved as a candidate." };
+  }
+  const action = workflow.available_actions && workflow.available_actions[step.step_id] ? workflow.available_actions[step.step_id] : {};
+  if (!action.save_candidate) {
+    return { disabled: true, label: "Save Candidate", helper: "This workflow step does not currently allow candidate save." };
+  }
+  if (!parsedOutput.raw_output || typeof parsedOutput.raw_output.sha256 !== "string") {
+    return { disabled: true, label: "Save Candidate", helper: "The current parsed output preview is missing its raw-output identity." };
+  }
+  const busy = state.saveCandidateAction.busy
+    && state.saveCandidateAction.channelSlug === state.selectedChannelSlug
+    && state.saveCandidateAction.projectSlug === state.selectedProjectSlug
+    && state.saveCandidateAction.workflowId === (bundle.identity && bundle.identity.workflow_id)
+    && state.saveCandidateAction.workflowVersion === (bundle.identity && bundle.identity.workflow_version)
+    && state.saveCandidateAction.stepId === step.step_id
+    && state.saveCandidateAction.bundleSha256 === bundle.bundle_sha256
+    && state.saveCandidateAction.rawOutputSha256 === parsedOutput.raw_output.sha256
+    && state.saveCandidateAction.expectedStateRevision === (workflow.state && workflow.state.state_revision);
+  return {
+    disabled: busy,
+    label: busy ? "Saving Candidate..." : "Save Candidate",
+    helper: busy ? "Persisting immutable candidate revisions for the current parsed output..." : "Save a candidate revision group only. No stable artifact files are published in this phase."
   };
 }
 
@@ -2205,6 +2338,8 @@ function renderProjectDetailState() {
   const bundleButton = bundleButtonModel();
   const copyButton = copyBundleButtonModel();
   const parseButton = parseOutputButtonModel();
+  const saveCandidateButton = saveCandidateButtonModel();
+  const candidateSaveFeedback = candidateSaveFeedbackForSelection();
   const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
   const currentStepLabel = workflowSteps.find((step) => step.step_id === workflowState.current_step_id);
   const nextStepLabel = workflowSteps.find((step) => step.step_id === workflowState.next_step_id);
@@ -2223,7 +2358,7 @@ function renderProjectDetailState() {
         data-workflow-step-id="${escapeHtml(step.step_id)}"
         style="width:100%;text-align:left"
       >
-        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong>${pill(selected ? "SELECTED" : "READY")}</div>
+        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong>${pill(selected ? "SELECTED" : stepStatusLabel(step))}</div>
         <div class="meta">Required model: ${escapeHtml(step.required_model || "Unspecified")}</div>
         <div class="meta">Resulting state: ${escapeHtml(step.resulting_lifecycle_state || "Unknown")}</div>
         <div class="meta">Availability: ${escapeHtml(stepAvailabilitySummary(step))}</div>
@@ -2248,6 +2383,17 @@ function renderProjectDetailState() {
   const parseFeedbackHtml = state.parsedOutputError
     ? `<div class="check"><strong>Output Preview Error</strong>${pill("ERROR")}</div><div class="meta">${escapeHtml(state.parsedOutputError)}</div>`
     : `<div class="meta">${escapeHtml(parseButton.helper)}</div>`;
+  const candidateFeedbackHtml = candidateSaveFeedback.text
+    ? `<div class="check"><strong>${candidateSaveFeedback.kind === "error" ? "Candidate Save Error" : "Candidate Save Status"}</strong>${pill(candidateSaveFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(candidateSaveFeedback.text)}</div>`
+    : `<div class="meta">${escapeHtml(saveCandidateButton.helper)}</div>`;
+  const selectedCandidate = selectedStep ? stepCandidateSummary(selectedStep.step_id) : null;
+  const lastSavedCandidate = state.lastSaveCandidateResult
+    && state.lastSaveCandidateResult.identity
+    && state.lastSaveCandidateResult.identity.channel_slug === state.selectedChannelSlug
+    && state.lastSaveCandidateResult.identity.project_slug === state.selectedProjectSlug
+    && state.lastSaveCandidateResult.identity.step_id === (selectedStep && selectedStep.step_id)
+      ? state.lastSaveCandidateResult
+      : null;
   const parsedArtifactsHtml = parsedOutput && Array.isArray(parsedOutput.artifacts) && parsedOutput.artifacts.length
     ? parsedOutput.artifacts.map((artifact, index) => `
       <div class="card" style="margin-top:12px">
@@ -2304,6 +2450,8 @@ function renderProjectDetailState() {
           <div class="card"><strong>Binding Source</strong><div>${pill(binding.binding_source || "UNKNOWN")}</div></div>
           <div class="card"><strong>Prompt Set</strong><div>${pill(promptSet.status || "UNKNOWN")}</div><div class="meta">${escapeHtml(promptSet.bundle_available ? "Bundle available" : "Prompt bundle unavailable for this workflow version.")}</div></div>
           <div class="card"><strong>Execution Mode</strong><div class="meta">${escapeHtml(definition.execution_mode || "Unknown")}</div></div>
+          <div class="card"><strong>State Revision</strong><div class="meta">${escapeHtml(String(workflowState.state_revision ?? 0))}</div></div>
+          <div class="card"><strong>State Persisted</strong><div>${pill(workflowState.state_persisted ? "FOUND" : "MISSING")}</div></div>
           <div class="card"><strong>Current Lifecycle</strong><div class="meta">${escapeHtml(workflowState.current_lifecycle_state || "Not started")}</div></div>
           <div class="card"><strong>Current Step</strong><div class="meta">${escapeHtml(currentStepLabel ? currentStepLabel.display_name : (workflowState.current_step_id || "Unknown"))}</div><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
           <div class="card"><strong>Current Step Status</strong><div>${pill(workflowState.current_step_status || "UNKNOWN")}</div></div>
@@ -2332,6 +2480,7 @@ function renderProjectDetailState() {
               <div class="card"><strong>Conversation Requirement</strong><div class="meta">${escapeHtml(describeConversationConstraint(selectedStep))}</div></div>
               <div class="card"><strong>Resulting Lifecycle State</strong><div class="meta">${escapeHtml(selectedStep.resulting_lifecycle_state || "Unknown")}</div></div>
               <div class="card"><strong>Output Artifacts</strong><div class="meta">${escapeHtml(String((selectedStep.output_artifact_ids || []).length))}</div></div>
+              <div class="card"><strong>Save Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].save_candidate ? "READY" : "WAITING")}</div></div>
             </div>
             <div class="row" style="margin-top:12px">
               <button type="button" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
@@ -2389,8 +2538,10 @@ function renderProjectDetailState() {
               <textarea id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." ${bundle ? "" : "disabled"} spellcheck="false"></textarea>
               <div class="row" style="margin-top:12px">
                 <button type="button" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
+                <button type="button" class="secondary" id="saveCandidateBtn" ${saveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(saveCandidateButton.label)}</button>
               </div>
               <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
+              <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
               ${parsedOutput ? `
                 <div class="summary-grid" style="margin-top:12px">
                   <div class="card"><strong>Preview Status</strong><div>${pill(parsedOutput.status || "UNKNOWN")}</div></div>
@@ -2403,6 +2554,31 @@ function renderProjectDetailState() {
                   ? `<div class="notice" style="margin-top:12px"><strong>Parse Validation Errors</strong><span class="meta">${escapeHtml(parsedOutput.validation.errors.join(" | "))}</span></div>`
                   : ""
                 }
+                ${(selectedCandidate || lastSavedCandidate) ? `
+                  <div class="card" style="margin-top:12px">
+                    <strong>Candidate Summary</strong>
+                    <div class="summary-grid" style="margin-top:12px">
+                      <div class="card"><strong>Candidate Group</strong><div class="meta mono">${escapeHtml(
+                        selectedCandidate && selectedCandidate.candidate_group_id
+                          ? selectedCandidate.candidate_group_id
+                          : (lastSavedCandidate && lastSavedCandidate.revision_group && lastSavedCandidate.revision_group.revision_group_id) || ""
+                      )}</div></div>
+                      <div class="card"><strong>Candidate Status</strong><div>${pill(selectedCandidate && selectedCandidate.status ? selectedCandidate.status : "CANDIDATE")}</div></div>
+                    </div>
+                    ${(lastSavedCandidate && lastSavedCandidate.revision_group && Array.isArray(lastSavedCandidate.revision_group.artifacts) && lastSavedCandidate.revision_group.artifacts.length)
+                      ? `<div class="stack" style="margin-top:12px">${lastSavedCandidate.revision_group.artifacts.map((artifact) => `
+                        <div class="check">
+                          <div>
+                            <strong>${escapeHtml(artifact.artifact_id || "")}</strong>
+                            <div class="meta mono">${escapeHtml(artifact.revision_id || "")}</div>
+                          </div>
+                          <div>${pill("CANDIDATE")}</div>
+                        </div>
+                      `).join("")}</div>`
+                      : ""
+                    }
+                  </div>
+                ` : ""}
                 ${parsedArtifactsHtml}
               ` : ""}
             </div>
@@ -2781,17 +2957,20 @@ async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
   }
 }
 
-async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg) {
+async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, preserveBundleStateArg) {
   const channelSlug = channelSlugArg || state.selectedChannelSlug;
   const projectSlug = projectSlugArg || state.selectedProjectSlug;
+  const preserveBundleState = !!preserveBundleStateArg;
   if (!channelSlug || !projectSlug || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
 
   const requestId = ++state.workflowRequestId;
   state.isLoadingWorkflow = true;
   state.workflowError = "";
   state.selectedProjectWorkflow = null;
-  state.selectedWorkflowStepId = null;
-  invalidateLoadedBundle();
+  if (!preserveBundleState) {
+    state.selectedWorkflowStepId = null;
+    invalidateLoadedBundle();
+  }
   render();
 
   try {
@@ -2801,11 +2980,13 @@ async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg) {
     const definitionSteps = data && data.definition && Array.isArray(data.definition.steps) ? data.definition.steps : [];
     const currentStepId = data && data.state && typeof data.state.current_step_id === "string" ? data.state.current_step_id : null;
     const hasCurrentStep = currentStepId && definitionSteps.some((step) => step.step_id === currentStepId);
-    state.selectedWorkflowStepId = hasCurrentStep ? currentStepId : (definitionSteps[0] ? definitionSteps[0].step_id : null);
+    if (!preserveBundleState || !state.selectedWorkflowStepId || !definitionSteps.some((step) => step.step_id === state.selectedWorkflowStepId)) {
+      state.selectedWorkflowStepId = hasCurrentStep ? currentStepId : (definitionSteps[0] ? definitionSteps[0].step_id : null);
+    }
   } catch (error) {
     if (requestId !== state.workflowRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
     state.selectedProjectWorkflow = null;
-    state.selectedWorkflowStepId = null;
+    if (!preserveBundleState) state.selectedWorkflowStepId = null;
     state.workflowError = workflowErrorSummary(error, "Could not load the selected project workflow.");
   } finally {
     if (requestId === state.workflowRequestId) {
@@ -3067,6 +3248,135 @@ async function parseOutputAction() {
   }
 }
 
+async function saveCandidateAction() {
+  const channelSlug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const workflow = state.selectedProjectWorkflow;
+  const step = selectedWorkflowStepRecord();
+  const bundle = activeBundleRecord();
+  const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
+  const button = saveCandidateButtonModel();
+  if (!channelSlug || !projectSlug || !workflow || !step || !bundle || !parsedOutput) {
+    setCandidateSaveFeedback("error", channelSlug, projectSlug, state.selectedWorkflowStepId, "Parse a current valid output preview before saving a candidate.");
+    render();
+    return;
+  }
+  if (button.disabled) {
+    if (!(state.saveCandidateAction.busy
+      && state.saveCandidateAction.channelSlug === channelSlug
+      && state.saveCandidateAction.projectSlug === projectSlug
+      && state.saveCandidateAction.stepId === step.step_id)) {
+      setCandidateSaveFeedback("error", channelSlug, projectSlug, step.step_id, button.helper);
+      render();
+    }
+    return;
+  }
+
+  const parseIdentity = parsedOutputIdentityForSelection(state.pastedOutputDraft);
+  const expectedStateRevision = workflow.state && typeof workflow.state.state_revision === "number" ? workflow.state.state_revision : 0;
+  if (!parseIdentity || !parseIdentity.raw_output_sha256) {
+    setCandidateSaveFeedback("error", channelSlug, projectSlug, step.step_id, "The current parsed output preview no longer matches the selected workflow state.");
+    render();
+    return;
+  }
+
+  const requestId = state.saveCandidateAction.requestId + 1;
+  state.saveCandidateAction = {
+    busy: true,
+    channelSlug,
+    projectSlug,
+    workflowId: parseIdentity.workflow_id,
+    workflowVersion: parseIdentity.workflow_version,
+    stepId: step.step_id,
+    bundleSha256: parseIdentity.bundle_sha256,
+    rawOutputSha256: parseIdentity.raw_output_sha256,
+    expectedStateRevision,
+    requestId
+  };
+  setCandidateSaveFeedback("info", channelSlug, projectSlug, step.step_id, "Saving immutable candidate revisions for the selected workflow step...");
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/revisions`, {
+      method: "POST",
+      body: JSON.stringify({
+        bundle_sha256: bundle.bundle_sha256,
+        output_text: parseIdentity.output_text,
+        expected_state_revision: expectedStateRevision
+      })
+    });
+    const currentWorkflow = state.selectedProjectWorkflow;
+    const currentParsed = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
+    const currentBundle = activeBundleRecord();
+    if (
+      state.saveCandidateAction.requestId !== requestId
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+      || !currentWorkflow
+      || !currentBundle
+      || currentBundle.bundle_sha256 !== parseIdentity.bundle_sha256
+      || !currentParsed
+      || !currentParsed.raw_output
+      || currentParsed.raw_output.sha256 !== parseIdentity.raw_output_sha256
+      || state.pastedOutputDraft !== parseIdentity.output_text
+    ) {
+      if (
+        state.saveCandidateAction.requestId === requestId
+        && state.saveCandidateAction.channelSlug === channelSlug
+        && state.saveCandidateAction.projectSlug === projectSlug
+        && state.saveCandidateAction.stepId === step.step_id
+      ) {
+        state.saveCandidateAction.busy = false;
+        clearCandidateSaveFeedback();
+        render();
+      }
+      return;
+    }
+    state.lastSaveCandidateResult = data;
+    setCandidateSaveFeedback(
+      "success",
+      channelSlug,
+      projectSlug,
+      step.step_id,
+      data.status === "CANDIDATE_ALREADY_SAVED"
+        ? `Candidate already saved as ${data.revision_group && data.revision_group.revision_group_id ? data.revision_group.revision_group_id : "existing group"}.`
+        : `Candidate saved as ${data.revision_group && data.revision_group.revision_group_id ? data.revision_group.revision_group_id : "new group"}.`
+    );
+    await loadSelectedProjectWorkflow(projectSlug, channelSlug, true);
+  } catch (error) {
+    if (
+      state.saveCandidateAction.requestId !== requestId
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+    ) {
+      if (
+        state.saveCandidateAction.requestId === requestId
+        && state.saveCandidateAction.channelSlug === channelSlug
+        && state.saveCandidateAction.projectSlug === projectSlug
+        && state.saveCandidateAction.stepId === step.step_id
+      ) {
+        state.saveCandidateAction.busy = false;
+        clearCandidateSaveFeedback();
+        render();
+      }
+      return;
+    }
+    setCandidateSaveFeedback("error", channelSlug, projectSlug, step.step_id, saveCandidateErrorSummary(error, "Could not save the current candidate output."));
+  } finally {
+    if (
+      state.saveCandidateAction.requestId === requestId
+      && state.saveCandidateAction.channelSlug === channelSlug
+      && state.saveCandidateAction.projectSlug === projectSlug
+      && state.saveCandidateAction.stepId === step.step_id
+    ) {
+      state.saveCandidateAction.busy = false;
+      render();
+    }
+  }
+}
+
 async function saveTranscriptAction() {
   const save = transcriptSaveModel();
   const slug = state.selectedChannelSlug;
@@ -3306,6 +3616,10 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
   }
   if (event.target.id === "parseOutputBtn") {
     parseOutputAction();
+    return;
+  }
+  if (event.target.id === "saveCandidateBtn") {
+    saveCandidateAction();
   }
 });
 

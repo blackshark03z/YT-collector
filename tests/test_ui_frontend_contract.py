@@ -277,6 +277,7 @@ class UiFrontendContractTests(unittest.TestCase):
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/revisions",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate",
             },
@@ -314,6 +315,9 @@ class UiFrontendContractTests(unittest.TestCase):
             "bundleAction",
             "bundleFeedback",
             "parseOutputAction",
+            "saveCandidateAction",
+            "candidateSaveFeedback",
+            "lastSaveCandidateResult",
         ]:
             self.assertIn(token, self.html)
 
@@ -391,12 +395,14 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow`)', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle`)', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output`, {', self.html)
+        self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/revisions`, {', self.html)
         self.assertIn("Workflow Panel", self.html)
         self.assertIn("Workflow Steps", self.html)
         self.assertIn("Selected Workflow Step", self.html)
         self.assertIn("Build Complete Bundle", self.html)
         self.assertIn("Copy Complete Bundle", self.html)
         self.assertIn("Parse and Preview", self.html)
+        self.assertIn("Save Candidate", self.html)
         self.assertIn("Paste AI Output", self.html)
         self.assertIn("Prompt bundle unavailable for this workflow version.", self.html)
 
@@ -425,10 +431,14 @@ class UiFrontendContractTests(unittest.TestCase):
             "parsedOutputMatchesSelection(state.parsedOutputResult)",
             "parsedOutputIdentityForSelection(state.pastedOutputDraft)",
             "parseOutputErrorSummary(error, \"Could not parse the pasted output preview.\")",
+            "saveCandidateErrorSummary(error, \"Could not save the current candidate output.\")",
             "BUNDLE_IDENTITY_MISMATCH",
             "OUTPUT_TEXT_REQUIRED",
             "OUTPUT_CONTRACT_INVALID",
             "PROMPT_OUTPUT_PARSE_FAILED",
+            "PROMPT_OUTPUT_INVALID",
+            "STATE_REVISION_CONFLICT",
+            "CANDIDATE_EXISTS",
         ]:
             self.assertIn(token, self.html)
 
@@ -476,6 +486,7 @@ class UiFrontendContractTests(unittest.TestCase):
             "state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug",
             "state.transcriptSaveAction.busy",
             "state.validationAction.busy",
+            "state.saveCandidateAction.busy",
             "if (oauth.disabled)",
             "if (metrics.disabled)",
             "clearActionFeedback();",
@@ -1200,6 +1211,181 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertEqual(result["bundleCallCountV1"], 0)
         self.assertEqual(result["requiredInputError"], "Required workflow inputs are still missing for this step.")
         self.assertEqual(result["bundleCallsTotal"], 1)
+
+    def test_save_candidate_uses_exact_request_body_and_keeps_preview_visible(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { "step-1": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            const workflowDefinition = state.selectedProjectWorkflow.definition;
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "## Subject\\nRome\\n";
+            state.parsedOutputResult = {
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "VALID",
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", filename: "artifact_a.md", content: state.pastedOutputDraft, sha256: "artifact-sha", character_count: state.pastedOutputDraft.length, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+              validation: { errors: [], warnings: [] },
+            };
+            fetchHandler = async (path) => {
+              if (path.endsWith("/workflow")) {
+                return jsonResponse({
+                  channel_slug: "channel-a",
+                  project_slug: "project-a",
+                  binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+                  definition: workflowDefinition,
+                  state: { current_step_id: "step-1", current_step_status: "CANDIDATE", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 1, state_persisted: true, step_states: { "step-1": { status: "CANDIDATE", candidate_group_id: "grp_000001", approved_group_id: null, candidate_idempotency_sha256: "idem", updated_at: "2026-07-02T00:00:00Z" } }, artifact_heads: { "artifact-a": { candidate_revision_id: "rev_000001", approved_revision_id: null } } },
+                  available_actions: { "step-1": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+                  artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+                });
+              }
+              if (path.endsWith("/revisions")) {
+                return jsonResponse({
+                  status: "CANDIDATE_SAVED",
+                  idempotent_replay: false,
+                  identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1" },
+                  state_revision: 1,
+                  revision_group: {
+                    revision_group_id: "grp_000001",
+                    bundle_sha256: "sha-bundle",
+                    raw_output_sha256: "raw-sha",
+                    artifacts: [{ artifact_id: "artifact-a", revision_id: "rev_000001", content_sha256: "artifact-sha", character_count: state.pastedOutputDraft.length }],
+                  },
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            await saveCandidateAction();
+            await flush();
+            const saveCall = fetchCalls.find((call) => call.path.includes("/revisions"));
+            return {
+              savePath: saveCall && saveCall.path,
+              saveBody: saveCall && saveCall.body,
+              feedback: state.candidateSaveFeedback.text,
+              parsePreviewValue: document.getElementById("parsedArtifactPreview0").value,
+              saveDisabledAfterRefresh: document.getElementById("projectDetailPanel").innerHTML.includes('id="saveCandidateBtn" disabled'),
+            };
+            """
+        )
+        self.assertEqual(result["savePath"], "/api/v2/channels/channel-a/projects/project-a/workflow/steps/step-1/revisions")
+        self.assertIn('"bundle_sha256":"sha-bundle"', result["saveBody"])
+        self.assertIn('"output_text":"## Subject\\nRome\\n"', result["saveBody"])
+        self.assertIn('"expected_state_revision":0', result["saveBody"])
+        self.assertEqual(result["feedback"], "Candidate saved as grp_000001.")
+        self.assertEqual(result["parsePreviewValue"], "## Subject\nRome\n")
+        self.assertTrue(result["saveDisabledAfterRefresh"])
+
+    def test_stale_save_candidate_response_is_ignored(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { "step-1": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "## Subject\\nRome\\n";
+            state.parsedOutputResult = {
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "VALID",
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", filename: "artifact_a.md", content: state.pastedOutputDraft, sha256: "artifact-sha", character_count: state.pastedOutputDraft.length, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+              validation: { errors: [], warnings: [] },
+            };
+            const deferred = makeDeferred();
+            fetchHandler = async (path) => {
+              if (path.endsWith("/revisions")) return await deferred.promise;
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            saveCandidateAction();
+            await flush();
+            state.pastedOutputDraft = "## Subject\\nChanged\\n";
+            deferred.resolve(jsonResponse({
+              status: "CANDIDATE_SAVED",
+              idempotent_replay: false,
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1" },
+              state_revision: 1,
+              revision_group: { revision_group_id: "grp_000001", bundle_sha256: "sha-bundle", raw_output_sha256: "raw-sha", artifacts: [] },
+            }));
+            await flush();
+            await flush();
+            return {
+              feedback: state.candidateSaveFeedback.text,
+              lastSaveCandidateResult: state.lastSaveCandidateResult,
+              currentDraft: state.pastedOutputDraft,
+            };
+            """
+        )
+        self.assertEqual(result["feedback"], "")
+        self.assertIsNone(result["lastSaveCandidateResult"])
+        self.assertEqual(result["currentDraft"], "## Subject\nChanged\n")
 
 
 if __name__ == "__main__":

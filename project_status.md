@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C2B - In-Memory Output Parsing and Preview
+Phase 7C2C1 - Candidate Persistence, Workflow State v2, Transaction Store, and Save Candidate
 
 ## Phase Status
 COMPLETE
@@ -61,6 +61,50 @@ MVP_ACCEPTED
 - Phase 7C1: authoritative Mist of Ages prompt-set ingestion, immutable workflow v2, generic prompt-manifest validation, prompt-bundle builder, and read-only bundle API completed locally without runtime mutation
 - Phase 7C2A: embedded read-only workflow panel, selected-step bundle preview/copy flow, and stale-response-safe bundle UI completed locally without runtime mutation
 - Phase 7C2B: pasted AI output intake, zero-write output parser, structural validation, and in-memory parsed artifact preview completed locally without runtime mutation
+- Phase 7C2C1: candidate-only workflow write path, persisted workflow state v2, immutable revision/group storage, per-project transaction locking, recovery-aware candidate commit, Save Candidate API, and minimal Save Candidate UI completed locally without runtime mutation
+
+## Phase 7C2C1 Scope
+- Added `scripts/channel_workflow_write.py` as the dedicated candidate-write domain module for workflow-state v2 validation, deterministic idempotency, per-project locking, staged transaction commit, incomplete-transaction recovery, and immutable candidate revision/group persistence.
+- Added one new write endpoint only: `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/revisions`.
+- Kept Phase 7C2C1 candidate-only: no `active.json`, no stable canonical artifact publication, no approval, no rejection, no candidate supersede, no downstream stale propagation, no restore flow, and no history endpoint.
+- Persisted `workflow/workflow_state.json` schema v2 lazily on first authorized candidate save with `state_revision`, `state_persisted`, per-step candidate summary, artifact candidate heads, and monotonic counters for group and per-artifact revision ids.
+- Preserved zero-write GET behavior: absent state still synthesizes `state_revision = 0` with `state_persisted = false`; schema-v1 files still read without migration and only convert to schema v2 on an authorized write when the mapping is unambiguous.
+- Added immutable candidate storage only beneath `workflow/revisions/` with server-owned paths:
+  - `workflow/revisions/groups/grp_000001/metadata.json`
+  - `workflow/revisions/artifacts/<artifact_id>/rev_000001/content.md`
+  - `workflow/revisions/artifacts/<artifact_id>/rev_000001/metadata.json`
+- Added transaction staging only beneath `workflow/_transactions/` with `.lock`, `txn_<id>/manifest.json`, `txn_<id>/next_workflow_state.json`, and staged final-file payloads; `workflow_state.json` is replaced last.
+- Added deterministic idempotent replay keyed by channel slug, project slug, workflow id, workflow version, step id, bundle SHA-256, and raw-output SHA-256. Identical replay now returns the existing candidate group without creating files or incrementing `state_revision`; different output while a candidate exists returns controlled `CANDIDATE_EXISTS`.
+- Extended the workflow read model and embedded UI so candidate status is visible, `state_revision` and `state_persisted` are visible, `Save Candidate` is enabled only for the current valid parsed preview, and the current raw text plus parsed preview remain visible across workflow refresh after save.
+- Preserved stable artifact authority: bundle building still reads only canonical project artifact paths and never consumes candidate revision content as downstream input.
+- Verification round narrowed the transaction contract explicitly to a recovery-aware, state-last filesystem transaction rather than claiming full atomic multi-file semantics.
+- Verification round tightened recovery classification, immutable-target validation, and lock ownership cleanup so interrupted writes reuse original ids when provable and return controlled `WORKFLOW_RECOVERY_REQUIRED` when not provable.
+- Verification round tightened schema-v2 validation so candidate groups and candidate heads must match the selected step output contract, counters must stay ahead of allocated ids, and extra files in immutable candidate directories fail safely.
+- Verification round made schema-v1 conversion explicit: reads remain byte-identical and zero-write, while the first authorized write converts only `READY` current-step states and seeds v2 counters from any existing revision/group directories.
+
+## Phase 7C2C1 Evidence
+- Focused workflow-write coverage: `python -m unittest tests.test_channel_workflow_write` passing (`23` run, `23` passed, `0` failures, `0` errors, `0` skipped).
+- Focused parser regression: `python -m unittest tests.test_channel_output_parser` passing (`22` run, `22` passed, `0` failures, `0` errors, `0` skipped).
+- Focused workflow regression: `python -m unittest tests.test_channel_workflow` passing (`17` run, `16` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability).
+- Focused prompt-bundle regression: `python -m unittest tests.test_channel_prompt_bundle` passing (`19` run, `19` passed, `0` failures, `0` errors, `0` skipped).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`53` run, `53` passed, `0` failures, `0` errors, `0` skipped).
+- Focused frontend contract plus runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`35` run, `35` passed, `0` failures, `0` errors, `0` skipped).
+- Explicit Node-backed runtime harness: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests` passing (`11` run, `11` passed, `0` failures, `0` errors, `0` skipped).
+- Compile check: `python -m py_compile scripts\channel_workflow_write.py scripts\channel_output_parser.py scripts\channel_prompt_bundle.py scripts\channel_workflow.py scripts\ui_server.py tests\test_channel_workflow_write.py tests\test_channel_output_parser.py tests\test_ui_frontend_contract.py` passing.
+- Full offline regression: `python -m unittest discover -s tests` passing (`368` run, `367` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability).
+- Production workflow defaults remain unchanged: `default_version = 1`, `legacy_unpinned_version = 1`.
+- Workflow v1 SHA-256 remained `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Workflow v2 SHA-256 remained `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`.
+- Prompt manifest SHA-256 remained `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- Candidate-save tests and recovery tests used temporary roots only; no real Mist of Ages project, canonical token, or legacy source file was mutated.
+- Protected-runtime snapshots taken before focused tests, after focused tests, and after full regression remained byte-identical and still confirmed `0` real canonical project directories plus `0` real `workflow_state.json` files.
+- `implement.docx` remained unrelated and untracked.
+
+## Phase 7C2C1 Gate
+- Candidate persistence, workflow-state schema v2, transaction storage, and Save Candidate are now implemented locally.
+- Phase 7C2C2 remains blocked pending a separate Tech Lead execution prompt for approval/rejection, stable canonical artifact publication, and candidate replacement semantics.
+- No Phase 7C2C1 commit has been created.
+- No Phase 7C2C1 push has been performed.
 
 ## Phase 7C2B Scope
 - Added `scripts/channel_output_parser.py` as a generic zero-write parser that resolves the selected project binding, exact workflow version, exact prompt manifest output contract, exact current bundle identity, and pasted raw output entirely on the server side.

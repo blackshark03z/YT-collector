@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Phase 7C2C1 - Candidate Persistence, Workflow State v2, Transaction Store, and Save Candidate
+- Added `scripts/channel_workflow_write.py` as a dedicated workflow-write module for candidate-only persistence, workflow-state v2 validation, per-project filesystem locking, deterministic idempotency, staged transaction commit, and incomplete-transaction recovery.
+- Added `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/revisions` in `scripts/ui_server.py` as the first authorized workflow write path.
+- Persisted `workflow/workflow_state.json` schema v2 lazily on first candidate save with `state_revision`, `state_persisted`, per-step candidate state, artifact candidate heads, and monotonic counters for project-wide group ids plus per-artifact revision ids.
+- Preserved zero-write reads: absent state still synthesizes `state_revision = 0`; schema-v1 state remains readable without migration and only converts on an authorized write when the mapping is unambiguous.
+- Added immutable candidate storage only under `workflow/revisions/` for candidate group metadata plus per-artifact revision content/metadata; no `active.json` and no stable canonical artifact file publication were introduced.
+- Added staged transaction storage only under `workflow/_transactions/` with `.lock`, deterministic `txn_<id>` directories, `manifest.json`, `next_workflow_state.json`, and staged final-file payloads, with `workflow_state.json` replaced last.
+- Added deterministic idempotent replay keyed by selected channel/project/workflow/version/step plus bundle SHA-256 and raw-output SHA-256. Identical replay returns the existing candidate group without creating files or incrementing `state_revision`; different output while a candidate exists returns controlled `CANDIDATE_EXISTS`.
+- Extended the workflow read model so state now exposes `state_revision`, `state_persisted`, candidate step summaries, artifact candidate heads, and per-step available actions without adding a revision-history endpoint.
+- Extended the embedded UI with a minimal `Save Candidate` control in the parsed-output area only. It now sends exactly `bundle_sha256`, raw `output_text`, and `expected_state_revision`, refreshes the workflow after success, preserves the current raw text and parsed preview, and still exposes no Approve/Reject controls.
+- Added focused workflow-write tests in `tests/test_channel_workflow_write.py` covering first-write persistence, schema-v1 write conversion, single- and multi-artifact candidate saves, idempotent replay, state conflicts, lock conflicts, recovery after partial publication, and runtime isolation.
+- Expanded the transaction/recovery verification round to cover incomplete staging, one-artifact publication, all-artifact publication before group, group publication before state, cleanup-after-state, corrupted final targets, corrupted staged targets, exact immutable-target reuse, publication-order proof, and lock-ownership-safe cleanup.
+- Tightened workflow-state v2 validation so candidate groups and candidate heads must match the step output contract, counters must remain ahead of allocated ids, and extra files in immutable candidate directories fail safely.
+- Tightened schema-v1 conversion so reads remain byte-identical and zero-write while the first authorized write converts only unambiguous `READY` states and seeds v2 counters from existing revision/group directories.
+- Tightened lock cleanup so a writer only removes the lock it still owns by ownership token, not merely by path or process id.
+- Tightened recovery semantics so ambiguous or hash-mismatched interrupted transactions return controlled `WORKFLOW_RECOVERY_REQUIRED` instead of guessing.
+- Extended the UI runtime harness coverage in `tests/test_ui_frontend_contract.py` for Save Candidate request identity, success refresh, disable-after-candidate behavior, and stale save-response ignore handling.
+- Re-ran focused workflow-write, parser, workflow, prompt-bundle, V2 API, frontend suites, and the explicit Node-backed UI runtime class successfully, then re-ran the full offline regression successfully (`368` run, `367` passed, `0` failures, `0` errors, `1` skipped).
+- Confirmed production workflow defaults remained `default_version = 1` and `legacy_unpinned_version = 1`.
+- Confirmed workflow v1 SHA-256 `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`, workflow v2 SHA-256 `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`, and prompt manifest SHA-256 `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602` remained unchanged.
+- Preserved the real Mist of Ages runtime, protected token files, legacy source files, and unrelated `implement.docx` without mutation.
+- Protected-runtime snapshots before focused tests, after focused tests, and after full regression remained byte-identical while still confirming `0` real canonical project directories and `0` real `workflow_state.json` files.
+- Kept stable artifact publication, approval/rejection, candidate supersede, restore, stale propagation, revision history, migration, and model/API calls out of scope.
+
 ### Phase 7C2B - In-Memory Output Parsing and Preview
 - Added `scripts/channel_output_parser.py` as a dedicated zero-write output parser that resolves the exact selected project binding, workflow version, step output contract, and current bundle identity server-side.
 - Added `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/parse-output` in `scripts/ui_server.py` as the only computational parse endpoint for pasted AI output.

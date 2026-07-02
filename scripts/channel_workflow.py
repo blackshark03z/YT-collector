@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from scripts import channel_workspace
+from scripts import channel_workspace, channel_workflow_write
 
 
 SUPPORTED_REGISTRY_SCHEMA_VERSION = 1
@@ -19,6 +19,7 @@ SUPPORTED_ARTIFACT_ROLES = {"INPUT", "OPTIONAL_INPUT", "GENERATED", "FINAL"}
 SUPPORTED_STEP_STATUSES = {
     "BLOCKED",
     "READY",
+    "CANDIDATE",
     "IN_PROGRESS",
     "AWAITING_APPROVAL",
     "APPROVED",
@@ -547,85 +548,15 @@ def load_or_synthesize_workflow_state(
     binding: dict[str, Any],
     definition: dict[str, Any],
 ) -> dict[str, Any]:
-    state_file = workflow_state_path(project_dir)
-    if not state_file.exists():
-        current_step, next_step = _first_and_next_steps(definition)
-        ready = _is_project_workflow_input_ready(project)
-        return {
-            "initialized": False,
-            "state_source": "SYNTHESIZED",
-            "current_lifecycle_state": definition["entry_lifecycle_state"] if ready else None,
-            "current_step_id": current_step["step_id"],
-            "current_step_status": "READY" if ready else "BLOCKED",
-            "next_step_id": next_step["step_id"] if next_step else None,
-            "blocking_reason": None if ready else "WORKFLOW_INPUT_NOT_READY",
-        }
-
     try:
-        payload = json.loads(state_file.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state.json is malformed JSON.") from exc
-    if not isinstance(payload, dict):
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state.json must be a JSON object.")
-    required = {
-        "schema_version",
-        "workflow_id",
-        "workflow_version",
-        "workflow_definition_sha256",
-        "current_step_id",
-        "current_lifecycle_state",
-        "step_states",
-        "created_at",
-        "updated_at",
-    }
-    missing = sorted(required - set(payload))
-    if missing:
-        raise _error("WORKFLOW_STATE_INVALID", f"workflow_state.json is missing fields: {', '.join(missing)}")
-    if payload["schema_version"] != SUPPORTED_STATE_SCHEMA_VERSION:
-        raise _error("WORKFLOW_STATE_INVALID", "Unsupported workflow_state schema_version.")
-    if payload["workflow_id"] != binding["workflow_id"] or payload["workflow_version"] != binding["workflow_version"]:
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state workflow id/version does not match the project binding.")
-    digest = _validate_digest(
-        payload["workflow_definition_sha256"],
-        field_name="workflow_state.workflow_definition_sha256",
-        code="WORKFLOW_STATE_INVALID",
-    )
-    if digest != binding["workflow_definition_sha256"]:
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state definition digest does not match the project binding.")
-    current_lifecycle_state = payload["current_lifecycle_state"]
-    if current_lifecycle_state is not None and current_lifecycle_state not in definition["lifecycle_states"]:
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state current_lifecycle_state is not part of the definition.")
-    current_step, next_step = _first_and_next_steps(definition, payload["current_step_id"])
-    step_states = payload["step_states"]
-    if not isinstance(step_states, dict):
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state step_states must be an object.")
-    valid_step_ids = {step["step_id"] for step in definition["steps"]}
-    for step_id, step_state in step_states.items():
-        if step_id not in valid_step_ids:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references unknown step_id {step_id}.")
-        if not isinstance(step_state, dict):
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} must be an object.")
-        status = step_state.get("status")
-        if status not in SUPPORTED_STEP_STATUSES:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} has an unsupported status.")
-    _ensure_iso_timestamp(payload["created_at"], "created_at")
-    _ensure_iso_timestamp(payload["updated_at"], "updated_at")
-    current_step_state = step_states.get(current_step["step_id"], {})
-    current_step_status = current_step_state.get("status")
-    if current_step_status not in SUPPORTED_STEP_STATUSES:
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state current step is missing a supported status.")
-    blocking_reason = payload.get("blocking_reason")
-    if blocking_reason is not None and not isinstance(blocking_reason, str):
-        raise _error("WORKFLOW_STATE_INVALID", "workflow_state blocking_reason must be a string or null.")
-    return {
-        "initialized": True,
-        "state_source": "FILE",
-        "current_lifecycle_state": current_lifecycle_state,
-        "current_step_id": current_step["step_id"],
-        "current_step_status": current_step_status,
-        "next_step_id": next_step["step_id"] if next_step else None,
-        "blocking_reason": blocking_reason,
-    }
+        return channel_workflow_write.load_workflow_state_for_read(
+            project=project,
+            project_dir=project_dir,
+            binding=binding,
+            definition=definition,
+        )
+    except channel_workflow_write.ChannelWorkflowWriteError as exc:
+        raise _error(exc.code, exc.message, exc.status) from exc
 
 
 def build_workflow_read_model(
@@ -685,5 +616,6 @@ def build_workflow_read_model(
             ],
         },
         "state": state,
+        "available_actions": state.get("available_actions", {}),
         "artifacts": artifacts,
     }
