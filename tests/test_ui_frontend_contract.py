@@ -276,6 +276,7 @@ class UiFrontendContractTests(unittest.TestCase):
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
                 "channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/validate",
             },
@@ -293,6 +294,9 @@ class UiFrontendContractTests(unittest.TestCase):
             "selectedProjectWorkflow",
             "selectedWorkflowStepId",
             "selectedWorkflowBundle",
+            "pastedOutputDraft",
+            "parsedOutputResult",
+            "parsedOutputError",
             "state.channels",
             "state.projects",
             "state.isLoadingChannels",
@@ -309,6 +313,7 @@ class UiFrontendContractTests(unittest.TestCase):
             "projectFeedback",
             "bundleAction",
             "bundleFeedback",
+            "parseOutputAction",
         ]:
             self.assertIn(token, self.html)
 
@@ -385,11 +390,14 @@ class UiFrontendContractTests(unittest.TestCase):
     def test_workflow_panel_uses_selected_project_workflow_and_bundle_routes(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow`)', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle`)', self.html)
+        self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output`, {', self.html)
         self.assertIn("Workflow Panel", self.html)
         self.assertIn("Workflow Steps", self.html)
         self.assertIn("Selected Workflow Step", self.html)
         self.assertIn("Build Complete Bundle", self.html)
         self.assertIn("Copy Complete Bundle", self.html)
+        self.assertIn("Parse and Preview", self.html)
+        self.assertIn("Paste AI Output", self.html)
         self.assertIn("Prompt bundle unavailable for this workflow version.", self.html)
 
     def test_workflow_step_selection_clears_bundle_without_auto_fetch(self):
@@ -408,6 +416,21 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("bundle.bundle_sha256", self.html)
         self.assertIn("bundle.prompt_file_sha256", self.html)
         self.assertIn('role="status" aria-live="polite"', self.html)
+
+    def test_output_preview_contract_and_safe_error_mapping_exist(self):
+        for token in [
+            "pastedOutputText",
+            "parseOutputBtn",
+            "parsedArtifactPreview${index}",
+            "parsedOutputMatchesSelection(state.parsedOutputResult)",
+            "parsedOutputIdentityForSelection(state.pastedOutputDraft)",
+            "parseOutputErrorSummary(error, \"Could not parse the pasted output preview.\")",
+            "BUNDLE_IDENTITY_MISMATCH",
+            "OUTPUT_TEXT_REQUIRED",
+            "OUTPUT_CONTRACT_INVALID",
+            "PROMPT_OUTPUT_PARSE_FAILED",
+        ]:
+            self.assertIn(token, self.html)
 
     def test_workflow_panel_renders_generic_step_and_constraint_data(self):
         self.assertIn("Generated from the workflow definition in step order.", self.html)
@@ -486,6 +509,18 @@ class UiFrontendContractTests(unittest.TestCase):
         ]
         for token in forbidden:
             self.assertNotIn(token, self.html)
+
+    def test_output_preview_uses_no_browser_persistence_or_file_save_api(self):
+        for token in [
+            "sessionStorage",
+            "indexedDB",
+            "showSaveFilePicker",
+            "createObjectURL",
+            "download=",
+            "Blob(",
+        ]:
+            self.assertNotIn(token, self.html)
+        self.assertNotIn("localStorage.setItem(\"yt_input_collector.pastedOutput", self.html)
 
     def test_visible_ui_still_signals_embedded_collector_context(self):
         self.assertIn("Mist of Ages Research", self.html)
@@ -620,6 +655,270 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertFalse(result["panelContainsRawImg"])
         self.assertTrue(result["panelContainsEscapedStepName"])
         self.assertEqual(result["copyFeedback"], "Copied the exact complete bundle.")
+
+    def test_parse_output_preview_uses_current_bundle_and_renders_exact_artifact_text(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "## Subject\\nRome\\n<img src=x onerror=1>";
+            fetchHandler = async (path, config) => {
+              if (path.endsWith("/steps/step-1/parse-output")) {
+                return jsonResponse({
+                  identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+                  raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+                  contract: { response_mode: "SINGLE_ARTIFACT" },
+                  status: "VALID",
+                  artifacts: [{
+                    artifact_id: "artifact-a",
+                    display_name: "Artifact A",
+                    filename: "artifact_a.md",
+                    content: state.pastedOutputDraft,
+                    sha256: "artifact-sha",
+                    character_count: state.pastedOutputDraft.length,
+                    validation: { status: "VALID", errors: [], warnings: [], heading_results: [] },
+                  }],
+                  validation: { errors: [], warnings: [] },
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            await parseOutputAction();
+            await flush();
+            return {
+              parseCalls: fetchCalls.filter((call) => call.path.includes("/parse-output")).length,
+              parsePath: fetchCalls.find((call) => call.path.includes("/parse-output")).path,
+              parseBody: fetchCalls.find((call) => call.path.includes("/parse-output")).body,
+              previewStatus: state.parsedOutputResult && state.parsedOutputResult.status,
+              parsedPreviewValue: document.getElementById("parsedArtifactPreview0").value,
+              panelContainsRawImg: document.getElementById("projectDetailPanel").innerHTML.includes("<img src=x onerror=1>"),
+            };
+            """
+        )
+        self.assertEqual(result["parseCalls"], 1)
+        self.assertEqual(
+            result["parsePath"],
+            "/api/v2/channels/channel-a/projects/project-a/workflow/steps/step-1/parse-output",
+        )
+        self.assertIn('"bundle_sha256":"sha-bundle"', result["parseBody"])
+        self.assertEqual(result["previewStatus"], "VALID")
+        self.assertEqual(result["parsedPreviewValue"], "## Subject\nRome\n<img src=x onerror=1>")
+        self.assertFalse(result["panelContainsRawImg"])
+
+    def test_output_textarea_stays_disabled_without_bundle_and_paste_does_not_auto_parse(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            render();
+            const disabledBefore = document.getElementById("projectDetailPanel").innerHTML.includes('id="pastedOutputText"') && document.getElementById("projectDetailPanel").innerHTML.includes('id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." disabled');
+            document.getElementById("projectDetailPanel").listeners["input"]({ target: { id: "pastedOutputText", value: "draft one" } });
+            await flush();
+            const parseCallsBeforeBundle = fetchCalls.filter((call) => call.path.includes("/parse-output")).length;
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            render();
+            const disabledAfter = document.getElementById("projectDetailPanel").innerHTML.includes('id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." disabled');
+            document.getElementById("projectDetailPanel").listeners["input"]({ target: { id: "pastedOutputText", value: "draft two" } });
+            await flush();
+            return {
+              disabledBefore,
+              disabledAfter,
+              parseCallsBeforeBundle,
+              parseCallsAfterPaste: fetchCalls.filter((call) => call.path.includes("/parse-output")).length,
+              currentDraft: state.pastedOutputDraft,
+            };
+            """
+        )
+        self.assertTrue(result["disabledBefore"])
+        self.assertFalse(result["disabledAfter"])
+        self.assertEqual(result["parseCallsBeforeBundle"], 0)
+        self.assertEqual(result["parseCallsAfterPaste"], 0)
+        self.assertEqual(result["currentDraft"], "draft two")
+
+    def test_editing_pasted_output_invalidates_previous_preview_and_stale_parse_response_is_ignored(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "first";
+            state.parsedOutputResult = {
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "sha-first", character_count: 5 },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "VALID",
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", filename: "artifact_a.md", content: "first", sha256: "sha-artifact", character_count: 5, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+              validation: { errors: [], warnings: [] },
+            };
+            render();
+            document.getElementById("projectDetailPanel").listeners["input"]({ target: { id: "pastedOutputText", value: "second" } });
+            const deferred = makeDeferred();
+            fetchHandler = async (path) => {
+              if (path.endsWith("/steps/step-1/parse-output")) return await deferred.promise;
+              return jsonResponse({ channels: [] });
+            };
+            const pending = parseOutputAction();
+            state.pastedOutputDraft = "third";
+            deferred.resolve(jsonResponse({
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "sha-second", character_count: 6 },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "VALID",
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", filename: "artifact_a.md", content: "second", sha256: "sha-second-artifact", character_count: 6, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+              validation: { errors: [], warnings: [] },
+            }));
+            await pending;
+            await flush();
+            return {
+              previewClearedAfterEdit: state.parsedOutputResult === null,
+              finalParsedOutput: state.parsedOutputResult,
+              currentDraft: state.pastedOutputDraft,
+            };
+            """
+        )
+        self.assertTrue(result["previewClearedAfterEdit"])
+        self.assertIsNone(result["finalParsedOutput"])
+        self.assertEqual(result["currentDraft"], "third")
+
+    def test_parse_failure_retains_current_raw_output(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }] },
+              state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "still here";
+            fetchHandler = async (path) => {
+              if (path.endsWith("/parse-output")) return errorResponse("PROMPT_OUTPUT_PARSE_FAILED", "Bad output", 409);
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            await parseOutputAction();
+            await flush();
+            return {
+              draft: state.pastedOutputDraft,
+              parseError: state.parsedOutputError,
+              parsedResult: state.parsedOutputResult,
+            };
+            """
+        )
+        self.assertEqual(result["draft"], "still here")
+        self.assertIn("could not be parsed", result["parseError"].lower())
+        self.assertIsNone(result["parsedResult"])
 
     def test_stale_workflow_response_is_ignored_after_project_change(self):
         result = run_ui_runtime_scenario(

@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -925,6 +925,10 @@ def _map_prompt_bundle_error(exc: channel_prompt_bundle.PromptBundleError) -> V2
     return _v2_error(exc.code, exc.message, exc.status)
 
 
+def _map_output_parser_error(exc: channel_output_parser.ChannelOutputParserError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
 def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
     channel = _load_channel_or_error(root, channel_slug)
     paths = channel_workspace.canonical_channel_paths(root, channel_slug)
@@ -1141,6 +1145,29 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, bundle
+            if len(parts) == 10 and parts[4] == "projects" and parts[6] == "workflow" and parts[7] == "steps" and parts[9] == "parse-output" and method == "POST":
+                project_slug = parts[5]
+                step_id = parts[8]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                try:
+                    parsed_output = channel_output_parser.parse_channel_output(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        step_id,
+                        payload.get("bundle_sha256"),
+                        payload.get("output_text"),
+                        project,
+                        project_dir,
+                    )
+                except channel_output_parser.ChannelOutputParserError as exc:
+                    raise _map_output_parser_error(exc) from exc
+                except channel_prompt_bundle.PromptBundleError as exc:
+                    raise _map_prompt_bundle_error(exc) from exc
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
+                return 200, parsed_output
             if len(parts) == 7 and parts[4] == "projects" and parts[6] == "transcript" and method == "POST":
                 project_slug = parts[5]
                 try:
@@ -1352,6 +1379,9 @@ const state = {
   selectedProjectWorkflow: null,
   selectedWorkflowStepId: null,
   selectedWorkflowBundle: null,
+  pastedOutputDraft: "",
+  parsedOutputResult: null,
+  parsedOutputError: "",
   transcriptDraft: "",
   isLoadingChannels: false,
   isLoadingSummary: false,
@@ -1369,6 +1399,7 @@ const state = {
   projectDetailRequestId: 0,
   workflowRequestId: 0,
   bundleAction: { busy: false, channelSlug: null, projectSlug: null, stepId: null, requestId: 0 },
+  parseOutputAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 },
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
   actionFeedback: { kind: "", slug: null, text: "" },
@@ -1423,6 +1454,18 @@ function workflowErrorSummary(error, fallback) {
     BUNDLE_REQUIRED_INPUT_MISSING: "Required workflow inputs are still missing for this step.",
     BUNDLE_PROJECT_CONTEXT_MISSING: "A required project context value is missing for this workflow step.",
     PROMPT_BUNDLE_INVALID: "The workflow bundle response was not valid.",
+  };
+  return known[code] || describeError(error, fallback);
+}
+
+function parseOutputErrorSummary(error, fallback) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  const known = {
+    BUNDLE_IDENTITY_MISMATCH: "The pasted output no longer matches the currently loaded bundle. Load the bundle again before parsing.",
+    OUTPUT_TEXT_REQUIRED: "Paste the AI output before parsing.",
+    OUTPUT_CONTRACT_INVALID: "This workflow step does not expose a usable output contract for preview.",
+    PROMPT_OUTPUT_PARSE_FAILED: "The pasted output could not be parsed for preview.",
+    WORKFLOW_STEP_NOT_FOUND: "The selected workflow step is no longer available.",
   };
   return known[code] || describeError(error, fallback);
 }
@@ -1505,10 +1548,14 @@ function clearProjectSelectionState() {
   state.selectedProjectWorkflow = null;
   state.selectedWorkflowStepId = null;
   state.selectedWorkflowBundle = null;
+  state.pastedOutputDraft = "";
+  state.parsedOutputResult = null;
+  state.parsedOutputError = "";
   state.transcriptDraft = "";
   state.projectDetailError = "";
   state.workflowError = "";
   state.bundleError = "";
+  state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
   state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
 }
 
@@ -1545,6 +1592,10 @@ function bundleFeedbackForSelection() {
 function invalidateLoadedBundle() {
   state.selectedWorkflowBundle = null;
   state.bundleError = "";
+  state.pastedOutputDraft = "";
+  state.parsedOutputResult = null;
+  state.parsedOutputError = "";
+  state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
   clearBundleFeedback();
 }
 
@@ -1623,6 +1674,43 @@ function activeBundleRecord() {
   return state.selectedWorkflowBundle;
 }
 
+function parsedOutputIdentityForSelection(outputTextArg) {
+  const bundle = activeBundleRecord();
+  const current = bundleIdentityForSelection();
+  const outputText = outputTextArg !== undefined ? outputTextArg : state.pastedOutputDraft;
+  if (!bundle || !current) return null;
+  return {
+    channel_slug: current.channel_slug,
+    project_slug: current.project_slug,
+    workflow_id: current.workflow_id,
+    workflow_version: current.workflow_version,
+    step_id: current.step_id,
+    bundle_sha256: bundle.bundle_sha256,
+    output_text: typeof outputText === "string" ? outputText : ""
+  };
+}
+
+function parsedOutputMatchesSelection(result) {
+  if (!result || !result.identity) return false;
+  const current = parsedOutputIdentityForSelection();
+  if (!current) return false;
+  return (
+    result.identity.channel_slug === current.channel_slug
+    && result.identity.project_slug === current.project_slug
+    && result.identity.workflow_id === current.workflow_id
+    && result.identity.workflow_version === current.workflow_version
+    && result.identity.step_id === current.step_id
+    && result.identity.bundle_sha256 === current.bundle_sha256
+    && result.raw_output
+    && result.raw_output.character_count === current.output_text.length
+  );
+}
+
+function invalidateParsedOutputResult() {
+  state.parsedOutputResult = null;
+  state.parsedOutputError = "";
+}
+
 function setSelectedWorkflowStepId(nextStepId) {
   const normalized = nextStepId && workflowStepList().some((step) => step.step_id === nextStepId) ? nextStepId : null;
   if (normalized === state.selectedWorkflowStepId) return;
@@ -1696,6 +1784,30 @@ function copyBundleButtonModel() {
     return { disabled: true, label: "Copy Complete Bundle", helper: "Load a valid bundle for the selected step before copying." };
   }
   return { disabled: false, label: "Copy Complete Bundle", helper: "Copy the exact full bundle returned by the local API." };
+}
+
+function parseOutputButtonModel() {
+  const bundle = activeBundleRecord();
+  const step = selectedWorkflowStepRecord();
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !step || !bundle) {
+    return { disabled: true, label: "Parse and Preview", helper: "Load a valid bundle for the selected step before parsing output." };
+  }
+  if (!String(state.pastedOutputDraft || "").trim()) {
+    return { disabled: true, label: "Parse and Preview", helper: "Paste the AI output before parsing." };
+  }
+  const busy = state.parseOutputAction.busy
+    && state.parseOutputAction.channelSlug === state.selectedChannelSlug
+    && state.parseOutputAction.projectSlug === state.selectedProjectSlug
+    && state.parseOutputAction.workflowId === (bundle.identity && bundle.identity.workflow_id)
+    && state.parseOutputAction.workflowVersion === (bundle.identity && bundle.identity.workflow_version)
+    && state.parseOutputAction.stepId === step.step_id
+    && state.parseOutputAction.bundleSha256 === bundle.bundle_sha256
+    && state.parseOutputAction.outputText === state.pastedOutputDraft;
+  return {
+    disabled: busy,
+    label: busy ? "Parsing Output..." : "Parse and Preview",
+    helper: busy ? "Checking the pasted output against the current bundle..." : "Preview parsed output in memory only. Nothing is written to project files."
+  };
 }
 
 function oauthButtonModel() {
@@ -2092,6 +2204,8 @@ function renderProjectDetailState() {
   const bundleFeedback = bundleFeedbackForSelection();
   const bundleButton = bundleButtonModel();
   const copyButton = copyBundleButtonModel();
+  const parseButton = parseOutputButtonModel();
+  const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
   const currentStepLabel = workflowSteps.find((step) => step.step_id === workflowState.current_step_id);
   const nextStepLabel = workflowSteps.find((step) => step.step_id === workflowState.next_step_id);
   const workflowErrorHtml = state.workflowError
@@ -2131,6 +2245,33 @@ function renderProjectDetailState() {
       </div>
     `).join("");
   };
+  const parseFeedbackHtml = state.parsedOutputError
+    ? `<div class="check"><strong>Output Preview Error</strong>${pill("ERROR")}</div><div class="meta">${escapeHtml(state.parsedOutputError)}</div>`
+    : `<div class="meta">${escapeHtml(parseButton.helper)}</div>`;
+  const parsedArtifactsHtml = parsedOutput && Array.isArray(parsedOutput.artifacts) && parsedOutput.artifacts.length
+    ? parsedOutput.artifacts.map((artifact, index) => `
+      <div class="card" style="margin-top:12px">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+          <div>
+            <strong>${escapeHtml(artifact.display_name || artifact.artifact_id || "Artifact")}</strong>
+            <div class="meta mono">${escapeHtml(artifact.filename || artifact.artifact_id || "")}</div>
+          </div>
+          <div>${pill(artifact.validation && artifact.validation.status ? artifact.validation.status : "UNKNOWN")}</div>
+        </div>
+        <div class="summary-grid" style="margin-top:12px">
+          <div class="card"><strong>Artifact ID</strong><div class="meta mono">${escapeHtml(artifact.artifact_id || "")}</div></div>
+          <div class="card"><strong>SHA-256</strong><div class="meta mono">${escapeHtml(artifact.sha256 || "")}</div></div>
+          <div class="card"><strong>Character Count</strong><div class="meta">${escapeHtml(String(artifact.character_count ?? ""))}</div></div>
+        </div>
+        ${(artifact.validation && Array.isArray(artifact.validation.errors) && artifact.validation.errors.length)
+          ? `<div class="notice" style="margin-top:12px"><strong>Validation Errors</strong><span class="meta">${escapeHtml(artifact.validation.errors.join(" | "))}</span></div>`
+          : ""
+        }
+        <label for="parsedArtifactPreview${index}" style="margin-top:12px">Parsed Artifact Preview</label>
+        <textarea id="parsedArtifactPreview${index}" readonly spellcheck="false"></textarea>
+      </div>
+    `).join("")
+    : "";
   panel.innerHTML = `
     <div class="summary-grid">
       <div class="card"><strong>Project Slug</strong><div class="meta mono">${escapeHtml(detail.project_slug || "")}</div></div>
@@ -2241,6 +2382,30 @@ function renderProjectDetailState() {
                 </div>
               `}
             </div>
+            <div class="card" style="margin-top:12px">
+              <strong>Paste AI Output</strong>
+              <div class="meta">Paste the model response for the loaded bundle. Parse and Preview checks it in memory only and does not write any artifact files.</div>
+              <label for="pastedOutputText" style="margin-top:12px">AI Output</label>
+              <textarea id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." ${bundle ? "" : "disabled"} spellcheck="false"></textarea>
+              <div class="row" style="margin-top:12px">
+                <button type="button" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
+              </div>
+              <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
+              ${parsedOutput ? `
+                <div class="summary-grid" style="margin-top:12px">
+                  <div class="card"><strong>Preview Status</strong><div>${pill(parsedOutput.status || "UNKNOWN")}</div></div>
+                  <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(parsedOutput.contract && parsedOutput.contract.response_mode ? parsedOutput.contract.response_mode : "Unknown")}</div></div>
+                  <div class="card"><strong>Raw Output SHA-256</strong><div class="meta mono">${escapeHtml(parsedOutput.raw_output && parsedOutput.raw_output.sha256 ? parsedOutput.raw_output.sha256 : "")}</div></div>
+                  <div class="card"><strong>Raw Character Count</strong><div class="meta">${escapeHtml(String(parsedOutput.raw_output && parsedOutput.raw_output.character_count !== undefined ? parsedOutput.raw_output.character_count : ""))}</div></div>
+                  <div class="card"><strong>Artifact Count</strong><div class="meta">${escapeHtml(String((parsedOutput.artifacts || []).length))}</div></div>
+                </div>
+                ${(parsedOutput.validation && Array.isArray(parsedOutput.validation.errors) && parsedOutput.validation.errors.length)
+                  ? `<div class="notice" style="margin-top:12px"><strong>Parse Validation Errors</strong><span class="meta">${escapeHtml(parsedOutput.validation.errors.join(" | "))}</span></div>`
+                  : ""
+                }
+                ${parsedArtifactsHtml}
+              ` : ""}
+            </div>
           </div>
         ` : ""}
       ` : `
@@ -2254,6 +2419,16 @@ function renderProjectDetailState() {
   const bundlePreviewText = document.getElementById("bundlePreviewText");
   if (bundlePreviewText && bundle) {
     bundlePreviewText.value = typeof bundle.bundle === "string" ? bundle.bundle : "";
+  }
+  const pastedOutputText = document.getElementById("pastedOutputText");
+  if (pastedOutputText) {
+    pastedOutputText.value = typeof state.pastedOutputDraft === "string" ? state.pastedOutputDraft : "";
+  }
+  if (parsedOutput && Array.isArray(parsedOutput.artifacts)) {
+    parsedOutput.artifacts.forEach((artifact, index) => {
+      const artifactPreview = document.getElementById(`parsedArtifactPreview${index}`);
+      if (artifactPreview) artifactPreview.value = typeof artifact.content === "string" ? artifact.content : "";
+    });
   }
 
   if (!state.selectedProjectValidation) {
@@ -2784,6 +2959,114 @@ async function copyBundleAction() {
   render();
 }
 
+async function parseOutputAction() {
+  const channelSlug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const step = selectedWorkflowStepRecord();
+  const bundle = activeBundleRecord();
+  const button = parseOutputButtonModel();
+  if (!channelSlug || !projectSlug || !step || !bundle) {
+    invalidateParsedOutputResult();
+    state.parsedOutputError = "Load a valid bundle for the selected step before parsing output.";
+    render();
+    return;
+  }
+  if (button.disabled) {
+    if (!(state.parseOutputAction.busy
+      && state.parseOutputAction.channelSlug === channelSlug
+      && state.parseOutputAction.projectSlug === projectSlug
+      && state.parseOutputAction.stepId === step.step_id)) {
+      invalidateParsedOutputResult();
+      state.parsedOutputError = button.helper;
+      render();
+    }
+    return;
+  }
+
+  const parseIdentity = parsedOutputIdentityForSelection(state.pastedOutputDraft);
+  if (!parseIdentity) {
+    invalidateParsedOutputResult();
+    state.parsedOutputError = "Load a valid bundle for the selected step before parsing output.";
+    render();
+    return;
+  }
+
+  const requestId = state.parseOutputAction.requestId + 1;
+  state.parseOutputAction = {
+    busy: true,
+    channelSlug,
+    projectSlug,
+    workflowId: parseIdentity.workflow_id,
+    workflowVersion: parseIdentity.workflow_version,
+    stepId: step.step_id,
+    bundleSha256: parseIdentity.bundle_sha256,
+    outputText: parseIdentity.output_text,
+    requestId
+  };
+  invalidateParsedOutputResult();
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output`, {
+      method: "POST",
+      body: JSON.stringify({
+        bundle_sha256: bundle.bundle_sha256,
+        output_text: parseIdentity.output_text
+      })
+    });
+    const activeBundle = activeBundleRecord();
+    if (
+      state.parseOutputAction.requestId !== requestId
+      || state.parseOutputAction.channelSlug !== channelSlug
+      || state.parseOutputAction.projectSlug !== projectSlug
+      || state.parseOutputAction.workflowId !== parseIdentity.workflow_id
+      || state.parseOutputAction.workflowVersion !== parseIdentity.workflow_version
+      || state.parseOutputAction.stepId !== step.step_id
+      || state.parseOutputAction.bundleSha256 !== parseIdentity.bundle_sha256
+      || state.parseOutputAction.outputText !== parseIdentity.output_text
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+      || !activeBundle
+      || activeBundle.bundle_sha256 !== parseIdentity.bundle_sha256
+      || state.pastedOutputDraft !== parseIdentity.output_text
+    ) return;
+    state.parsedOutputResult = data;
+    state.parsedOutputError = "";
+  } catch (error) {
+    if (
+      state.parseOutputAction.requestId !== requestId
+      || state.parseOutputAction.channelSlug !== channelSlug
+      || state.parseOutputAction.projectSlug !== projectSlug
+      || state.parseOutputAction.workflowId !== parseIdentity.workflow_id
+      || state.parseOutputAction.workflowVersion !== parseIdentity.workflow_version
+      || state.parseOutputAction.stepId !== step.step_id
+      || state.parseOutputAction.bundleSha256 !== parseIdentity.bundle_sha256
+      || state.parseOutputAction.outputText !== parseIdentity.output_text
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+      || state.pastedOutputDraft !== parseIdentity.output_text
+    ) return;
+    invalidateParsedOutputResult();
+    state.parsedOutputError = parseOutputErrorSummary(error, "Could not parse the pasted output preview.");
+  } finally {
+    if (
+      state.parseOutputAction.requestId === requestId
+      && state.parseOutputAction.channelSlug === channelSlug
+      && state.parseOutputAction.projectSlug === projectSlug
+      && state.parseOutputAction.workflowId === parseIdentity.workflow_id
+      && state.parseOutputAction.workflowVersion === parseIdentity.workflow_version
+      && state.parseOutputAction.stepId === step.step_id
+      && state.parseOutputAction.bundleSha256 === parseIdentity.bundle_sha256
+      && state.parseOutputAction.outputText === parseIdentity.output_text
+    ) {
+      state.parseOutputAction.busy = false;
+      render();
+    }
+  }
+}
+
 async function saveTranscriptAction() {
   const save = transcriptSaveModel();
   const slug = state.selectedChannelSlug;
@@ -2998,6 +3281,15 @@ document.getElementById("projectDetailPanel").addEventListener("change", (event)
     setSelectedWorkflowStepId(event.target.value || null);
   }
 });
+document.getElementById("projectDetailPanel").addEventListener("input", (event) => {
+  if (event.target.id === "pastedOutputText") {
+    state.pastedOutputDraft = event.target.value;
+    if (state.parsedOutputResult || state.parsedOutputError) {
+      invalidateParsedOutputResult();
+      render();
+    }
+  }
+});
 document.getElementById("projectDetailPanel").addEventListener("click", (event) => {
   const stepButton = event.target.closest("[data-workflow-step-id]");
   if (stepButton) {
@@ -3010,6 +3302,10 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
   }
   if (event.target.id === "copyBundleBtn") {
     copyBundleAction();
+    return;
+  }
+  if (event.target.id === "parseOutputBtn") {
+    parseOutputAction();
   }
 });
 
@@ -3086,7 +3382,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         try:
-            payload = self.read_body()
+            try:
+                payload = self.read_body()
+            except json.JSONDecodeError as exc:
+                if self.path.startswith("/api/v2/"):
+                    raise _v2_error("INVALID_REQUEST", "Request body must be valid JSON.", 400) from exc
+                raise
             if self.path.startswith("/api/v2/"):
                 status, data = dispatch_v2_request("POST", self.path, payload=payload, context=APP_CONTEXT)
                 self.send_json(data, status)

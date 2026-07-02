@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Phase 7C2B - In-Memory Output Parsing and Preview
+- Added `scripts/channel_output_parser.py` as a dedicated zero-write output parser that resolves the exact selected project binding, workflow version, step output contract, and current bundle identity server-side.
+- Added `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/parse-output` in `scripts/ui_server.py` as the only computational parse endpoint for pasted AI output.
+- Enforced exact bundle-identity verification before parsing by rebuilding the current bundle and comparing the authoritative SHA-256 against the request `bundle_sha256`; stale or mismatched bundle identity now fails with controlled `BUNDLE_IDENTITY_MISMATCH`.
+- Implemented generic parser branching only by committed contract response modes: `SINGLE_ARTIFACT`, `MULTI_ARTIFACT_TOOL_ENVELOPE`, and `MULTI_ARTIFACT_PROMPT_NATIVE`.
+- Preserved exact raw output bytes in memory for SHA-256 and character-count reporting; the parser does not normalize, trim, log, or write raw output.
+- Added structural validation for required-heading presence/duplication/order, marker presence/duplication/order, unknown marker lines, non-whitespace prefix text, empty artifact bodies, and contract/artifact identity consistency.
+- Added embedded UI intake for `Paste AI Output` and `Parse and Preview`, with in-memory-only state for raw text, parse identity, parse result, parse error, and stale-response generation tracking.
+- Added stale parse-response protection so older parse results cannot replace newer output, newer bundle identity, or newer selected channel/project/step state.
+- Added generic parsed artifact preview cards with filename, artifact id, validation status, SHA-256, character count, structural errors, and full plain-text preview content rendered through readonly textareas only.
+- Extended `tests/test_channel_output_parser.py`, `tests/test_multichannel_api.py`, and `tests/test_ui_frontend_contract.py` with parser coverage for LF/CRLF, exact whitespace preservation, per-artifact heading validation, generic three-artifact parsing, malformed JSON handling, disabled-before-bundle state, no auto-parse on paste, stale-parse invalidation, parse-failure raw-text retention, and inert untrusted content rendering.
+- Verification round confirmed there is no real canonical project directory and no real `workflow_state.json` under `channels/mist_of_ages/projects/`; the earlier contrary manual count was a measurement mistake from `@(Get-ChildItem ... | Measure-Object).Count`.
+- Verification round recorded the protected real-runtime baseline accurately as canonical channel identity/profile/learnings plus canonical metrics, legacy identity/learnings/token, and canonical token present, with no canonical project directories and no real `workflow_state.json`.
+- Verification round re-ran runtime-harness, compile, and full-regression commands with before/after protected-runtime snapshots and proved exact path-set, size, and SHA-256 equality across the protected runtime set.
+- Re-ran the focused parser, frontend, prompt-bundle, workflow, and multichannel API suites successfully, then re-ran the full offline regression successfully (`343` run, `342` passed, `0` failures, `0` errors, `1` skipped).
+- Confirmed production workflow defaults remained `default_version = 1` and `legacy_unpinned_version = 1`.
+- Confirmed workflow v1 SHA-256 `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`, workflow v2 SHA-256 `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`, and prompt manifest SHA-256 `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602` remained unchanged.
+- Preserved the real Mist of Ages runtime, canonical token paths, legacy source files, and unrelated `implement.docx` without mutation.
+- Kept artifact writes, revisions, workflow-state mutation, approval/reject/retry semantics, stale downstream propagation, migration, and model/API calls out of scope.
+
 ### Phase 7C2A - Read-Only Workflow UI and Copy Bundle
 - Modified the embedded production UI in `scripts/ui_server.py` to add a read-only workflow panel inside the selected project detail area without introducing a second frontend stack.
 - Added selected-project workflow loading through `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow` after successful project-detail load.

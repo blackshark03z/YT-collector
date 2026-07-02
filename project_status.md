@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C2A - Read-Only Workflow UI and Copy Bundle
+Phase 7C2B - In-Memory Output Parsing and Preview
 
 ## Phase Status
 COMPLETE
@@ -60,6 +60,45 @@ MVP_ACCEPTED
 - Phase 7B: versioned workflow registry/definition foundation, immutable project workflow binding, legacy synthesized binding reads, workflow state read synthesis, and channel-scoped workflow read API completed locally without runtime mutation
 - Phase 7C1: authoritative Mist of Ages prompt-set ingestion, immutable workflow v2, generic prompt-manifest validation, prompt-bundle builder, and read-only bundle API completed locally without runtime mutation
 - Phase 7C2A: embedded read-only workflow panel, selected-step bundle preview/copy flow, and stale-response-safe bundle UI completed locally without runtime mutation
+- Phase 7C2B: pasted AI output intake, zero-write output parser, structural validation, and in-memory parsed artifact preview completed locally without runtime mutation
+
+## Phase 7C2B Scope
+- Added `scripts/channel_output_parser.py` as a generic zero-write parser that resolves the selected project binding, exact workflow version, exact prompt manifest output contract, exact current bundle identity, and pasted raw output entirely on the server side.
+- Added one computational endpoint only: `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/parse-output`.
+- Added exact bundle SHA verification before parsing; mismatched or stale bundle identity now returns controlled `BUNDLE_IDENTITY_MISMATCH` instead of parsing against a stale contract.
+- Implemented generic parser branching only by declared `response_mode`: `SINGLE_ARTIFACT`, `MULTI_ARTIFACT_TOOL_ENVELOPE`, and `MULTI_ARTIFACT_PROMPT_NATIVE`.
+- Preserved exact raw output bytes in memory for SHA-256 and character-count calculation; the parser does not normalize, trim, or write raw output.
+- Added structural validation only: marker presence/order/uniqueness, non-whitespace prefix, artifact-count identity, empty artifact bodies, required-heading presence, duplicate headings, and out-of-order headings.
+- Added embedded UI intake in `scripts/ui_server.py` for `Paste AI Output` plus `Parse and Preview`, with memory-only state for raw output, parse request identity, parse result, and parse errors.
+- Added stale parse-response protection keyed by channel slug, project slug, workflow id, workflow version, step id, bundle SHA, exact raw-output snapshot, and request generation id.
+- Added generic parsed artifact preview cards with filename, status, SHA-256, character count, validation errors, and full plain-text preview content using readonly textareas only.
+- Kept all Phase 7C2B behavior zero-write: no artifact writes, no workflow-state writes, no revisions, no approvals, no retries, no stale propagation, and no model/API calls.
+
+## Phase 7C2B Evidence
+- Phase 7C2A push completed earlier in this execution chain; the pushed baseline commit remains `31bde87104bd2073f87ec6229b7d1fba3b249f02` and no additional push occurred for Phase 7C2B.
+- Focused parser coverage: `python -m unittest tests.test_channel_output_parser` passing (`22` run, `22` passed, `0` failures, `0` errors, `0` skipped).
+- Focused frontend contract plus runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`33` run, `33` passed, `0` failures, `0` errors, `0` skipped).
+- Explicit JavaScript runtime harness: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests` passing (`9` run, `9` passed, `0` failures, `0` errors, `0` skipped).
+- Focused prompt-bundle regression: `python -m unittest tests.test_channel_prompt_bundle` passing (`19` run, `19` passed, `0` failures, `0` errors, `0` skipped).
+- Focused workflow regression: `python -m unittest tests.test_channel_workflow` passing (`17` run, `16` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`53` run, `53` passed, `0` failures, `0` errors, `0` skipped).
+- Compile check: `python -m py_compile scripts\channel_output_parser.py scripts\channel_prompt_bundle.py scripts\channel_workflow.py scripts\ui_server.py tests\test_channel_output_parser.py tests\test_ui_frontend_contract.py` passing.
+- Full offline regression: `python -m unittest discover -s tests` passing (`343` run, `342` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability).
+- Diff check: `git diff --check` passing with only Git LF/CRLF working-copy warnings on modified tracked files.
+- Production workflow defaults remain unchanged: `default_version = 1`, `legacy_unpinned_version = 1`.
+- Workflow v1 SHA-256 remained `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Workflow v2 SHA-256 remained `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`.
+- Prompt manifest SHA-256 remained `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- Runtime-baseline investigation confirmed no real canonical project directory and no real `workflow_state.json` exist under `channels/mist_of_ages/projects/`; the earlier contrary manual report was a measurement mistake caused by `@(Get-ChildItem ... | Measure-Object).Count`, which counts the wrapped `Measure-Object` result item rather than the discovered file count.
+- Protected runtime before/after snapshot across explicit runtime-harness, compile, and full-regression execution remained byte-identical for the full path set under `channels/mist_of_ages/`, `.local/mist_of_ages_channel.json`, `channel/mist_of_ages/channel_learnings_master.md`, `youtube_oauth_token.json`, and `secrets/youtube/mist_of_ages_oauth_token.json`.
+- Protected runtime baseline is now recorded accurately as: canonical channel identity/profile/learnings present, canonical metrics present, legacy identity/learnings/token present, canonical token present, canonical project directories absent, and real `workflow_state.json` absent.
+- Real Mist of Ages runtime paths and unrelated `implement.docx` remained untouched; all parser/write-safety coverage used temporary roots or embedded UI/runtime harnesses only.
+
+## Phase 7C2B Gate
+- In-memory output parsing and preview are now implemented locally and remain strictly zero-write.
+- Phase 7C2C remains blocked pending a separate Tech Lead execution prompt for artifact writes, immutable revisions, workflow-state mutation, approval/reject/retry semantics, and stale downstream propagation.
+- No Phase 7C2B commit has been created.
+- No Phase 7C2B push has been performed.
 
 ## Phase 7C2A Scope
 - Extended the embedded visible UI in `scripts/ui_server.py` only; no second frontend app and no backend write endpoint were added.

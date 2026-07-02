@@ -1,4 +1,6 @@
+import http.client
 import json
+import threading
 import sys
 import tempfile
 import unittest
@@ -9,7 +11,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import channel_projects, channel_workspace, ui_server
+from scripts import channel_projects, channel_prompt_bundle, channel_workspace, ui_server
 from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
@@ -368,6 +370,259 @@ class MultiChannelApiTests(unittest.TestCase):
     def test_existing_collector_behavior_remains_unchanged(self):
         self.assertIn("api_key", ui_server.app_status())
         self.assertTrue(callable(ui_server.create_project))
+
+    def test_parse_output_route_returns_parsed_preview_for_selected_project_step(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            (project_dir / "workflow" / "transcript_analysis.md").write_text("## Subject\nRome\n", encoding="utf-8", newline="\n")
+            project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
+            bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_2_historical_research", project, project_dir)
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_2_historical_research/parse-output",
+                {
+                    "bundle_sha256": bundle["bundle_sha256"],
+                    "output_text": (
+                        "=== FILE 1: research_pack.md ===\n"
+                        "## Topic Overview\nOverview\n"
+                        "## Reliable Timeline\nTimeline\n"
+                        "## Key People and Roles\nPeople\n"
+                        "## Anchor Facts\nFacts\n"
+                        "## Human Details and Human Cost\nCost\n"
+                        "## Myths, Disputes, and Later Accounts\nMyths\n"
+                        "## Facts That Contradict the Competitor\nContradictions\n"
+                        "## Possible Evidence-Based Contradictions\nEvidence\n"
+                        "## Documented Visual Details\nVisuals\n"
+                        "## Source Notes\nSources\n"
+                        "=== FILE 2: evidence_ledger.md ===\n"
+                        "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n"
+                    ),
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(data["status"], "VALID")
+            self.assertEqual(len(data["artifacts"]), 2)
+            before_tree = {}
+            for path in sorted(project_dir.rglob("*")):
+                before_tree[path.relative_to(project_dir).as_posix()] = ("dir", 0) if path.is_dir() else ("file", path.stat().st_size, path.read_bytes())
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_2_historical_research/parse-output",
+                {
+                    "bundle_sha256": bundle["bundle_sha256"],
+                    "output_text": (
+                        "=== FILE 1: research_pack.md ===\n"
+                        "## Topic Overview\nOverview\n"
+                        "## Reliable Timeline\nTimeline\n"
+                        "## Key People and Roles\nPeople\n"
+                        "## Anchor Facts\nFacts\n"
+                        "## Human Details and Human Cost\nCost\n"
+                        "## Myths, Disputes, and Later Accounts\nMyths\n"
+                        "## Facts That Contradict the Competitor\nContradictions\n"
+                        "## Possible Evidence-Based Contradictions\nEvidence\n"
+                        "## Documented Visual Details\nVisuals\n"
+                        "## Source Notes\nSources\n"
+                        "=== FILE 2: evidence_ledger.md ===\n"
+                        "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n"
+                    ),
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            after_tree = {}
+            for path in sorted(project_dir.rglob("*")):
+                after_tree[path.relative_to(project_dir).as_posix()] = ("dir", 0) if path.is_dir() else ("file", path.stat().st_size, path.read_bytes())
+            self.assertEqual(before_tree, after_tree)
+            dumped = json.dumps(data)
+            self.assertNotIn(str(root), dumped)
+
+    def test_parse_output_route_returns_stable_identity_mismatch_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/parse-output",
+                    {"bundle_sha256": "A" * 64, "output_text": "## Subject\nRome\n"},
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(ctx.exception.code, "BUNDLE_IDENTITY_MISMATCH")
+
+    def test_parse_output_route_returns_invalid_for_malformed_ai_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            (project_dir / "workflow" / "transcript_analysis.md").write_text("## Subject\nRome\n", encoding="utf-8", newline="\n")
+            project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
+            bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_2_historical_research", project, project_dir)
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_2_historical_research/parse-output",
+                {
+                    "bundle_sha256": bundle["bundle_sha256"],
+                    "output_text": "unexpected prefix\n=== FILE 2: evidence_ledger.md ===\nCLAIM:\nFact\n",
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(data["status"], "INVALID")
+            self.assertEqual(data["artifacts"], [])
+
+    def test_parse_output_route_rejects_non_string_output_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/parse-output",
+                    {"bundle_sha256": "A" * 64, "output_text": {"bad": True}},
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(ctx.exception.code, "OUTPUT_TEXT_REQUIRED")
+
+    def test_v2_handler_returns_controlled_error_for_malformed_json_body(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            previous = ui_server.APP_CONTEXT
+            server = None
+            thread = None
+            try:
+                ui_server.APP_CONTEXT = ui_server.build_app_context(root=root)
+                server = ui_server.ThreadingHTTPServer(("127.0.0.1", 0), ui_server.Handler)
+                thread = threading.Thread(target=server.serve_forever, daemon=True)
+                thread.start()
+                conn = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=5)
+                conn.request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects/demo/workflow/steps/alpha/parse-output",
+                    body="{bad json",
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                )
+                response = conn.getresponse()
+                payload = json.loads(response.read().decode("utf-8"))
+                conn.close()
+                self.assertEqual(response.status, 400)
+                self.assertEqual(payload["error"]["code"], "INVALID_REQUEST")
+                self.assertEqual(payload["error"]["message"], "Request body must be valid JSON.")
+            finally:
+                if server is not None:
+                    server.shutdown()
+                    server.server_close()
+                if thread is not None:
+                    thread.join(timeout=5)
+                ui_server.APP_CONTEXT = previous
 
     def test_oauth_start_dispatch_create_rejects_existing_workspace(self):
         with tempfile.TemporaryDirectory() as tmp:
