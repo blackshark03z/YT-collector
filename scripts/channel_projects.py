@@ -297,7 +297,7 @@ def _project_paths(root: Path | str, channel_slug: str, project_slug: str) -> Pr
 
 
 def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
-    return {
+    summary = {
         "project_slug": project["project_slug"],
         "channel_slug": project["channel_slug"],
         "youtube_channel_id": project["youtube_channel_id"],
@@ -309,6 +309,9 @@ def _project_summary(project: dict[str, Any]) -> dict[str, Any]:
         "created_at": project["created_at"],
         "updated_at": project["updated_at"],
     }
+    if "workflow_binding" in project and project["workflow_binding"] is not None:
+        summary["workflow_binding"] = channel_workflow.validate_project_workflow_binding(project["workflow_binding"])
+    return summary
 
 
 def load_channel_project(root: Path | str, channel_slug: str, project_slug: str) -> dict[str, Any]:
@@ -377,6 +380,7 @@ def create_channel_project(
     thumbnail_bytes: bytes | None = None,
     thumbnail_extension: str | None = None,
     created_at: str | None = None,
+    workflow_binding: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_video_id, str) or not source_video_id.strip():
         raise ChannelProjectError("source_video_id is required.")
@@ -389,10 +393,14 @@ def create_channel_project(
         raise ChannelProjectError("Selected channel workspace has no valid youtube_channel_id.")
     workspace = channel_workspace.canonical_channel_paths(root, channel_slug)
     try:
-        workflow_binding = channel_workflow.get_channel_default_workflow(root, channel_slug)
+        effective_workflow_binding = (
+            channel_workflow.validate_project_workflow_binding(workflow_binding)
+            if workflow_binding is not None
+            else channel_workflow.get_channel_default_workflow(root, channel_slug)
+        )
     except channel_workflow.ChannelWorkflowError as exc:
         raise ChannelProjectError(exc.message) from exc
-    workflow_generated_outputs = _workflow_generated_output_relative_paths(root, workflow_binding)
+    workflow_generated_outputs = _workflow_generated_output_relative_paths(root, effective_workflow_binding)
     learnings_bytes = _read_required_snapshot(
         workspace.channel_learnings_master, name="channel learnings"
     )
@@ -478,8 +486,8 @@ def create_channel_project(
                 "captured_at": snapshot_time,
             },
         }
-        if workflow_binding is not None:
-            project_json["workflow_binding"] = workflow_binding
+        if effective_workflow_binding is not None:
+            project_json["workflow_binding"] = effective_workflow_binding
         (temp_dir / "project.json").write_text(
             json.dumps(project_json, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8",

@@ -929,8 +929,10 @@ class PromptBundleTests(unittest.TestCase):
                     "updated_at",
                     "has_content",
                     "has_publishing_package",
+                    "workflow_binding",
                 },
             )
+            self.assertEqual(detail_data["project"]["workflow_binding"]["workflow_version"], "2")
 
     def test_temp_root_work_never_mutates_real_runtime(self):
         before = snapshot_runtime_state(ROOT)

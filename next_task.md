@@ -4,71 +4,68 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-Phase 7C2C3B - Replacement History Read Surface
+Phase 7D1A2 - Blocked Pilot Cleanup and Retry Gate
 
 ## Do Not Start Yet
-Do not begin Phase 7C2C3B until a separate Tech Lead execution prompt authorizes it.
+Do not begin Phase 7D1A2 until a separate Tech Lead execution prompt authorizes cleanup of the blocked v1 pilot project and any later retry.
 
 ## Proposed Objective
-Build on completed Phase 7C2C3A by adding a narrow read-only replacement-history surface only, while preserving schema v3 authority, exact bundle identity, immutable decision history, and fail-closed stable-artifact authority.
+Handle the failed real pilot artifact separately from the 7D1A1 create-path fix: decide whether to archive, delete, or otherwise clean up `channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/`, then authorize a fresh pilot retry only after cleanup rules are explicit.
 
 ## Current Phase Evidence
-- Phase 7C2C3A replacement recovery matrix A-J is now proven locally.
-- Direct, transitive, branch-safe, multi-input, and multi-output stale propagation behavior is now proven locally.
-- Downstream approved-plus-candidate invalidation, first-candidate invalidation, and stale clearing are now proven locally.
-- Schema-v3 conversion remains write-only and locally proven.
-- History and restore remain blocked; no history/restore production code exists in the current diff.
+- Phase 7D1A1 confirmed the real blocker exactly: canonical V2 project creation silently inherited registry `default_version = 1` because no explicit binding crossed the canonical create boundary.
+- Canonical create now requires explicit `workflow_id` plus `workflow_version`, uses server-owned workflow choices only, and persists the authoritative server-calculated binding.
+- Registry defaults remain unchanged at `default_version = 1` and `legacy_unpinned_version = 1`.
+- The blocked v1 pilot project remains untouched and byte-identical.
+- Transcript save and Prompt 1 execution were not performed.
+- No second real project was created.
+- Cleanup and pilot retry remain blocked pending separate authorization.
+- History and Restore remain deferred.
 
 ## Preconditions
-- Phase 7C1 prompt assets, workflow v2, manifest, and bundle endpoint must remain the only source of truth for prompt text
-- Phase 7C2B parse endpoint and UI preview must remain the only source of truth for accepted raw-output identity before any artifact write is permitted
-- the completed Phase 7C2C2 trust rule must remain authoritative: workflow-generated files are trusted only from approved workflow state, never from file existence alone
-- the completed Phase 7C2C2 production-path audit must remain true: both active production project creators now obey no-output-scaffolding, and no production workflow-placeholder writer remains
-- no migration of existing v1-bound projects may occur without explicit authorization
-- the protected real-runtime baseline must now be treated accurately as canonical channel identity/profile/learnings plus canonical metrics, legacy identity/learnings/token, and canonical token present, with no canonical project directories and no real `workflow_state.json`
+- Do not mutate the blocked project without an explicit cleanup decision.
+- Do not treat the blocked project as automatically migrated to workflow version `2`.
+- Preserve the explicit canonical create contract from Phase 7D1A1: browser authority is limited to `workflow_id` and `workflow_version`; digest/path authority remains server-owned.
+- Preserve the real-runtime baseline with exactly one canonical project directory and zero real `workflow_state.json` files unless a separate cleanup prompt explicitly authorizes change.
+- Preserve workflow defaults and prompt/workflow assets unchanged.
 
 ## Required Focus
 - preserve immutable project workflow bindings
-- preserve `LEGACY_SYNTHESIZED` read behavior for unbound legacy projects
-- preserve zero-write GET behavior for read routes and zero-write parse behavior for the Phase 7C2B preview path
 - preserve channel-scoped `/api/v2/` ownership checks
-- keep visible frontend changes narrowly limited to separately authorized 7C2C3 follow-up only
-- preserve the verified Prompt 2 topic contract and the pathless optional pronunciation-notes contract from Phase 7C1
-- preserve exact bundle SHA and raw-output identity matching before any candidate approval, rejection, or stable publication follow-up
-- preserve the new schema-v3 approved-plus-candidate model, replacement decision compatibility, stale propagation semantics, and stale bundle gating from Phase 7C2C3A
+- preserve server-owned workflow-option authority
+- preserve zero automatic migration of existing projects
+- preserve the untouched blocked pilot artifact until cleanup is separately authorized
+- preserve workflow/prompt asset digests and registry default semantics
 
 ## Forbidden Work
-- do not rewrite canonical prompt bodies or prompt digests
+- do not edit, validate, delete, rename, or recreate the blocked pilot project without separate authorization
+- do not save the real transcript for the blocked pilot project
+- do not start Prompt 1 or any later workflow step on the blocked pilot project
 - do not auto-migrate existing projects to workflow version `2`
-- do not add prompt editing UI
+- do not change workflow defaults away from `default_version = 1` and `legacy_unpinned_version = 1`
 - do not add AI API calls
-- do not bypass the read-only bundle plus parse-preview identity checks by approving or publishing output directly from pasted text
-- do not add restore behavior; Phase 7C2C3C restore remains blocked pending a separate Tech Lead execution prompt
-- do not broaden history beyond the separately approved Phase 7C2C3B read surface
 - do not mutate protected runtime data outside approved temporary-root tests
-- do not weaken the no-placeholder-overwrite rule or occupied-target fail-closed behavior
+- do not start History or Restore work in this cleanup phase
 
 ## Verification Requirements
-- confirm workflow v2 prompt-set validation still rejects tampering and path escape
-- confirm workflow version pinning still survives registry default changes
-- confirm `legacy_unpinned_version` remains compatibility-pinned for legacy unbound projects unless a separately approved migration plan says otherwise
-- preserve the verified Phase 7C2C3A recovery model: replacement approval publishes replacement stable artifacts then decision then workflow state then cleanup; rejection publishes decision then workflow state then cleanup
-- preserve the verified Phase 7C2C1 lock-ownership rule: cleanup may remove only the lock still owned by the current transaction token
-- confirm the read-only UI bundle identity rules and Phase 7C2B parse identity rules still prevent stale or mismatched output acceptance
-- confirm the Phase 7C2C2 trust rule still rejects unmanaged placeholder files and other occupied stable targets as approval blockers
-- keep the corrected legacy route disposition intact: `/api/create_project` may remain registered, but it must stay parity-safe with the no-output-scaffolding contract
-- confirm real Mist of Ages runtime and token files remain untouched
-- preserve the corrected runtime-baseline methodology: compare before/after protected-runtime hashes instead of relying on zero-count assumptions or wrapped `Measure-Object` mistakes
+- confirm explicit workflow pinning still survives registry default values remaining at v1
+- confirm the blocked pilot artifact is either preserved untouched or changed only by a separately authorized cleanup action
+- confirm real Mist of Ages runtime and token files remain protected from accidental mutation
+- preserve the runtime-baseline methodology: compare before/after protected-runtime hashes and blocked-project hashes
+- keep `/api/create_project` parity-safe with the no-output-scaffolding contract
+- keep browser authority limited to selection ids/versions, never digests or paths
 
 ## Reasoning Effort
 High
 
 ## Deferred Later Phase
-Phase 7C2C3C - Restore
+History and Restore remain deferred
 
 ## Explicitly Blocked
-- Phase 7C2C3B history remains blocked pending a separate Tech Lead execution prompt.
-- Phase 7C2C3C restore remains blocked pending a separate Tech Lead execution prompt.
+- Blocked pilot cleanup remains blocked pending a separate Tech Lead execution prompt.
+- Pilot retry remains blocked pending a separate Tech Lead execution prompt.
+- History remains deferred.
+- Restore remains deferred.
 
 ## Exact First Action
-Verify the baseline after the completed Phase 7C2C3A verification round, then define the exact separately authorized history-only Phase 7C2C3B read surface without implementing restore or any broader mutation flow.
+Verify the blocked pilot project state and choose an explicit cleanup/disposition plan before authorizing any fresh real pilot creation attempt.

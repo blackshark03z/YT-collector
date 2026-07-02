@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import channel_projects, channel_workspace
+from scripts import channel_projects, channel_workspace, channel_workflow
 from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
@@ -55,6 +55,10 @@ def read_json(path: Path) -> dict:
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
+
+
+def explicit_binding(root: Path, channel_slug: str, workflow_id: str, workflow_version: str) -> dict:
+    return channel_workflow.resolve_explicit_channel_workflow_binding(root, channel_slug, workflow_id, workflow_version)
 
 
 class ChannelProjectTests(unittest.TestCase):
@@ -232,7 +236,14 @@ class ChannelProjectTests(unittest.TestCase):
             registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
             write_json(registry_path, registry)
             make_channel(root, "mist_of_ages", "UC123")
-            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "2"),
+            )
             base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
             self.assertTrue((base / "input" / "competitor_reference.md").exists())
             self.assertTrue((base / "research" / "competitor_transcript.md").exists())
@@ -285,7 +296,14 @@ class ChannelProjectTests(unittest.TestCase):
             registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
             write_json(registry_path, registry)
             make_channel(root, "mist_of_ages", "UC123")
-            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "3"),
+            )
             base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
             self.assertTrue((base / "input" / "competitor_reference.md").exists())
             self.assertTrue((base / "research" / "competitor_transcript.md").exists())
@@ -343,7 +361,14 @@ class ChannelProjectTests(unittest.TestCase):
             registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
             write_json(registry_path, registry)
             make_channel(root, "mist_of_ages", "UC123")
-            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "8"),
+            )
             base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
             self.assertTrue((base / "research" / "competitor_transcript.md").exists())
             self.assertFalse((base / "workflow" / "alpha.custom.md").exists())
@@ -598,6 +623,57 @@ class ChannelProjectTests(unittest.TestCase):
             channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
         after = snapshot_runtime_state(ROOT)
         self.assertEqual(before, after)
+
+    def test_explicit_v2_binding_is_persisted_exactly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            make_channel(root, "mist_of_ages", "UC123")
+            binding = explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "2")
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=binding,
+            )
+            self.assertEqual(project["workflow_binding"], binding)
+            project_json = read_json(root / "channels" / "mist_of_ages" / "projects" / project["project_slug"] / "project.json")
+            self.assertEqual(project_json["workflow_binding"], binding)
+
+    def test_explicit_v1_binding_is_persisted_exactly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            make_channel(root, "mist_of_ages", "UC123")
+            binding = explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "1")
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=binding,
+            )
+            self.assertEqual(project["workflow_binding"], binding)
+
+    def test_explicit_binding_does_not_create_workflow_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            make_channel(root, "mist_of_ages", "UC123")
+            binding = explicit_binding(root, "mist_of_ages", "mist_of_ages_assisted_content", "2")
+            project = channel_projects.create_channel_project(
+                root,
+                "mist_of_ages",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                source_metadata(),
+                workflow_binding=binding,
+            )
+            project_root = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
+            self.assertFalse((project_root / "workflow" / "workflow_state.json").exists())
 
 
 if __name__ == "__main__":

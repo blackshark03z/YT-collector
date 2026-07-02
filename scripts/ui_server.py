@@ -928,6 +928,7 @@ def _channel_status_payload(root: Path | str, channel_slug: str) -> dict:
             reporting_state = {}
     return {
         "channel": _sanitize_channel_summary(root, channel),
+        "available_workflows": channel_workflow.list_channel_workflow_options(root, channel_slug),
         "learnings": {
             "path": paths.channel_learnings_master.relative_to(Path(root)).as_posix(),
             "exists": paths.channel_learnings_master.exists(),
@@ -1051,8 +1052,27 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 return 200, {"sync": result}
             if method == "POST" and len(parts) == 5 and parts[4] == "projects":
                 _load_channel_or_error(root, channel_slug)
-                competitor_url = payload.get("url", "")
+                unsupported_authority_fields = {
+                    "workflow_definition_sha256",
+                    "workflow_definition_path",
+                    "prompt_manifest_path",
+                    "artifact_paths",
+                    "registry_path",
+                }
+                unsupported = sorted(field for field in unsupported_authority_fields if field in payload)
+                if unsupported:
+                    raise _v2_error("INVALID_REQUEST", f"Unsupported workflow authority fields: {', '.join(unsupported)}.", 400)
+                competitor_url = payload.get("competitor_url", payload.get("url", ""))
                 project_name = payload.get("project_name")
+                try:
+                    workflow_binding = channel_workflow.resolve_explicit_channel_workflow_binding(
+                        root,
+                        channel_slug,
+                        payload.get("workflow_id"),
+                        payload.get("workflow_version"),
+                    )
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
                 try:
                     video_id = parse_video_id(competitor_url)
                     video = ctx["competitor_video_fetcher"](video_id)
@@ -1073,10 +1093,11 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                         project_name=project_name,
                         thumbnail_bytes=thumb_bytes,
                         thumbnail_extension=thumb_ext,
+                        workflow_binding=workflow_binding,
                     )
                 except channel_projects.ChannelProjectError as exc:
                     raise _map_project_error(exc) from exc
-                return 200, {"project": channel_projects.list_channel_projects(root, channel_slug)[0]}
+                return 200, {"project": channel_projects._project_summary(project)}
             if len(parts) == 6 and parts[4] == "projects" and method == "GET":
                 project_slug = parts[5]
                 project = _load_project_or_error(root, channel_slug, project_slug)
@@ -1373,6 +1394,10 @@ HTML_PAGE = r"""<!doctype html>
           <input id="url" placeholder="https://www.youtube.com/watch?v=...">
           <label for="name">Project Name (optional)</label>
           <input id="name" placeholder="Optional project title override">
+          <label for="workflowBinding">Workflow Version</label>
+          <select id="workflowBinding" disabled>
+            <option value="">Select a workflow</option>
+          </select>
           <div id="projectCreateState" class="status" style="margin-top:12px"></div>
           <div class="row" style="margin-top:14px">
             <button id="createBtn" disabled>Create Research Project</button>
@@ -1597,6 +1622,37 @@ function selectedChannelRecord() {
     return state.selectedChannelSummary.channel;
   }
   return state.channels.find((item) => item.channel_slug === state.selectedChannelSlug) || null;
+}
+
+function channelWorkflowOptions() {
+  const summary = state.selectedChannelSummary;
+  const options = summary && Array.isArray(summary.available_workflows) ? summary.available_workflows : [];
+  return options.filter((item) =>
+    item
+    && typeof item.workflow_id === "string"
+    && typeof item.workflow_version === "string"
+  );
+}
+
+function workflowOptionValue(option) {
+  return `${option.workflow_id}@@${option.workflow_version}`;
+}
+
+function parseWorkflowOptionValue(value) {
+  if (typeof value !== "string" || !value.includes("@@")) return null;
+  const parts = value.split("@@");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  return { workflow_id: parts[0], workflow_version: parts[1] };
+}
+
+function selectedCreateWorkflowOption() {
+  const select = document.getElementById("workflowBinding");
+  if (!select) return null;
+  const parsed = parseWorkflowOptionValue(String(select.value || ""));
+  if (!parsed) return null;
+  return channelWorkflowOptions().find((option) =>
+    option.workflow_id === parsed.workflow_id && option.workflow_version === parsed.workflow_version
+  ) || null;
 }
 
 function clearActionFeedback() {
@@ -2112,11 +2168,17 @@ function createProjectModel() {
   if (channel.status !== "CONNECTED") {
     return { disabled: true, label: "Create Research Project", helper: "Project creation is available only when the selected channel is connected." };
   }
+  if (!channelWorkflowOptions().length) {
+    return { disabled: true, label: "Create Research Project", helper: "No server-approved workflow options are available for the selected channel." };
+  }
+  if (!selectedCreateWorkflowOption()) {
+    return { disabled: true, label: "Create Research Project", helper: "Select a workflow version before creating a project." };
+  }
   const busy = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
   return {
     disabled: busy,
     label: busy ? "Creating Project..." : "Create Research Project",
-    helper: "Create a canonical project under the selected channel only."
+    helper: "Create a canonical project under the selected channel with an explicit server-approved workflow binding."
   };
 }
 
@@ -2276,6 +2338,7 @@ function renderProjectListState() {
   const createButton = document.getElementById("createBtn");
   const urlInput = document.getElementById("url");
   const nameInput = document.getElementById("name");
+  const workflowSelect = document.getElementById("workflowBinding");
   const stateTarget = document.getElementById("projectListState");
   const listTarget = document.getElementById("projectListPanel");
   const refresh = projectsRefreshModel();
@@ -2287,6 +2350,18 @@ function renderProjectListState() {
   createButton.textContent = create.label;
   urlInput.disabled = create.disabled;
   nameInput.disabled = create.disabled;
+  const workflowOptions = channelWorkflowOptions();
+  const currentWorkflow = selectedCreateWorkflowOption();
+  const optionRows = ['<option value="">Select a workflow</option>'].concat(
+    workflowOptions.map((option) => {
+      const value = workflowOptionValue(option);
+      const selected = currentWorkflow && workflowOptionValue(currentWorkflow) === value ? " selected" : "";
+      const label = `${option.display_name || option.workflow_id} v${option.workflow_version}`;
+      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+  );
+  workflowSelect.innerHTML = optionRows.join("");
+  workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;
 
   if (!state.selectedChannelSlug) {
     stateTarget.innerHTML = `
@@ -2984,8 +3059,14 @@ async function createProjectAction() {
 
   const url = String(document.getElementById("url").value || "").trim();
   const projectName = String(document.getElementById("name").value || "").trim();
+  const workflowOption = selectedCreateWorkflowOption();
   if (!url) {
     setProjectFeedback("error", slug, null, "Competitor YouTube URL is required.");
+    render();
+    return;
+  }
+  if (!workflowOption) {
+    setProjectFeedback("error", slug, null, "Select a workflow version before creating a project.");
     render();
     return;
   }
@@ -2996,7 +3077,11 @@ async function createProjectAction() {
   render();
 
   try {
-    const payload = { url };
+    const payload = {
+      competitor_url: url,
+      workflow_id: workflowOption.workflow_id,
+      workflow_version: workflowOption.workflow_version
+    };
     if (projectName) payload.project_name = projectName;
     const data = await v2Api(`channels/${encodeURIComponent(slug)}/projects`, {
       method: "POST",
@@ -3011,6 +3096,8 @@ async function createProjectAction() {
       setProjectFeedback("success", slug, createdSlug, "Canonical project created for the selected channel.");
       document.getElementById("url").value = "";
       document.getElementById("name").value = "";
+      const workflowSelect = document.getElementById("workflowBinding");
+      if (workflowSelect) workflowSelect.value = workflowOptionValue(workflowOption);
       if (createdSlug && state.projects.some((item) => item.project_slug === createdSlug)) {
         setSelectedProjectSlug(createdSlug);
       }
@@ -3828,6 +3915,9 @@ function refreshStatus() {
 
 document.getElementById("channelSelect").addEventListener("change", (event) => {
   setSelectedChannelSlug(event.target.value || null);
+});
+document.getElementById("workflowBinding").addEventListener("change", () => {
+  render();
 });
 document.getElementById("connectChannelBtn").addEventListener("click", startOAuthAction);
 document.getElementById("syncMetricsBtn").addEventListener("click", syncMetricsAction);

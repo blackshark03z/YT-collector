@@ -459,6 +459,72 @@ def get_channel_default_workflow(root: Path | str, channel_slug: str) -> dict[st
     }
 
 
+def list_channel_workflow_options(root: Path | str, channel_slug: str) -> list[dict[str, str]]:
+    registry = load_workflow_registry(root)
+    channel_slug = channel_workspace.validate_channel_slug(channel_slug)
+    default = registry["channel_defaults"].get(channel_slug)
+    if not default:
+        return []
+    workflow_id = default["workflow_id"]
+    workflow_entry = registry["workflows"][workflow_id]
+    options: list[dict[str, str]] = []
+    for workflow_version in sorted(workflow_entry["versions"]):
+        version_entry = workflow_entry["versions"][workflow_version]
+        if version_entry["status"] not in SUPPORTED_VERSION_STATUSES:
+            continue
+        options.append(
+            {
+                "workflow_id": workflow_id,
+                "workflow_version": workflow_version,
+                "display_name": workflow_entry["display_name"],
+                "version_status": version_entry["status"],
+            }
+        )
+    return options
+
+
+def resolve_explicit_channel_workflow_binding(
+    root: Path | str,
+    channel_slug: str,
+    workflow_id: Any,
+    workflow_version: Any,
+) -> dict[str, str]:
+    if not isinstance(workflow_id, str) or not workflow_id.strip():
+        raise _error("WORKFLOW_BINDING_REQUIRED", "workflow_id is required for canonical project creation.", 400)
+    if not isinstance(workflow_version, str) or not workflow_version.strip():
+        raise _error("WORKFLOW_BINDING_REQUIRED", "workflow_version is required for canonical project creation.", 400)
+
+    requested_workflow_id = workflow_id.strip()
+    requested_workflow_version = workflow_version.strip()
+    registry = load_workflow_registry(root)
+    channel_slug = channel_workspace.validate_channel_slug(channel_slug)
+    default = registry["channel_defaults"].get(channel_slug)
+    if not default:
+        raise _error("WORKFLOW_NOT_CONFIGURED", "No workflow is configured for the selected channel.", 409)
+    if requested_workflow_id != default["workflow_id"]:
+        raise _error("WORKFLOW_BINDING_INVALID", "The selected channel is not authorized to use the requested workflow.", 409)
+
+    workflow_entry = registry["workflows"].get(requested_workflow_id)
+    if workflow_entry is None:
+        raise _error("WORKFLOW_BINDING_INVALID", "The requested workflow is not registered.", 409)
+    version_entry = workflow_entry["versions"].get(requested_workflow_version)
+    if version_entry is None:
+        raise _error("WORKFLOW_BINDING_INVALID", "The requested workflow version is not registered.", 409)
+    if version_entry["status"] not in SUPPORTED_VERSION_STATUSES:
+        raise _error("WORKFLOW_BINDING_INVALID", "The requested workflow version is not available.", 409)
+
+    definition_path = resolve_workflow_definition_path(root, requested_workflow_id, requested_workflow_version)
+    if not definition_path.exists():
+        raise _error("WORKFLOW_BINDING_INVALID", "The requested workflow definition file does not exist.", 409)
+    definition_digest = _sha256_file(definition_path)
+    definition = load_workflow_definition(root, requested_workflow_id, requested_workflow_version)
+    return {
+        "workflow_id": definition["workflow_id"],
+        "workflow_version": definition["workflow_version"],
+        "workflow_definition_sha256": definition_digest,
+    }
+
+
 def validate_project_workflow_binding(value: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         raise _error("WORKFLOW_BINDING_INVALID", "workflow_binding must be an object.")

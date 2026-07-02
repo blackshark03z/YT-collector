@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C2C3A - Replacement Candidate, Replacement Approval, and Downstream Stale Propagation
+Phase 7D1A1 - Explicit Workflow Binding at Project Creation
 
 ## Phase Status
 COMPLETE
@@ -28,6 +28,36 @@ IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
 
 ## MVP Status
 MVP_ACCEPTED
+
+## Phase 7D1A1 Scope
+- Confirmed the real pilot blocker exactly: the canonical V2 create flow in `scripts/ui_server.py` called `channel_projects.create_channel_project(...)` without an explicit workflow binding, and `scripts/channel_projects.py` then fell back to `channel_workflow.get_channel_default_workflow(...)`.
+- Confirmed the fallback chain terminated in `scripts/channel_workflow.py` against `workflows/registry.json` where `default_version = 1` and `legacy_unpinned_version = 1`, so a newly created canonical project was legitimately persisted with workflow version `1`.
+- Added `channel_workflow.list_channel_workflow_options(...)` to expose server-owned workflow choices per selected channel from registry-owned workflow data only, with no hardcoded Mist-of-Ages or v2 browser default.
+- Added `channel_workflow.resolve_explicit_channel_workflow_binding(...)` so canonical create requests must provide `workflow_id` and `workflow_version`, and the server now validates channel authorization, version availability, and the authoritative workflow definition digest itself.
+- Updated the canonical `POST /api/v2/channels/<channel_slug>/projects` route in `scripts/ui_server.py` to reject missing binding with controlled `WORKFLOW_BINDING_REQUIRED`, reject unsupported client authority fields with `INVALID_REQUEST`, resolve the explicit binding before metadata fetch, and return the authoritative pinned binding in the create response.
+- Updated `scripts/channel_projects.py:create_channel_project(...)` so the canonical caller can pass an already validated explicit binding and the low-level project creator no longer silently re-resolves a different default on that path.
+- Updated the embedded UI in `scripts/ui_server.py` so visible canonical project creation now requires an explicit workflow selection from server-owned `available_workflows`, keeps Create disabled until a valid selection exists, refreshes options with the selected channel, and sends only `competitor_url`, optional `project_name`, `workflow_id`, and `workflow_version`.
+- Verified the fix remains generic: no production code hardcodes `mist_of_ages`, `mist_of_ages_assisted_content`, workflow version `2`, prompt numbering, workflow digests, or prompt/workflow file paths as browser authority.
+- Confirmed production workflow assets remained unchanged: `default_version = 1`, `legacy_unpinned_version = 1`, workflow v1 SHA-256 `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`, workflow v2 SHA-256 `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`, and prompt manifest SHA-256 `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+
+## Phase 7D1A1 Runtime Safety
+- The blocked pilot artifact at `channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/` remained untouched and must stay a failed initialization artifact until a separate cleanup prompt authorizes action.
+- The blocked pilot project's persisted binding remained the previously observed workflow version `1`; this phase did not edit, validate, migrate, rename, delete, or recreate that project.
+- Transcript save was not executed.
+- Prompt 1 and later workflow execution were not started.
+- No second real project was created.
+- Real canonical counts remained `1` canonical project directory and `0` real `workflow_state.json` files throughout the phase.
+- Protected canonical and legacy runtime files were snapshotted before implementation and again after focused/full regression; the blocked pilot project remained byte-identical across those snapshots.
+- `implement.docx` remained untouched and untracked.
+
+## Phase 7D1A1 Evidence
+- Focused project-service regression: `python -m unittest tests.test_channel_projects` passing (`49` run, `49` passed, `0` failures, `0` errors, `0` skipped).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`66` run, `66` passed, `0` failures, `0` errors, `0` skipped).
+- Focused frontend contract plus runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`44` run, `44` passed, `0` failures, `0` errors, `0` skipped).
+- Added deterministic coverage for missing binding, explicit v2 binding, explicit v1 binding, unknown workflow id/version, client-supplied authority-field rejection, cross-channel workflow rejection, server-calculated digest persistence, no-output-scaffolding regression, and no `workflow_state.json` at project creation.
+- Added frontend runtime coverage for server-owned workflow options, disabled create state without selection, exact selected id/version request payload, no digest/path authority leakage, stale option invalidation on channel change, and workflow-version visibility after successful create/read flow.
+- Cleanup and pilot retry remain blocked pending separate authorization.
+- History and Restore remain deferred.
 
 ## Post-MVP Documentation
 - Preserved the intentional post-MVP planning document at `docs/post_mvp/video_production_optimization_proposals.md`.

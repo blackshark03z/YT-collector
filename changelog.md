@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 7D1A1 - Explicit Workflow Binding at Project Creation
+- Confirmed the real pilot blocker from code instead of assumption: canonical V2 project creation in `scripts/ui_server.py` entered `channel_projects.create_channel_project(...)` without an explicit binding, which then fell back to `channel_workflow.get_channel_default_workflow(...)` and therefore persisted the registry `default_version = 1`.
+- Added `channel_workflow.list_channel_workflow_options(...)` so the visible canonical create UI can use server-owned workflow options derived from the registry and channel defaults.
+- Added `channel_workflow.resolve_explicit_channel_workflow_binding(...)` so canonical create requests now require `workflow_id` plus `workflow_version`, validate channel authorization and version availability server-side, and calculate the authoritative workflow definition digest on the server.
+- Updated the canonical `POST /api/v2/channels/<channel_slug>/projects` route to fail closed with `WORKFLOW_BINDING_REQUIRED` when selection is missing, reject unsupported client authority fields with `INVALID_REQUEST`, resolve the explicit binding before metadata fetch, and return the authoritative pinned binding in the create response.
+- Updated `scripts/channel_projects.py:create_channel_project(...)` so the canonical caller can provide a prevalidated explicit binding and the low-level creator no longer silently re-resolves a different registry default on that path.
+- Updated the embedded canonical project-create UI to require an explicit workflow selector backed by server-owned `available_workflows`, keep Create disabled until a valid selection exists, refresh options with selected-channel changes, and send only `competitor_url`, optional `project_name`, `workflow_id`, and `workflow_version`.
+- Expanded `tests/test_channel_projects.py`, `tests/test_multichannel_api.py`, and `tests/test_ui_frontend_contract.py` with explicit-binding, invalid-binding, exact-payload, stale-option, and authoritative-version coverage.
+- Re-ran focused project, API, and frontend suites successfully after the narrow fix; full workflow-focused and offline regression reruns remain part of the same local verification pass for Tech Lead review.
+- Preserved workflow defaults and prompt/workflow assets unchanged, kept the blocked v1 pilot project untouched and byte-identical, did not save the transcript, did not create a second real project, and kept cleanup/pilot retry/history/restore outside this phase.
+
 ### Phase 7C2C3A - Replacement Candidate, Replacement Approval, and Downstream Stale Propagation
 - Introduced workflow-state schema v3 in `scripts/channel_workflow_write.py` so approved and candidate heads can coexist on the same step while preserving the exact status vocabulary `READY`, `CANDIDATE`, and `APPROVED`.
 - Added write-time schema-v2 to schema-v3 conversion only for authorized replacement-specific writes; reads remain backward-compatible and zero-migration.

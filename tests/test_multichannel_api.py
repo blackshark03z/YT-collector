@@ -17,6 +17,12 @@ from tests.test_channel_prompt_bundle import prepare_step2_inputs, seed_approved
 
 
 def make_channel(root: Path, slug: str, channel_id: str, *, with_metrics: bool = True) -> None:
+    if not (root / "workflows").exists():
+        __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+    registry_path = root / "workflows" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry.setdefault("channel_defaults", {})[slug] = {"workflow_id": "mist_of_ages_assisted_content"}
+    registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
     channel_workspace.create_channel_workspace(root, slug, slug.replace("_", " ").title(), channel_id, "@" + slug)
     paths = channel_workspace.canonical_channel_paths(root, slug)
     paths.channel_learnings_master.write_text("# Learnings\n\nApproved.\n", encoding="utf-8", newline="\n")
@@ -62,6 +68,14 @@ def fake_video(video_id: str) -> dict:
         },
         "contentDetails": {"duration": "PT10M"},
         "statistics": {"viewCount": "123", "likeCount": "4", "commentCount": "5"},
+    }
+
+
+def create_payload(video_id: str = "VIDEO12345A", *, workflow_id: str = "mist_of_ages_assisted_content", workflow_version: str = "2") -> dict:
+    return {
+        "competitor_url": f"https://youtube.com/watch?v={video_id}",
+        "workflow_id": workflow_id,
+        "workflow_version": workflow_version,
     }
 
 
@@ -226,7 +240,7 @@ class MultiChannelApiTests(unittest.TestCase):
             status, data = ui_server.dispatch_v2_request(
                 "POST",
                 "/api/v2/channels/channel_a/projects",
-                {"url": "https://youtube.com/watch?v=VIDEO12345A"},
+                create_payload(),
                 context=ui_server.build_app_context(root=root, competitor_video_fetcher=fetcher, thumbnail_fetcher=lambda url: (b"img", ".jpg")),
             )
             self.assertEqual(status, 200)
@@ -244,10 +258,164 @@ class MultiChannelApiTests(unittest.TestCase):
             status, _ = ui_server.dispatch_v2_request(
                 "POST",
                 "/api/v2/channels/channel_a/projects",
-                {"url": "https://youtube.com/watch?v=VIDEO12345A"},
+                create_payload(),
                 context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), metrics_syncer=bad_sync),
             )
             self.assertEqual(status, 200)
+
+    def test_create_project_requires_explicit_workflow_binding_before_metadata_fetch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+
+            def should_not_fetch(_video_id):
+                raise AssertionError("metadata fetch should not run without explicit workflow binding")
+
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects",
+                    {"competitor_url": "https://youtube.com/watch?v=VIDEO12345A"},
+                    context=ui_server.build_app_context(root=root, competitor_video_fetcher=should_not_fetch, thumbnail_fetcher=lambda url: (None, None)),
+                )
+            self.assertEqual(ctx.exception.code, "WORKFLOW_BINDING_REQUIRED")
+            self.assertEqual(channel_projects.list_channel_projects(root, "channel_a"), [])
+
+    def test_create_project_persists_authoritative_explicit_v2_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                "/api/v2/channels/channel_a/projects",
+                create_payload(workflow_version="2"),
+                context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+            )
+            self.assertEqual(status, 200)
+            binding = data["project"]["workflow_binding"]
+            self.assertEqual(binding["workflow_id"], "mist_of_ages_assisted_content")
+            self.assertEqual(binding["workflow_version"], "2")
+            self.assertEqual(binding["workflow_definition_sha256"], "5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606")
+
+    def test_create_project_persists_authoritative_explicit_v1_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                "/api/v2/channels/channel_a/projects",
+                create_payload(workflow_version="1"),
+                context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+            )
+            self.assertEqual(status, 200)
+            binding = data["project"]["workflow_binding"]
+            self.assertEqual(binding["workflow_version"], "1")
+            self.assertEqual(binding["workflow_definition_sha256"], "BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E")
+
+    def test_create_project_response_and_read_model_keep_same_validated_binding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                "/api/v2/channels/channel_a/projects",
+                create_payload(workflow_version="2"),
+                context=ctx,
+            )
+            self.assertEqual(status, 200)
+            project = data["project"]
+            status, detail = ui_server.dispatch_v2_request(
+                "GET",
+                f"/api/v2/channels/channel_a/projects/{project['project_slug']}",
+                context=ctx,
+            )
+            self.assertEqual(status, 200)
+            persisted = channel_projects.load_channel_project(root, "channel_a", project["project_slug"])["workflow_binding"]
+            self.assertEqual(project["workflow_binding"], persisted)
+            self.assertEqual(detail["project"]["workflow_binding"], persisted)
+
+    def test_create_project_rejects_unknown_workflow_id_without_creating_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects",
+                    create_payload(workflow_id="wf-missing"),
+                    context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+                )
+            self.assertEqual(ctx.exception.code, "WORKFLOW_BINDING_INVALID")
+            self.assertEqual(channel_projects.list_channel_projects(root, "channel_a"), [])
+
+    def test_create_project_rejects_unknown_workflow_version_without_creating_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects",
+                    create_payload(workflow_version="99"),
+                    context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+                )
+            self.assertEqual(ctx.exception.code, "WORKFLOW_BINDING_INVALID")
+            self.assertEqual(channel_projects.list_channel_projects(root, "channel_a"), [])
+
+    def test_create_project_rejects_client_supplied_digest_authority(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            payload = create_payload()
+            payload["workflow_definition_sha256"] = "A" * 64
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects",
+                    payload,
+                    context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+                )
+            self.assertEqual(ctx.exception.code, "INVALID_REQUEST")
+            self.assertEqual(channel_projects.list_channel_projects(root, "channel_a"), [])
+
+    def test_create_project_rejects_cross_channel_workflow_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root, "channel_a", "UC1")
+            make_channel(root, "channel_b", "UC2")
+            workflow_dir = root / "workflows" / "alt_assisted_content" / "v1"
+            workflow_dir.mkdir(parents=True, exist_ok=True)
+            source_definition = json.loads((root / "workflows" / "mist_of_ages_assisted_content" / "v1" / "workflow.json").read_text(encoding="utf-8"))
+            source_definition["workflow_id"] = "alt_assisted_content"
+            alt_path = workflow_dir / "workflow.json"
+            alt_path.write_text(json.dumps(source_definition, indent=2) + "\n", encoding="utf-8", newline="\n")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["alt_assisted_content"] = {
+                "display_name": "Alt Assisted Content Workflow",
+                "default_version": "1",
+                "legacy_unpinned_version": "1",
+                "versions": {
+                    "1": {
+                        "status": "ACTIVE",
+                        "definition_path": "alt_assisted_content/v1/workflow.json",
+                        "definition_sha256": ui_server.channel_workflow._sha256_file(alt_path),
+                    }
+                },
+            }
+            registry["channel_defaults"]["channel_b"] = {"workflow_id": "alt_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+            with self.assertRaises(ui_server.V2Error) as ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    "/api/v2/channels/channel_a/projects",
+                    create_payload(workflow_id="alt_assisted_content", workflow_version="1"),
+                    context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
+                )
+            self.assertEqual(ctx.exception.code, "WORKFLOW_BINDING_INVALID")
+            self.assertEqual(channel_projects.list_channel_projects(root, "channel_a"), [])
 
     def test_create_project_fails_clearly_without_channel_metrics(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -257,7 +425,7 @@ class MultiChannelApiTests(unittest.TestCase):
                 ui_server.dispatch_v2_request(
                     "POST",
                     "/api/v2/channels/channel_a/projects",
-                    {"url": "https://youtube.com/watch?v=VIDEO12345A"},
+                    create_payload(),
                     context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)),
                 )
             self.assertEqual(ctx.exception.code, "CHANNEL_METRICS_NOT_READY")
@@ -268,8 +436,8 @@ class MultiChannelApiTests(unittest.TestCase):
             make_channel(root, "channel_a", "UC1")
             make_channel(root, "channel_b", "UC2")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)
-            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_b/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_b/projects", create_payload(), context=ctx)
             self.assertEqual(len(channel_projects.list_channel_projects(root, "channel_a")), 1)
             self.assertEqual(len(channel_projects.list_channel_projects(root, "channel_b")), 1)
 
@@ -278,9 +446,9 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)
             with self.assertRaises(ui_server.V2Error) as err:
-                ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)
+                ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)
             self.assertEqual(err.exception.code, "SOURCE_VIDEO_ALREADY_EXISTS")
 
     def test_transcript_save_uses_selected_channel(self):
@@ -288,7 +456,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             status, data = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{project['project_slug']}/transcript", {"transcript": "real transcript " * 10}, context=ctx)
             self.assertEqual(status, 200)
             self.assertTrue(data["checks"]["transcript_real_content"])
@@ -298,7 +466,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{project['project_slug']}/transcript", {"transcript": "real transcript " * 10}, context=ctx)
             with self.assertRaises(ui_server.V2Error) as err:
                 ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{project['project_slug']}/transcript", {"transcript": "other transcript " * 10}, context=ctx)
@@ -309,7 +477,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             status, data = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{project['project_slug']}/validate", {}, context=ctx)
             self.assertEqual(status, 200)
             self.assertEqual(data["project"]["channel_slug"], "channel_a")
@@ -320,7 +488,7 @@ class MultiChannelApiTests(unittest.TestCase):
             make_channel(root, "channel_a", "UC1")
             make_channel(root, "channel_b", "UC2")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            project = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             with self.assertRaises(ui_server.V2Error):
                 ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_b/projects/{project['project_slug']}/validate", {}, context=ctx)
 
@@ -336,7 +504,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1", with_metrics=False)
             try:
-                ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)))
+                ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None)))
             except ui_server.V2Error as exc:
                 self.assertNotIn("access_token", exc.message)
                 self.assertNotIn("client_secret", exc.message)
@@ -944,7 +1112,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             status, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
             self.assertEqual(status, 200)
             self.assertEqual(data["project"]["channel_slug"], "channel_a")
@@ -961,6 +1129,7 @@ class MultiChannelApiTests(unittest.TestCase):
                 "updated_at",
                 "has_content",
                 "has_publishing_package",
+                "workflow_binding",
             })
 
     def test_project_detail_contains_no_absolute_paths(self):
@@ -968,7 +1137,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
             dumped = json.dumps(data)
             self.assertNotIn(str(root), dumped)
@@ -978,7 +1147,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
             (project_dir / "content.md").write_text("x", encoding="utf-8")
             _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}", context=ctx)
@@ -990,7 +1159,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             status, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", context=ctx)
             self.assertEqual(status, 200)
             self.assertTrue(data["is_template"])
@@ -1001,7 +1170,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", {"transcript": "real transcript " * 10}, context=ctx)
             _, data = ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/transcript", context=ctx)
             self.assertFalse(data["is_template"])
@@ -1013,7 +1182,7 @@ class MultiChannelApiTests(unittest.TestCase):
             make_channel(root, "channel_a", "UC1")
             make_channel(root, "channel_b", "UC2")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             with self.assertRaises(ui_server.V2Error):
                 ui_server.dispatch_v2_request("GET", f"/api/v2/channels/channel_b/projects/{created['project_slug']}/transcript", context=ctx)
 
@@ -1022,7 +1191,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             transcript = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"] / "research" / "competitor_transcript.md"
             transcript.unlink()
             with self.assertRaises(ui_server.V2Error) as err:
@@ -1043,7 +1212,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: None)
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             seen = {}
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: seen.setdefault("path", path))
             status, _ = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/open", context=ctx)
@@ -1055,7 +1224,7 @@ class MultiChannelApiTests(unittest.TestCase):
             root = Path(tmp)
             make_channel(root, "channel_a", "UC1")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             seen = {}
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None), path_opener=lambda path: seen.setdefault("path", path))
             status, _ = ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_a/projects/{created['project_slug']}/open_transcript", context=ctx)
@@ -1083,7 +1252,7 @@ class MultiChannelApiTests(unittest.TestCase):
             make_channel(root, "channel_a", "UC1")
             make_channel(root, "channel_b", "UC2")
             ctx = ui_server.build_app_context(root=root, competitor_video_fetcher=lambda video_id: fake_video(video_id), thumbnail_fetcher=lambda url: (None, None))
-            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)[1]["project"]
+            created = ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)[1]["project"]
             with self.assertRaises(ui_server.V2Error):
                 ui_server.dispatch_v2_request("POST", f"/api/v2/channels/channel_b/projects/{created['project_slug']}/open", context=ctx)
 
@@ -1150,7 +1319,7 @@ class MultiChannelApiTests(unittest.TestCase):
                 competitor_video_fetcher=lambda video_id: called.__setitem__("video", called["video"] + 1) or fake_video(video_id),
                 thumbnail_fetcher=lambda url: (None, None),
             )
-            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", {"url": "https://youtube.com/watch?v=VIDEO12345A"}, context=ctx)
+            ui_server.dispatch_v2_request("POST", "/api/v2/channels/channel_a/projects", create_payload(), context=ctx)
             self.assertEqual(called["video"], 1)
 
     def test_no_real_repository_runtime_data_is_touched(self):

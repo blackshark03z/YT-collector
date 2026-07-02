@@ -541,7 +541,8 @@ class ChannelWorkflowTests(unittest.TestCase):
             )
             self.assertEqual(detail_status, 200)
             self.assertIn("has_content", detail_data["project"])
-            self.assertNotIn("workflow_binding", detail_data["project"])
+            self.assertEqual(detail_data["project"]["workflow_binding"]["workflow_id"], "mist_of_ages_assisted_content")
+            self.assertEqual(detail_data["project"]["workflow_binding"]["workflow_version"], "1")
 
             status, data = ui_server.dispatch_v2_request(
                 "GET",

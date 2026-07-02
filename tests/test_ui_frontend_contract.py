@@ -199,6 +199,7 @@ globalThis.window = window;
   "createBtn",
   "url",
   "name",
+  "workflowBinding",
   "projectListState",
   "projectListPanel",
   "projectCreateState",
@@ -468,9 +469,35 @@ class UiFrontendContractTests(unittest.TestCase):
 
     def test_project_creation_uses_exact_v2_route_and_supported_payload(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects`, {', self.html)
-        self.assertIn('const payload = { url };', self.html)
+        self.assertIn('const payload = {', self.html)
+        self.assertIn('competitor_url: url,', self.html)
+        self.assertIn('workflow_id: workflowOption.workflow_id,', self.html)
+        self.assertIn('workflow_version: workflowOption.workflow_version', self.html)
         self.assertIn("payload.project_name = projectName;", self.html)
+        self.assertIn('Select a workflow version before creating a project.', self.html)
+        self.assertIn('No server-approved workflow options are available for the selected channel.', self.html)
+        create_action = self.html[self.html.index("async function createProjectAction()"):self.html.index("async function loadSelectedProjectDetail(")]
+        self.assertNotIn('workflow_definition_sha256', create_action)
+        self.assertNotIn('workflow_definition_path', create_action)
+        self.assertNotIn('prompt_manifest_path', create_action)
         self.assertIn("Project creation is available only when the selected channel is connected.", self.html)
+
+    def test_workflow_selector_uses_server_owned_options_without_hidden_default(self):
+        for token in [
+            '<label for="workflowBinding">Workflow Version</label>',
+            '<select id="workflowBinding" disabled>',
+            'available_workflows',
+            'function channelWorkflowOptions()',
+            'function selectedCreateWorkflowOption()',
+            'workflowSelect.innerHTML = optionRows.join("")',
+            'workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;',
+            "return `${option.workflow_id}@@${option.workflow_version}`;",
+            'const label = `${option.display_name || option.workflow_id} v${option.workflow_version}`;',
+            'document.getElementById("workflowBinding").addEventListener("change", () => {',
+        ]:
+            self.assertIn(token, self.html)
+        self.assertNotIn('workflowSelect.value = workflowOptions[0]', self.html)
+        self.assertNotIn('value="mist_of_ages_assisted_content@@2"', self.html)
 
     def test_transcript_and_validation_use_exact_v2_project_routes(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(slug)}/projects/${encodeURIComponent(projectSlug)}/transcript`, {', self.html)
@@ -544,6 +571,202 @@ class UiFrontendContractTests(unittest.TestCase):
 
 
 class UiFrontendRuntimeTests(unittest.TestCase):
+    def test_workflow_selector_loads_from_server_summary_and_create_stays_disabled_without_selection(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow <Alpha>", version_status: "ACTIVE" },
+                { workflow_id: "wf-alpha", workflow_version: "1", display_name: "Workflow <Alpha>", version_status: "ACTIVE" },
+              ],
+            };
+            render();
+            const select = document.getElementById("workflowBinding");
+            const button = document.getElementById("createBtn");
+            return {
+              createDisabled: button.disabled,
+              selectDisabled: select.disabled,
+              selectHtml: select.innerHTML,
+              helperHtml: document.getElementById("projectCreateState").innerHTML,
+            };
+            """
+        )
+        self.assertTrue(result["createDisabled"])
+        self.assertFalse(result["selectDisabled"])
+        self.assertIn("Select a workflow</option>", result["selectHtml"])
+        self.assertIn("Workflow &lt;Alpha&gt; v2", result["selectHtml"])
+        self.assertIn("Workflow &lt;Alpha&gt; v1", result["selectHtml"])
+        self.assertIn("Select a workflow version before creating a project.", result["helperHtml"])
+
+    def test_create_project_sends_only_selected_workflow_id_and_version(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" },
+              ],
+            };
+            fetchHandler = async (path, config) => {
+              if (path === "/api/v2/channels/channel-a/projects" && (config.method || "GET") === "POST") {
+                return jsonResponse({
+                  project: {
+                    project_slug: "project-a",
+                    channel_slug: "channel-a",
+                    workflow_binding: {
+                      workflow_id: "wf-alpha",
+                      workflow_version: "2",
+                      workflow_definition_sha256: "server-digest",
+                    },
+                  },
+                });
+              }
+              if (path === "/api/v2/channels/channel-a") {
+                return jsonResponse(state.selectedChannelSummary);
+              }
+              if (path === "/api/v2/channels/channel-a/projects") {
+                return jsonResponse({ projects: [{ project_slug: "project-a" }] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a") {
+                return jsonResponse({
+                  project: {
+                    project_slug: "project-a",
+                    channel_slug: "channel-a",
+                    source_video_id: "VIDEO12345A",
+                    source_video_url: "https://youtube.com/watch?v=VIDEO12345A",
+                    status: "READY",
+                    workflow_input_status: "READY",
+                    runnable: true,
+                    created_at: "2026-07-03T00:00:00Z",
+                    updated_at: "2026-07-03T00:00:00Z",
+                    has_content: false,
+                    has_publishing_package: false,
+                    workflow_binding: {
+                      workflow_id: "wf-alpha",
+                      workflow_version: "2",
+                      workflow_definition_sha256: "server-digest",
+                    },
+                  },
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/workflow") {
+                return jsonResponse({
+                  channel_slug: "channel-a",
+                  project_slug: "project-a",
+                  binding: {
+                    workflow_id: "wf-alpha",
+                    workflow_version: "2",
+                    workflow_definition_sha256: "server-digest",
+                    binding_source: "PROJECT_JSON",
+                  },
+                  definition: {
+                    workflow_id: "wf-alpha",
+                    workflow_version: "2",
+                    display_name: "Workflow Alpha",
+                    execution_mode: "ASSISTED",
+                    prompt_set: { status: "AVAILABLE", bundle_available: true },
+                    steps: [],
+                  },
+                  state: {
+                    current_step_id: null,
+                    current_step_status: "READY",
+                    next_step_id: null,
+                    current_lifecycle_state: "INPUT_READY",
+                  },
+                  artifacts: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/transcript") {
+                return jsonResponse({ transcript: "", is_template: true, has_real_content: false });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            document.getElementById("url").value = "https://youtube.com/watch?v=VIDEO12345A";
+            document.getElementById("workflowBinding").value = "wf-alpha@@2";
+            render();
+            await createProjectAction();
+            await flush();
+            const createCall = fetchCalls.find((call) => call.path === "/api/v2/channels/channel-a/projects" && call.method === "POST");
+            return {
+              createDisabledAfterSelection: document.getElementById("createBtn").disabled,
+              createBody: JSON.parse(createCall.body),
+              feedback: state.projectFeedback.text,
+              workflowVersionCardVisible: document.getElementById("projectDetailPanel").innerHTML.includes("Workflow Version"),
+              workflowVersionVisible: document.getElementById("projectDetailPanel").innerHTML.includes(">2<"),
+            };
+            """
+        )
+        self.assertFalse(result["createDisabledAfterSelection"])
+        self.assertEqual(
+            result["createBody"],
+            {
+                "competitor_url": "https://youtube.com/watch?v=VIDEO12345A",
+                "workflow_id": "wf-alpha",
+                "workflow_version": "2",
+            },
+        )
+        self.assertNotIn("workflow_definition_sha256", result["createBody"])
+        self.assertNotIn("workflow_definition_path", result["createBody"])
+        self.assertNotIn("prompt_manifest_path", result["createBody"])
+        self.assertEqual(result["feedback"], "Canonical project created for the selected channel.")
+        self.assertTrue(result["workflowVersionCardVisible"])
+        self.assertTrue(result["workflowVersionVisible"])
+
+    def test_channel_change_invalidates_stale_workflow_options(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.channels = [
+              { channel_slug: "channel-a", status: "CONNECTED" },
+              { channel_slug: "channel-b", status: "CONNECTED" },
+            ];
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels/channel-b") {
+                return jsonResponse({
+                  channel: { channel_slug: "channel-b", status: "CONNECTED" },
+                  available_workflows: [],
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" },
+              ],
+            };
+            render();
+            document.getElementById("workflowBinding").value = "wf-alpha@@2";
+            render();
+            setSelectedChannelSlug("channel-b");
+            await flush();
+            const select = document.getElementById("workflowBinding");
+            return {
+              selectedChannelSlug: state.selectedChannelSlug,
+              selectedChannelSummary: state.selectedChannelSummary,
+              selectedProjectSlug: state.selectedProjectSlug,
+              selectValue: select.value,
+              selectDisabled: select.disabled,
+              createDisabled: document.getElementById("createBtn").disabled,
+              selectHtml: select.innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["selectedChannelSlug"], "channel-b")
+        self.assertEqual(result["selectedChannelSummary"]["channel"]["channel_slug"], "channel-b")
+        self.assertEqual(result["selectedChannelSummary"]["available_workflows"], [])
+        self.assertIsNone(result["selectedProjectSlug"])
+        self.assertTrue(result["selectDisabled"])
+        self.assertTrue(result["createDisabled"])
+        self.assertNotIn("wf-alpha@@2", result["selectHtml"])
+
     def test_step_change_build_copy_and_inert_bundle_preview(self):
         result = run_ui_runtime_scenario(
             """
