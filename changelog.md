@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Phase 7C2C2 - Approval, Rejection, Stable Publication, and Scaffold/Trust-Rule Closure
+- Removed workflow-generated stable artifact scaffolding from new workflow-bound projects in `scripts/channel_projects.py`; only legitimate source/input artifacts plus an empty `workflow/` directory are created now.
+- Audited the active legacy production creator in `scripts/ui_server.py:create_project(...)` and corrected it independently so `/api/create_project` no longer scaffolds workflow-generated output placeholders either.
+- Implemented generic generated-output detection from the exact pinned workflow definition by taking the union of all step `output_artifact_ids`, with no Prompt-specific or Mist-of-Ages-only hard-coding.
+- Preserved legitimate source/input scaffold behavior for competitor reference, transcript, learnings snapshot, metrics snapshot, and raw competitor metadata.
+- Enforced an authoritative approved-artifact trust rule in `scripts/channel_prompt_bundle.py`: workflow-generated files are trusted only when workflow state proves approved producer step state, approved group id, approved revision id, no candidate head, and exact stable-byte/hash match.
+- Propagated the same trust rule into `scripts/channel_workflow_write.py` for readiness derivation, downstream bundle safety, and recovery-safe stable publication checks.
+- Removed the last exact production workflow-placeholder string matches from `scripts/`; placeholder-era text now remains only in historical test coverage.
+- Preserved strict fail-closed stable publication: occupied canonical output targets now remain `STABLE_ARTIFACT_CONFLICT` even when they contain old placeholder text, empty content, or bytes matching the candidate output.
+- Corrected placeholder-era fixtures in `tests/test_channel_projects.py`, `tests/test_channel_prompt_bundle.py`, `tests/test_channel_output_parser.py`, `tests/test_channel_workflow_write.py`, and `tests/test_multichannel_api.py` so approval succeeds only when the stable target is absent and unmanaged occupied targets remain untouched conflicts.
+- Added/updated approval and rejection verification for first approval, multi-artifact approval, reject-without-publication, decision immutability, replay/idempotency, monotonic ids after reject-then-retry, read-path fail-closed gating, interrupted-transaction recovery, legacy-create parity, and occupied-path compatibility including placeholder text, empty files, matching bytes, arbitrary bytes, directories, case-colliding paths, and symlink-backed occupied targets where supported.
+- Added the final missing recovery evidence in `tests/test_channel_workflow_write.py`: fail-closed approval interruption before decision/stable staging completes, corrupt rejection-decision recovery refusal, and reject-recovery followed by idempotent replay with no extra filesystem writes.
+- Added a narrow V2 route fix in `scripts/ui_server.py` so read-gate `WORKFLOW_RECOVERY_REQUIRED` errors from bundle/parse paths are mapped as controlled API errors instead of surfacing as `INTERNAL_ERROR`.
+- Fixed two final production-path defects found during the last verification round:
+  - approval/rejection recovery now resolves transaction targets correctly between project-root stable artifacts and workflow-owned transaction objects
+  - post-reject candidate save is writable again because candidate-save gating now blocks only active `CANDIDATE` state, not every persisted step-state record
+- Re-ran the three new recovery tests individually (`3` run, `3` passed, `0` failures, `0` errors, `0` skipped), re-ran `tests.test_channel_workflow_write` successfully (`47` run, `46` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability), re-ran `tests.test_multichannel_api` successfully (`56` run, `56` passed, `0` failures, `0` errors, `0` skipped), and then re-ran the full offline regression successfully (`400` run, `398` passed, `0` failures, `0` errors, `2` skipped).
+- Confirmed production workflow defaults remained `default_version = 1` and `legacy_unpinned_version = 1`, and confirmed workflow v1/v2 plus prompt-manifest SHA-256 digests remained unchanged.
+- Confirmed the protected real runtime, canonical token paths, legacy source hashes, and unrelated `implement.docx` remained untouched; real canonical project directories stayed `0` and real `workflow_state.json` files stayed `0`.
+
 ### Phase 7C2C1 - Candidate Persistence, Workflow State v2, Transaction Store, and Save Candidate
 - Added `scripts/channel_workflow_write.py` as a dedicated workflow-write module for candidate-only persistence, workflow-state v2 validation, per-project filesystem locking, deterministic idempotency, staged transaction commit, and incomplete-transaction recovery.
 - Added `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/workflow/steps/<step_id>/revisions` in `scripts/ui_server.py` as the first authorized workflow write path.

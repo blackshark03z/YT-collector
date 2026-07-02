@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from scripts import channel_projects, channel_prompt_bundle, channel_workflow, channel_workspace, prompt_source_ingest, ui_server
+from scripts import channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace, prompt_source_ingest, ui_server
 from tests.runtime_isolation_helpers import snapshot_runtime_state
 
 
@@ -163,6 +163,96 @@ def write_project_artifact(root: Path, channel_slug: str, project_slug: str, rel
     path.write_text(text, encoding="utf-8", newline="\n")
 
 
+def seed_approved_step_outputs(root: Path, channel_slug: str, project_slug: str, step_id: str, artifact_contents: dict[str, str]) -> None:
+    project = channel_projects.load_channel_project(root, channel_slug, project_slug)
+    project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+    binding = channel_workflow.resolve_project_workflow_binding(root, channel_slug, project)
+    definition = channel_workflow.load_workflow_definition(root, binding["workflow_id"], binding["workflow_version"])
+    step = next(item for item in definition["steps"] if item["step_id"] == step_id)
+    paths = channel_workflow_write.workflow_write_paths(project_dir)
+    if paths.workflow_state_json.exists():
+        state = json.loads(paths.workflow_state_json.read_text(encoding="utf-8"))
+    else:
+        state = channel_workflow_write._empty_v2_state(binding, definition, created_at=project["created_at"])
+    now = "2026-07-01T00:00:00+00:00"
+    group_number = state["counters"]["next_group_number"]
+    group_id = f"grp_{group_number:06d}"
+    prompt_set = definition["prompt_set"]
+    artifact_revision_ids: dict[str, str] = {}
+    for artifact_id in step["output_artifact_ids"]:
+        content = artifact_contents[artifact_id]
+        artifact = next(item for item in definition["artifacts"] if item["artifact_id"] == artifact_id)
+        revision_number = state["counters"]["next_revision_number_by_artifact"][artifact_id]
+        revision_id = f"rev_{revision_number:06d}"
+        revision_dir = paths.artifacts_dir / artifact_id / revision_id
+        revision_dir.mkdir(parents=True, exist_ok=True)
+        content_path = revision_dir / "content.md"
+        content_path.write_text(content, encoding="utf-8", newline="\n")
+        sha256 = channel_workflow_write._sha256_text(content)
+        metadata = {
+            "schema_version": 1,
+            "revision_id": revision_id,
+            "artifact_id": artifact_id,
+            "stored_filename": "content.md",
+            "content_sha256": sha256,
+            "character_count": len(content),
+            "created_at": now,
+            "created_by": "test_seed",
+            "source_step_id": step_id,
+            "workflow_id": binding["workflow_id"],
+            "workflow_version": binding["workflow_version"],
+            "workflow_definition_sha256": binding["workflow_definition_sha256"],
+            "prompt_set_id": prompt_set.get("prompt_set_id"),
+            "prompt_set_version": prompt_set.get("version"),
+            "bundle_sha256": "A" * 64,
+            "raw_output_sha256": "B" * 64,
+            "parse_status": "VALID",
+            "revision_group_id": group_id,
+            "created_status": "CANDIDATE",
+        }
+        (revision_dir / "metadata.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8", newline="\n")
+        stable_path = project_dir / Path(artifact["relative_path"])
+        stable_path.parent.mkdir(parents=True, exist_ok=True)
+        stable_path.write_text(content, encoding="utf-8", newline="\n")
+        artifact_revision_ids[artifact_id] = revision_id
+        state["artifact_heads"][artifact_id] = {"candidate_revision_id": None, "approved_revision_id": revision_id}
+        state["counters"]["next_revision_number_by_artifact"][artifact_id] += 1
+
+    group_dir = paths.groups_dir / group_id
+    group_dir.mkdir(parents=True, exist_ok=True)
+    group_metadata = {
+        "schema_version": 1,
+        "revision_group_id": group_id,
+        "step_id": step_id,
+        "workflow_id": binding["workflow_id"],
+        "workflow_version": binding["workflow_version"],
+        "workflow_definition_sha256": binding["workflow_definition_sha256"],
+        "prompt_set_id": prompt_set.get("prompt_set_id"),
+        "prompt_set_version": prompt_set.get("version"),
+        "bundle_sha256": "A" * 64,
+        "raw_output_sha256": "B" * 64,
+        "idempotency_sha256": "C" * 64,
+        "artifact_revision_ids": artifact_revision_ids,
+        "created_at": now,
+        "created_by": "test_seed",
+        "created_status": "CANDIDATE",
+    }
+    (group_dir / "metadata.json").write_text(json.dumps(group_metadata, indent=2) + "\n", encoding="utf-8", newline="\n")
+    state["step_states"][step_id] = {
+        "status": "APPROVED",
+        "candidate_group_id": None,
+        "approved_group_id": group_id,
+        "candidate_idempotency_sha256": None,
+        "updated_at": now,
+    }
+    state["state_revision"] += 1
+    state["counters"]["next_group_number"] += 1
+    state["updated_at"] = now
+    channel_workflow_write.validate_workflow_state_v2(state, binding=binding, definition=definition, project_dir=project_dir)
+    paths.workflow_state_json.parent.mkdir(parents=True, exist_ok=True)
+    paths.workflow_state_json.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
 def make_v2_bound_project(root: Path, *, channel_slug: str = "mist_of_ages", video_id: str = "VIDEO12345A") -> dict:
     copy_workflows(root)
     set_default_workflow_version(root, "2")
@@ -173,14 +263,64 @@ def make_v2_bound_project(root: Path, *, channel_slug: str = "mist_of_ages", vid
 
 def prepare_step2_inputs(root: Path, channel_slug: str, project_slug: str) -> None:
     channel_projects.save_project_transcript(root, channel_slug, project_slug, "real transcript " * 12)
-    write_project_artifact(root, channel_slug, project_slug, "workflow/transcript_analysis.md", "## Subject\nRome\n")
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_1_transcript_analysis",
+        {
+            "transcript_analysis": "## Subject\nRome\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+        },
+    )
 
 
 def prepare_prompt7_inputs(root: Path, channel_slug: str, project_slug: str) -> None:
-    write_project_artifact(root, channel_slug, project_slug, "workflow/narration_v1.md", "## Narration\nA real narration.\n")
-    write_project_artifact(root, channel_slug, project_slug, "workflow/red_team_report.md", "## Overall Verdict\nPASS\n## Must Fix — Narration\nNone.\n## Must Fix — Publishing Package\nNone.\n## Optional Improvements\nNone.\n## Passed Checks\nAll.\n")
-    write_project_artifact(root, channel_slug, project_slug, "workflow/locked_creative_package.md", "# Locked Creative Package\n## Topic Verdict\nPRODUCE\n")
-    write_project_artifact(root, channel_slug, project_slug, "workflow/evidence_ledger.md", "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n")
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_2_historical_research",
+        {
+            "research_pack": "## Topic Overview\nOverview\n## Reliable Timeline\nTimeline\n## Key People and Roles\nPeople\n## Anchor Facts\nFacts\n## Human Details and Human Cost\nCost\n## Myths, Disputes, and Later Accounts\nMyths\n## Facts That Contradict the Competitor\nContradictions\n## Possible Evidence-Based Contradictions\nEvidence\n## Documented Visual Details\nVisuals\n## Source Notes\nSources\n",
+            "evidence_ledger": "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+        },
+    )
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_3_creative_package",
+        {
+            "locked_creative_package": "# Locked Creative Package\n## Topic Verdict\nPRODUCE\n",
+        },
+    )
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_4_retention_outline",
+        {
+            "retention_outline": "## Opening Hook\nHook\n## Segment-by-Segment Beat Outline\nOutline\n## Pattern Interrupt Plan\nPlan\n## Curiosity Loops to Open and Close\nLoops\n## Tone and Narrative Notes\nNotes\n",
+        },
+    )
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_5_narration_v1",
+        {
+            "narration_v1": "## Narration\nA real narration.\n",
+        },
+    )
+    seed_approved_step_outputs(
+        root,
+        channel_slug,
+        project_slug,
+        "prompt_6_red_team",
+        {
+            "red_team_report": "## Overall Verdict\nPASS\n## Must Fix — Narration\nNone.\n## Must Fix — Publishing Package\nNone.\n## Optional Improvements\nNone.\n## Passed Checks\nAll.\n",
+        },
+    )
 
 
 class PromptBundleTests(unittest.TestCase):
@@ -350,7 +490,15 @@ class PromptBundleTests(unittest.TestCase):
             self.assertEqual(first["project_context"]["topic"]["value"], "Why Rome Executed Jesus")
             self.assertEqual(first["project_context"]["topic"]["source_field"], "input/_raw/competitor_video.json:title")
             self.assertIn("Source: input/_raw/competitor_video.json:title", first["bundle"])
-            write_project_artifact(root, "mist_of_ages", project["project_slug"], "workflow/transcript_analysis.md", "## Subject\nChanged\n")
+            seed_approved_step_outputs(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                {
+                    "transcript_analysis": "## Subject\nChanged\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                },
+            )
             changed = channel_prompt_bundle.build_prompt_bundle(root, "mist_of_ages", project["project_slug"], "prompt_2_historical_research", project_data, project_dir)
             self.assertNotEqual(first["bundle_sha256"], changed["bundle_sha256"])
 
@@ -552,15 +700,29 @@ class PromptBundleTests(unittest.TestCase):
             self.assertIn("ALPHA SINGLE", alpha_bundle["bundle"])
             self.assertEqual(alpha_bundle["output_contract"]["response_mode"], "SINGLE_ARTIFACT")
 
-            write_project_artifact(root, "mist_of_ages", project_v3["project_slug"], "workflow/alpha_notes.md", "# Alpha Notes\nReady\n")
+            seed_approved_step_outputs(
+                root,
+                "mist_of_ages",
+                project_v3["project_slug"],
+                "alpha_single",
+                {"alpha_notes": "# Alpha Notes\nReady\n"},
+            )
             beta_bundle = channel_prompt_bundle.build_prompt_bundle(root, "mist_of_ages", project_v3["project_slug"], "beta_bundle", project_data, project_dir)
             self.assertIn("BETA ENVELOPE", beta_bundle["bundle"])
             self.assertEqual(beta_bundle["output_contract"]["response_mode"], "MULTI_ARTIFACT_TOOL_ENVELOPE")
             self.assertIn("=== FILE 1: beta_brief.custom ===", beta_bundle["bundle"])
             self.assertIn("=== FILE 2: beta_facts.custom ===", beta_bundle["bundle"])
 
-            write_project_artifact(root, "mist_of_ages", project_v3["project_slug"], "workflow/beta_brief.md", "# Beta Brief\nReady\n")
-            write_project_artifact(root, "mist_of_ages", project_v3["project_slug"], "workflow/beta_facts.md", "# Beta Facts\nReady\n")
+            seed_approved_step_outputs(
+                root,
+                "mist_of_ages",
+                project_v3["project_slug"],
+                "beta_bundle",
+                {
+                    "beta_brief": "# Beta Brief\nReady\n",
+                    "beta_facts": "# Beta Facts\nReady\n",
+                },
+            )
             gamma_bundle = channel_prompt_bundle.build_prompt_bundle(root, "mist_of_ages", project_v3["project_slug"], "gamma_native", project_data, project_dir)
             self.assertIn("GAMMA NATIVE", gamma_bundle["bundle"])
             self.assertEqual(gamma_bundle["output_contract"]["response_mode"], "MULTI_ARTIFACT_PROMPT_NATIVE")

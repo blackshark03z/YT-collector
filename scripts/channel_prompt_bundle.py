@@ -15,9 +15,6 @@ SUPPORTED_RESPONSE_MODES = {
     "MULTI_ARTIFACT_PROMPT_NATIVE",
 }
 TOOL_DELIVERY_CONTRACT_VERSION = "1"
-WORKFLOW_PLACEHOLDER_SENTINEL = "TODO: Fill manually during Workflow V2."
-
-
 class PromptBundleError(Exception):
     def __init__(self, code: str, message: str, status: int = 400):
         super().__init__(message)
@@ -370,11 +367,82 @@ def _artifact_usability_error(path: Path, artifact_id: str) -> bool:
         return True
     if not text.strip():
         return True
-    if WORKFLOW_PLACEHOLDER_SENTINEL in text:
-        return True
     if artifact_id == "competitor_transcript" and channel_projects.is_transcript_template(path):
         return True
     return False
+
+
+def _workflow_output_producers(definition: dict[str, Any]) -> dict[str, str]:
+    return {
+        artifact_id: step["step_id"]
+        for step in definition["steps"]
+        for artifact_id in step["output_artifact_ids"]
+    }
+
+
+def _workflow_managed_artifact_is_trusted(
+    *,
+    project_dir: Path,
+    artifact: dict[str, Any],
+    binding: dict[str, Any],
+    definition: dict[str, Any],
+) -> bool:
+    from scripts import channel_workflow_write
+
+    producer_step_id = _workflow_output_producers(definition).get(artifact["artifact_id"])
+    if producer_step_id is None:
+        artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
+        return not _artifact_usability_error(artifact_path, artifact["artifact_id"])
+
+    paths = channel_workflow_write.workflow_write_paths(project_dir)
+    if not paths.workflow_state_json.exists():
+        return False
+    try:
+        payload = json.loads(paths.workflow_state_json.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise _error("WORKFLOW_STATE_INVALID", "workflow_state.json is malformed JSON.", 409) from exc
+    if payload.get("schema_version") != 2:
+        return False
+
+    validated = channel_workflow_write.validate_workflow_state_v2(
+        payload,
+        binding=binding,
+        definition=definition,
+        project_dir=project_dir,
+    )
+    step_state = validated["step_states"].get(producer_step_id)
+    if not isinstance(step_state, dict) or step_state.get("status") != "APPROVED":
+        return False
+    if not isinstance(step_state.get("approved_group_id"), str) or not step_state["approved_group_id"].startswith("grp_"):
+        return False
+    head = validated["artifact_heads"].get(artifact["artifact_id"])
+    if not isinstance(head, dict):
+        return False
+    approved_revision_id = head.get("approved_revision_id")
+    if not isinstance(approved_revision_id, str) or not approved_revision_id.startswith("rev_"):
+        return False
+    if head.get("candidate_revision_id") is not None:
+        return False
+
+    artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
+    if _artifact_usability_error(artifact_path, artifact["artifact_id"]):
+        return False
+    revision_dir = paths.artifacts_dir / artifact["artifact_id"] / approved_revision_id
+    metadata_path = revision_dir / "metadata.json"
+    content_path = revision_dir / "content.md"
+    if not metadata_path.exists() or not content_path.exists():
+        return False
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise _error("WORKFLOW_STATE_INVALID", "Approved revision metadata is malformed.", 409) from exc
+    stable_bytes = artifact_path.read_bytes()
+    revision_bytes = content_path.read_bytes()
+    stable_sha = _sha256_bytes(stable_bytes)
+    return (
+        stable_bytes == revision_bytes
+        and metadata.get("content_sha256") == stable_sha
+    )
 
 
 def _read_artifact(project_dir: Path, artifact: dict[str, Any]) -> tuple[Path, bytes, str]:
@@ -408,6 +476,9 @@ def build_prompt_bundle(
     project: dict[str, Any],
     project_dir: Path,
 ) -> dict[str, Any]:
+    from scripts import channel_workflow_write
+
+    channel_workflow_write.assert_no_pending_read_transaction(project_dir=project_dir)
     binding = channel_workflow.resolve_project_workflow_binding(root, channel_slug, project)
     definition = channel_workflow.load_workflow_definition(root, binding["workflow_id"], binding["workflow_version"])
     manifest = load_prompt_manifest(root, binding["workflow_id"], binding["workflow_version"], definition)
@@ -428,7 +499,12 @@ def build_prompt_bundle(
     for artifact_id in step["input_artifact_ids"]:
         artifact = artifacts_by_id[artifact_id]
         artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
-        if _artifact_usability_error(artifact_path, artifact_id):
+        if not _workflow_managed_artifact_is_trusted(
+            project_dir=project_dir,
+            artifact=artifact,
+            binding=binding,
+            definition=definition,
+        ):
             missing_required.append(artifact_id)
             continue
         data = artifact_path.read_bytes()
@@ -447,7 +523,12 @@ def build_prompt_bundle(
     for artifact_id in step["optional_input_artifact_ids"]:
         artifact = artifacts_by_id[artifact_id]
         artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
-        if _artifact_usability_error(artifact_path, artifact_id):
+        if not _workflow_managed_artifact_is_trusted(
+            project_dir=project_dir,
+            artifact=artifact,
+            binding=binding,
+            definition=definition,
+        ):
             missing_optional_inputs.append(artifact_id)
             optional_blocks.append(f"--- OPTIONAL ARTIFACT: {PurePosixPath(artifact['relative_path']).name} ---\nNOT PROVIDED")
             continue

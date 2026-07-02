@@ -1,5 +1,6 @@
 import importlib
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -41,6 +42,19 @@ def source_metadata(title="Why Rome Executed Jesus", channel="Competitor Channel
         "commentCount": "8",
         "thumbnailUrl": "https://i.ytimg.com/example.jpg",
     }
+
+
+def copy_workflows(root: Path) -> None:
+    shutil.copytree(ROOT / "workflows", root / "workflows", dirs_exist_ok=True)
+
+
+def read_json(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def write_json(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
 
 
 class ChannelProjectTests(unittest.TestCase):
@@ -194,7 +208,8 @@ class ChannelProjectTests(unittest.TestCase):
                 "input/channel_metrics.csv",
                 "input/_raw/competitor_video.json",
                 "research/competitor_transcript.md",
-            ] + [f"workflow/{name}" for name in channel_projects.WORKFLOW_PLACEHOLDERS]
+                "workflow",
+            ]
             for rel in required:
                 self.assertTrue((base / rel).exists(), rel)
 
@@ -206,6 +221,136 @@ class ChannelProjectTests(unittest.TestCase):
             base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
             self.assertFalse((base / "content.md").exists())
             self.assertFalse((base / "publishing_package.md").exists())
+
+    def test_explicit_v2_project_does_not_scaffold_workflow_generated_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            registry_path = root / "workflows" / "registry.json"
+            registry = read_json(registry_path)
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            write_json(registry_path, registry)
+            make_channel(root, "mist_of_ages", "UC123")
+            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
+            self.assertTrue((base / "input" / "competitor_reference.md").exists())
+            self.assertTrue((base / "research" / "competitor_transcript.md").exists())
+            self.assertTrue((base / "workflow").exists())
+            self.assertFalse((base / "workflow" / "transcript_analysis.md").exists())
+            self.assertFalse((base / "workflow" / "research_pack.md").exists())
+            self.assertFalse((base / "workflow" / "evidence_ledger.md").exists())
+            self.assertFalse((base / "workflow" / "workflow_state.json").exists())
+
+    def test_generic_alternate_workflow_does_not_scaffold_output_union(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            v3_dir = root / "workflows" / "mist_of_ages_assisted_content" / "v3"
+            (v3_dir / "prompts").mkdir(parents=True, exist_ok=True)
+            workflow = {
+                "schema_version": 1,
+                "workflow_id": "mist_of_ages_assisted_content",
+                "workflow_version": "3",
+                "display_name": "Generic Workflow",
+                "execution_mode": "LINEAR",
+                "entry_lifecycle_state": "INPUT_READY",
+                "terminal_lifecycle_state": "DONE",
+                "lifecycle_states": ["INPUT_READY", "ALPHA_READY", "BETA_READY", "DONE"],
+                "prompt_set": {
+                    "status": "MISSING",
+                    "bundle_available": False,
+                },
+                "artifacts": [
+                    {"artifact_id": "source_a", "display_name": "Source A", "relative_path": "input/source_a.md", "artifact_role": "INPUT", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "draft_x", "display_name": "Draft X", "relative_path": "workflow/draft_x.md", "artifact_role": "GENERATED", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "draft_y", "display_name": "Draft Y", "relative_path": "workflow/draft_y.md", "artifact_role": "GENERATED", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "final_z", "display_name": "Final Z", "relative_path": "workflow/final_z.md", "artifact_role": "FINAL", "required": True, "media_type": "text/markdown"},
+                ],
+                "steps": [
+                    {"step_id": "alpha_custom", "order": 1, "display_name": "Alpha", "required_model": "Model A", "input_artifact_ids": ["source_a"], "optional_input_artifact_ids": [], "output_artifact_ids": ["draft_x"], "resulting_lifecycle_state": "ALPHA_READY", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "beta_custom", "order": 2, "display_name": "Beta", "required_model": "Model B", "input_artifact_ids": ["draft_x"], "optional_input_artifact_ids": [], "output_artifact_ids": ["draft_y", "final_z"], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                ],
+            }
+            workflow_path = v3_dir / "workflow.json"
+            write_json(workflow_path, workflow)
+            registry_path = root / "workflows" / "registry.json"
+            registry = read_json(registry_path)
+            registry["workflows"]["mist_of_ages_assisted_content"]["versions"]["3"] = {
+                "status": "ACTIVE",
+                "definition_path": "mist_of_ages_assisted_content/v3/workflow.json",
+                "definition_sha256": __import__("scripts.channel_workflow", fromlist=[""])._sha256_file(workflow_path),
+            }
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "3"
+            registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            write_json(registry_path, registry)
+            make_channel(root, "mist_of_ages", "UC123")
+            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
+            self.assertTrue((base / "input" / "competitor_reference.md").exists())
+            self.assertTrue((base / "research" / "competitor_transcript.md").exists())
+            self.assertFalse((base / "workflow" / "draft_x.md").exists())
+            self.assertFalse((base / "workflow" / "draft_y.md").exists())
+            self.assertFalse((base / "workflow" / "final_z.md").exists())
+
+    def test_generated_outputs_remain_absent_for_overlapping_and_root_level_paths(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            v8_dir = root / "workflows" / "mist_of_ages_assisted_content" / "v8"
+            (v8_dir / "prompts").mkdir(parents=True, exist_ok=True)
+            workflow = {
+                "schema_version": 1,
+                "workflow_id": "mist_of_ages_assisted_content",
+                "workflow_version": "8",
+                "display_name": "Eight Step Generic Workflow",
+                "execution_mode": "LINEAR",
+                "entry_lifecycle_state": "INPUT_READY",
+                "terminal_lifecycle_state": "DONE",
+                "lifecycle_states": ["INPUT_READY", "DONE"],
+                "prompt_set": {
+                    "status": "MISSING",
+                    "bundle_available": False,
+                },
+                "artifacts": [
+                    {"artifact_id": "competitor_transcript", "display_name": "Transcript", "relative_path": "research/competitor_transcript.md", "artifact_role": "INPUT", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "workflow_source_custom", "display_name": "Workflow Source", "relative_path": "workflow/source_custom.md", "artifact_role": "INPUT", "required": False, "media_type": "text/markdown"},
+                    {"artifact_id": "alpha_custom", "display_name": "Alpha", "relative_path": "workflow/alpha.custom.md", "artifact_role": "GENERATED", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "beta_custom", "display_name": "Beta", "relative_path": "workflow/beta.custom.md", "artifact_role": "GENERATED", "required": True, "media_type": "text/markdown"},
+                    {"artifact_id": "gamma_custom", "display_name": "Gamma", "relative_path": "gamma_root.custom.md", "artifact_role": "FINAL", "required": True, "media_type": "text/markdown"},
+                ],
+                "steps": [
+                    {"step_id": "step_1", "order": 1, "display_name": "Step 1", "required_model": "Model", "input_artifact_ids": ["competitor_transcript"], "optional_input_artifact_ids": [], "output_artifact_ids": ["alpha_custom"], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_2", "order": 2, "display_name": "Step 2", "required_model": "Model", "input_artifact_ids": ["alpha_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": [], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_3", "order": 3, "display_name": "Step 3", "required_model": "Model", "input_artifact_ids": ["alpha_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": [], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_4", "order": 4, "display_name": "Step 4", "required_model": "Model", "input_artifact_ids": ["alpha_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": ["beta_custom"], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_5", "order": 5, "display_name": "Step 5", "required_model": "Model", "input_artifact_ids": ["beta_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": [], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_6", "order": 6, "display_name": "Step 6", "required_model": "Model", "input_artifact_ids": ["beta_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": [], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_7", "order": 7, "display_name": "Step 7", "required_model": "Model", "input_artifact_ids": ["beta_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": ["gamma_custom"], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                    {"step_id": "step_8", "order": 8, "display_name": "Step 8", "required_model": "Model", "input_artifact_ids": ["gamma_custom"], "optional_input_artifact_ids": [], "output_artifact_ids": [], "resulting_lifecycle_state": "DONE", "constraints": [], "prompt_source_ref": None},
+                ],
+            }
+            workflow_path = v8_dir / "workflow.json"
+            write_json(workflow_path, workflow)
+            registry_path = root / "workflows" / "registry.json"
+            registry = read_json(registry_path)
+            registry["workflows"]["mist_of_ages_assisted_content"]["versions"]["8"] = {
+                "status": "ACTIVE",
+                "definition_path": "mist_of_ages_assisted_content/v8/workflow.json",
+                "definition_sha256": __import__("scripts.channel_workflow", fromlist=[""])._sha256_file(workflow_path),
+            }
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "8"
+            registry["channel_defaults"]["mist_of_ages"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            write_json(registry_path, registry)
+            make_channel(root, "mist_of_ages", "UC123")
+            project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
+            base = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"]
+            self.assertTrue((base / "research" / "competitor_transcript.md").exists())
+            self.assertFalse((base / "workflow" / "alpha.custom.md").exists())
+            self.assertFalse((base / "workflow" / "beta.custom.md").exists())
+            self.assertFalse((base / "gamma_root.custom.md").exists())
+            self.assertFalse((base / "workflow" / "source_custom.md").exists())
+            self.assertFalse((base / "workflow" / "workflow_state.json").exists())
 
     def test_raw_competitor_json_contains_no_secrets(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -416,13 +561,13 @@ class ChannelProjectTests(unittest.TestCase):
             with self.assertRaises(channel_projects.ChannelProjectError):
                 channel_projects.validate_channel_project(root, "tam_builds", project["project_slug"])
 
-    def test_placeholder_files_are_created(self):
+    def test_workflow_directory_starts_without_generated_output_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             make_channel(root, "mist_of_ages", "UC123")
             project = channel_projects.create_channel_project(root, "mist_of_ages", "VIDEO12345A", "https://youtube.com/watch?v=VIDEO12345A", source_metadata())
             workflow_dir = root / "channels" / "mist_of_ages" / "projects" / project["project_slug"] / "workflow"
-            self.assertEqual(sorted(p.name for p in workflow_dir.iterdir()), sorted(channel_projects.WORKFLOW_PLACEHOLDERS))
+            self.assertEqual(list(workflow_dir.iterdir()), [])
 
     def test_content_and_publishing_package_not_created(self):
         with tempfile.TemporaryDirectory() as tmp:

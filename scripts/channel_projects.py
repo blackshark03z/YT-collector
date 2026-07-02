@@ -17,15 +17,6 @@ from scripts import channel_workflow, channel_workspace
 
 PLACEHOLDER_TEXT = "Paste the manually collected transcript below."
 TRANSCRIPT_HINT = "Preserve timestamps at meaningful section boundaries where possible."
-WORKFLOW_PLACEHOLDERS = {
-    "transcript_analysis.md": "Transcript Analysis",
-    "research_pack.md": "Research Pack",
-    "evidence_ledger.md": "Evidence Ledger",
-    "locked_creative_package.md": "Locked Creative Package",
-    "retention_outline.md": "Retention Outline",
-    "narration_v1.md": "Narration V1",
-    "red_team_report.md": "Red Team Report",
-}
 THUMBNAIL_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 SECRET_MARKERS = ("access_token", "refresh_token", "client_secret", "authorization", "oauth")
 SLUG_TEXT_RE = re.compile(r"[^a-z0-9]+")
@@ -161,8 +152,27 @@ def _read_required_snapshot(path: Path, *, name: str, csv: bool = False) -> byte
     return data
 
 
-def _workflow_placeholder_text(title: str) -> str:
-    return f"# {title}\n\nTODO: Fill manually during Workflow V2.\n"
+def _workflow_generated_output_relative_paths(
+    root: Path | str,
+    workflow_binding: dict[str, Any] | None,
+) -> set[str]:
+    if workflow_binding is None:
+        return set()
+    definition = channel_workflow.load_workflow_definition(
+        root,
+        workflow_binding["workflow_id"],
+        workflow_binding["workflow_version"],
+    )
+    output_ids = {
+        artifact_id
+        for step in definition["steps"]
+        for artifact_id in step["output_artifact_ids"]
+    }
+    return {
+        artifact["relative_path"]
+        for artifact in definition["artifacts"]
+        if artifact["artifact_id"] in output_ids
+    }
 
 
 def _transcript_template(title: str, url: str, channel: str, duration: str) -> str:
@@ -382,6 +392,7 @@ def create_channel_project(
         workflow_binding = channel_workflow.get_channel_default_workflow(root, channel_slug)
     except channel_workflow.ChannelWorkflowError as exc:
         raise ChannelProjectError(exc.message) from exc
+    workflow_generated_outputs = _workflow_generated_output_relative_paths(root, workflow_binding)
     learnings_bytes = _read_required_snapshot(
         workspace.channel_learnings_master, name="channel learnings"
     )
@@ -442,10 +453,10 @@ def create_channel_project(
         (temp_dir / "research" / "competitor_transcript.md").write_text(
             transcript_text, encoding="utf-8", newline="\n"
         )
-        for filename, title in WORKFLOW_PLACEHOLDERS.items():
-            (temp_dir / "workflow" / filename).write_text(
-                _workflow_placeholder_text(title), encoding="utf-8", newline="\n"
-            )
+        for relative_path in workflow_generated_outputs:
+            target = temp_dir / Path(relative_path)
+            if target.exists():
+                raise ChannelProjectError("Workflow-generated artifacts must not be scaffolded during project creation.")
 
         snapshot_time = created_dt.isoformat()
         project_json = {
@@ -562,7 +573,7 @@ def validate_channel_project(root: Path | str, channel_slug: str, project_slug: 
         "channel_metrics": paths.channel_metrics.exists() and bool(paths.channel_metrics.read_bytes().strip()),
         "competitor_raw_json": paths.competitor_raw_json.exists(),
         "transcript_real_content": transcript_has_real_content(paths.transcript_file),
-        "workflow_placeholders": all((paths.workflow_dir / name).exists() for name in WORKFLOW_PLACEHOLDERS),
+        "workflow_directory": paths.workflow_dir.exists() and paths.workflow_dir.is_dir(),
         "ownership": project["channel_slug"] == channel_slug == project["channel_slug"],
     }
     snapshot = project["channel_snapshot"]
@@ -577,7 +588,7 @@ def validate_channel_project(root: Path | str, channel_slug: str, project_slug: 
             "channel_learnings",
             "channel_metrics",
             "competitor_raw_json",
-            "workflow_placeholders",
+            "workflow_directory",
             "ownership",
             "safe_snapshot_paths",
         )

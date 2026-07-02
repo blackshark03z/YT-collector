@@ -16,6 +16,7 @@ from tests.test_channel_prompt_bundle import (
     create_project,
     prepare_step2_inputs,
     prepare_prompt7_inputs,
+    seed_approved_step_outputs,
 )
 from tests.runtime_isolation_helpers import snapshot_runtime_state
 
@@ -177,10 +178,18 @@ def build_generic_three_artifact_fixture(root: Path) -> tuple[dict, Path]:
     project = create_project(root, "mist_of_ages", "VIDEO12345Z")
     channel_projects.save_project_transcript(root, "mist_of_ages", project["project_slug"], "real transcript " * 12)
     project_dir = channel_workspace.canonical_channel_paths(root, "mist_of_ages").projects_dir / project["project_slug"]
-    (project_dir / "workflow" / "alpha_notes_custom.md").write_text("# Alpha\n## Beta\n", encoding="utf-8", newline="\n")
-    (project_dir / "workflow" / "brief_custom.md").write_text("# Brief\n", encoding="utf-8", newline="\n")
-    (project_dir / "workflow" / "facts_custom.md").write_text("# Facts\n", encoding="utf-8", newline="\n")
-    (project_dir / "workflow" / "notes_custom.md").write_text("# Notes\n", encoding="utf-8", newline="\n")
+    seed_approved_step_outputs(root, "mist_of_ages", project["project_slug"], "alpha_single_custom", {"alpha_notes_custom": "# Alpha\n## Beta\n"})
+    seed_approved_step_outputs(
+        root,
+        "mist_of_ages",
+        project["project_slug"],
+        "beta_envelope_custom",
+        {
+            "brief_custom": "# Brief\n",
+            "facts_custom": "# Facts\n",
+            "notes_custom": "# Notes\n",
+        },
+    )
     return project, project_dir
 
 

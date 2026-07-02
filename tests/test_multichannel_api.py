@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts import channel_projects, channel_prompt_bundle, channel_workspace, ui_server
 from tests.runtime_isolation_helpers import snapshot_runtime_state
+from tests.test_channel_prompt_bundle import prepare_step2_inputs
 
 
 def make_channel(root: Path, slug: str, channel_id: str, *, with_metrics: bool = True) -> None:
@@ -401,9 +402,8 @@ class MultiChannelApiTests(unittest.TestCase):
                 },
                 created_at="2026-07-01T00:00:00+00:00",
             )
-            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
             project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
-            (project_dir / "workflow" / "transcript_analysis.md").write_text("## Subject\nRome\n", encoding="utf-8", newline="\n")
+            prepare_step2_inputs(root, "channel_a", created["project_slug"])
             project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
             bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_2_historical_research", project, project_dir)
             status, data = ui_server.dispatch_v2_request(
@@ -535,9 +535,8 @@ class MultiChannelApiTests(unittest.TestCase):
                 },
                 created_at="2026-07-01T00:00:00+00:00",
             )
-            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
             project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
-            (project_dir / "workflow" / "transcript_analysis.md").write_text("## Subject\nRome\n", encoding="utf-8", newline="\n")
+            prepare_step2_inputs(root, "channel_a", created["project_slug"])
             project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
             bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_2_historical_research", project, project_dir)
             status, data = ui_server.dispatch_v2_request(
@@ -591,6 +590,111 @@ class MultiChannelApiTests(unittest.TestCase):
                     context=ui_server.build_app_context(root=root),
                 )
             self.assertEqual(ctx.exception.code, "OUTPUT_TEXT_REQUIRED")
+
+    def test_candidate_approve_route_publishes_stable_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
+            bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_1_transcript_analysis", project, project_dir)
+            saved = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/revisions",
+                {
+                    "bundle_sha256": bundle["bundle_sha256"],
+                    "output_text": "## Subject\nRome\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                    "expected_state_revision": 0,
+                },
+                context=ui_server.build_app_context(root=root),
+            )[1]
+            status, data = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/candidate/approve",
+                {
+                    "candidate_group_id": saved["revision_group"]["revision_group_id"],
+                    "expected_state_revision": 1,
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(data["status"], "CANDIDATE_APPROVED")
+            self.assertIn("## Subject\nRome\n", (project_dir / "workflow" / "transcript_analysis.md").read_text(encoding="utf-8"))
+
+    def test_workflow_read_routes_reject_pending_transaction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            (project_dir / "workflow" / "_transactions" / "txn_pending").mkdir(parents=True, exist_ok=True)
+            with self.assertRaises(ui_server.V2Error) as workflow_ctx:
+                ui_server.dispatch_v2_request(
+                    "GET",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow",
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(workflow_ctx.exception.code, "WORKFLOW_RECOVERY_REQUIRED")
+            with self.assertRaises(ui_server.V2Error) as bundle_ctx:
+                ui_server.dispatch_v2_request(
+                    "GET",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/bundle",
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(bundle_ctx.exception.code, "WORKFLOW_RECOVERY_REQUIRED")
 
     def test_v2_handler_returns_controlled_error_for_malformed_json_body(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -819,6 +923,39 @@ class MultiChannelApiTests(unittest.TestCase):
 
     def test_existing_legacy_routes_remain_unchanged(self):
         self.assertIn("Connect Channel", ui_server.HTML_PAGE)
+
+    def test_legacy_create_project_keeps_workflow_outputs_absent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            projects_dir = root / "projects"
+            channel_dir = root / "channel" / "mist_of_ages"
+            config_dir = root / ".local"
+            channel_dir.mkdir(parents=True, exist_ok=True)
+            config_dir.mkdir(parents=True, exist_ok=True)
+            (channel_dir / "channel_learnings_master.md").write_text("# Learnings\n\nApproved.\n", encoding="utf-8", newline="\n")
+            (config_dir / "mist_of_ages_channel.json").write_text(
+                json.dumps({"id": "UC1", "title": "Mist of Ages"}, indent=2) + "\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            with mock.patch.object(ui_server, "PROJECTS_DIR", projects_dir), \
+                mock.patch.object(ui_server, "CHANNEL_DIR", channel_dir), \
+                mock.patch.object(ui_server, "CONFIG_DIR", config_dir), \
+                mock.patch.object(ui_server, "CHANNEL_CONFIG_FILE", config_dir / "mist_of_ages_channel.json"), \
+                mock.patch.object(ui_server, "MASTER_LEARNINGS_FILE", channel_dir / "channel_learnings_master.md"), \
+                mock.patch.object(ui_server, "fetch_competitor_video", lambda video_id: fake_video(video_id)), \
+                mock.patch.object(ui_server, "download_thumbnail", lambda url, assets_dir: ""), \
+                mock.patch.object(ui_server, "write_channel_files", lambda project_dir, count, window_days: {"status": "PASS"}):
+                result = ui_server.create_project({"url": "https://youtube.com/watch?v=VIDEO12345A", "recent_count": 10, "window_days": 28})
+            project_dir = projects_dir / result["project"]["project_slug"]
+            self.assertTrue((project_dir / "project.json").exists())
+            self.assertTrue((project_dir / "input" / "competitor_reference.md").exists())
+            self.assertTrue((project_dir / "research" / "competitor_transcript.md").exists())
+            self.assertTrue((project_dir / "workflow").exists())
+            self.assertEqual(sorted(path.name for path in (project_dir / "workflow").glob("*")), [])
+            self.assertFalse((project_dir / "workflow" / "transcript_analysis.md").exists())
+            self.assertFalse((project_dir / "workflow" / "research_pack.md").exists())
+            self.assertFalse((project_dir / "workflow" / "evidence_ledger.md").exists())
 
     def test_no_real_api_network_request_occurs(self):
         with tempfile.TemporaryDirectory() as tmp:

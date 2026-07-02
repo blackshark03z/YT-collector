@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C2C1 - Candidate Persistence, Workflow State v2, Transaction Store, and Save Candidate
+Phase 7C2C2 - Candidate Approval, Rejection, Stable Publication, and Scaffold/Trust-Rule Closure
 
 ## Phase Status
 COMPLETE
@@ -62,6 +62,63 @@ MVP_ACCEPTED
 - Phase 7C2A: embedded read-only workflow panel, selected-step bundle preview/copy flow, and stale-response-safe bundle UI completed locally without runtime mutation
 - Phase 7C2B: pasted AI output intake, zero-write output parser, structural validation, and in-memory parsed artifact preview completed locally without runtime mutation
 - Phase 7C2C1: candidate-only workflow write path, persisted workflow state v2, immutable revision/group storage, per-project transaction locking, recovery-aware candidate commit, Save Candidate API, and minimal Save Candidate UI completed locally without runtime mutation
+- Phase 7C2C2: approval/rejection write path, stable publication gate, no-placeholder-overwrite rule, workflow-generated output scaffold removal, approved-state trust enforcement, and recovery verification completed locally without runtime mutation
+
+## Phase 7C2C2 Scope
+- Removed workflow-generated stable artifact scaffolding from new workflow-bound project creation in `scripts/channel_projects.py`. New projects now create only legitimate source/input artifacts plus an empty `workflow/` directory.
+- Audited every active production project-creation path and confirmed there are now only two supported creators:
+  - canonical `/api/v2/channels/<channel_slug>/projects` -> `scripts/channel_projects.py:create_channel_project(...)`
+  - legacy `/api/create_project` -> `scripts/ui_server.py:create_project(...)`
+- Kept the legacy route registered but corrected it independently so it no longer scaffolds any workflow-generated output placeholders.
+- Kept output-artifact detection generic by resolving the exact pinned workflow definition and taking the union of every step `output_artifact_ids`; no Prompt-specific artifact list or Mist-of-Ages-only fallback was added.
+- Preserved legitimate source/input scaffolding for competitor reference, transcript, learnings snapshot, metrics snapshot, and raw competitor metadata.
+- Enforced the approved trust rule in `scripts/channel_prompt_bundle.py`: workflow-generated artifact files are trusted only when authoritative workflow state proves the producer step is `APPROVED`, an approved group exists, an approved revision head exists, no candidate head remains, and the stable bytes still match the approved revision content hash.
+- Extended `scripts/channel_workflow_write.py` so approval/rejection recovery, downstream readiness, and publish-state derivation honor the same authoritative approved-artifact trust rule instead of raw stable-file existence.
+- Preserved fail-closed occupied-target behavior: first approval never overwrites any existing stable canonical file, including old placeholder text, exact matching bytes, empty files, or unmanaged files at a canonical output path. The controlled result remains `STABLE_ARTIFACT_CONFLICT`.
+- Completed approval/rejection verification locally: first approval now publishes stable files only when the stable target is absent; reject clears candidate state without creating stable output; interrupted approval/rejection transactions recover only through authorized write paths after lock acquisition.
+- Closed the final missing recovery-evidence gap locally: approval failure before decision/stable staging completion now proves fail-closed recovery without mutation; corrupt rejection decisions stay unrecoverable without silent cleanup; reject recovery followed by idempotent replay reuses the original decision and performs no extra writes.
+- Kept existing-project compatibility fail-closed: unmanaged placeholder files, empty files, matching-candidate bytes, arbitrary bytes, directories, case-colliding occupied paths, and symlink-backed occupied paths at stable output targets all fail closed without overwrite, adoption, deletion, decision creation, or state transition. No production migration is required because the real canonical project count remains `0`.
+
+## Phase 7C2C2 Evidence
+- Placeholder source classification result: `BOTH`.
+- Exact placeholder-producing production paths:
+  - `scripts/channel_projects.py`: `create_channel_project(...)` previously scaffolded workflow output placeholders; now removed.
+  - `scripts/ui_server.py`: legacy `create_project(...)` previously scaffolded workflow output placeholders; now removed.
+- Final production placeholder-eradication scan over `scripts/` returned no remaining exact workflow-placeholder creation matches.
+- Legacy route disposition: `B` - the legacy project-creation route is still active and still reachable through `/api/create_project`, but it now independently obeys the same no-output-scaffolding rule as the canonical creator.
+- Exact fixture sources corrected to match the approved contract:
+  - `tests/test_channel_projects.py`
+  - `tests/test_channel_prompt_bundle.py`
+  - `tests/test_channel_output_parser.py`
+  - `tests/test_channel_workflow_write.py`
+  - `tests/test_multichannel_api.py`
+- Focused project scaffolding regression: `python -m unittest tests.test_channel_projects` passing (`46` run, `46` passed, `0` failures, `0` errors, `0` skipped).
+- Focused approval/rejection and recovery regression: `python -m unittest tests.test_channel_workflow_write` passing (`47` run, `46` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability in this environment).
+- Focused output-parser regression: `python -m unittest tests.test_channel_output_parser` passing (`22` run, `22` passed, `0` failures, `0` errors, `0` skipped).
+- Focused workflow regression: `python -m unittest tests.test_channel_workflow` passing (`17` run, `16` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability in this environment).
+- Focused prompt-bundle regression: `python -m unittest tests.test_channel_prompt_bundle` passing (`19` run, `19` passed, `0` failures, `0` errors, `0` skipped).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`56` run, `56` passed, `0` failures, `0` errors, `0` skipped).
+- Focused frontend contract regression: `python -m unittest tests.test_ui_frontend_contract` passing (`37` run, `37` passed, `0` failures, `0` errors, `0` skipped).
+- Explicit Node-backed runtime harness: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests` passing (`13` run, `13` passed, `0` failures, `0` errors, `0` skipped).
+- Compile check: `python -m py_compile scripts\channel_projects.py scripts\channel_workflow_write.py scripts\channel_output_parser.py scripts\channel_prompt_bundle.py scripts\channel_workflow.py scripts\ui_server.py tests\test_channel_projects.py tests\test_channel_workflow_write.py tests\test_ui_frontend_contract.py` passing.
+- Focused combined verification run across the required seven suites: `python -m unittest tests.test_channel_projects tests.test_channel_workflow_write tests.test_channel_output_parser tests.test_channel_workflow tests.test_channel_prompt_bundle tests.test_multichannel_api tests.test_ui_frontend_contract` passing (`242` run, `240` passed, `0` failures, `0` errors, `2` skipped for unsupported symlink capability in this environment).
+- Full offline regression: `python -m unittest discover -s tests` passing (`400` run, `398` passed, `0` failures, `0` errors, `2` skipped for unsupported symlink capability in this environment).
+- Production workflow defaults remained unchanged: `default_version = 1`, `legacy_unpinned_version = 1`.
+- Workflow v1 SHA-256 remained `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Workflow v2 SHA-256 remained `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`.
+- Prompt manifest SHA-256 remained `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- Protected-runtime snapshots taken before focused verification, after focused verification, and after full regression remained byte-identical for canonical identity/profile/learnings/token plus legacy identity/learnings/token hashes.
+- Real canonical project directories remained `0` and real `workflow_state.json` files remained `0`.
+- No production migration is required now because the real canonical project count is `0`.
+- `implement.docx` remained unrelated and untracked.
+
+## Phase 7C2C2 Gate
+- Output artifacts are no longer scaffolded before approval.
+- Workflow-generated artifacts are no longer trusted from file existence alone.
+- There is no placeholder overwrite exception.
+- Existing occupied stable canonical paths fail closed with controlled conflict behavior.
+- Approval/rejection and stable publication are now implemented and verified locally.
+- Phase 7C2C3 remains blocked pending a separate Tech Lead execution prompt.
 
 ## Phase 7C2C1 Scope
 - Added `scripts/channel_workflow_write.py` as the dedicated candidate-write domain module for workflow-state v2 validation, deterministic idempotency, per-project locking, staged transaction commit, incomplete-transaction recovery, and immutable candidate revision/group persistence.

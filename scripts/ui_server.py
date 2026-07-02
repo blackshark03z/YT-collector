@@ -450,11 +450,6 @@ Preserve timestamps at meaningful section boundaries where possible.
     path.write_text(text, encoding="utf-8")
 
 
-def placeholder(path: Path, title: str) -> None:
-    if not path.exists():
-        path.write_text(f"# {title}\n\nTODO: Fill manually during Workflow V2.\n", encoding="utf-8")
-
-
 def transcript_has_content(path: Path) -> bool:
     if not path.exists():
         return False
@@ -628,17 +623,6 @@ def create_project(payload: dict) -> dict:
     thumb_local = download_thumbnail(thumb_url, assets_dir)
     write_competitor_reference(input_dir / "competitor_reference.md", video, url, thumb_url, thumb_local)
     create_transcript_template(research_dir / "competitor_transcript.md", video, url)
-
-    for filename, title_text in {
-        "transcript_analysis.md": "Transcript Analysis",
-        "research_pack.md": "Research Pack",
-        "evidence_ledger.md": "Evidence Ledger",
-        "locked_creative_package.md": "Locked Creative Package",
-        "retention_outline.md": "Retention Outline",
-        "narration_v1.md": "Narration V1",
-        "red_team_report.md": "Red Team Report",
-    }.items():
-        placeholder(workflow_dir / filename, title_text)
 
     channel_result = write_channel_files(
         project_dir,
@@ -1146,6 +1130,8 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                     )
                 except channel_prompt_bundle.PromptBundleError as exc:
                     raise _map_prompt_bundle_error(exc) from exc
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, bundle
@@ -1169,6 +1155,8 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                     raise _map_output_parser_error(exc) from exc
                 except channel_prompt_bundle.PromptBundleError as exc:
                     raise _map_prompt_bundle_error(exc) from exc
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, parsed_output
@@ -1185,6 +1173,31 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                         payload.get("output_text"),
                         payload.get("expected_state_revision"),
                     )
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
+                return status, data
+            if len(parts) == 11 and parts[4] == "projects" and parts[6] == "workflow" and parts[7] == "steps" and parts[9] == "candidate" and parts[10] in {"approve", "reject"} and method == "POST":
+                project_slug = parts[5]
+                step_id = parts[8]
+                try:
+                    if parts[10] == "approve":
+                        status, data = channel_workflow_write.approve_candidate(
+                            root,
+                            channel_slug,
+                            project_slug,
+                            step_id,
+                            payload.get("candidate_group_id"),
+                            payload.get("expected_state_revision"),
+                        )
+                    else:
+                        status, data = channel_workflow_write.reject_candidate(
+                            root,
+                            channel_slug,
+                            project_slug,
+                            step_id,
+                            payload.get("candidate_group_id"),
+                            payload.get("expected_state_revision"),
+                        )
                 except channel_workflow_write.ChannelWorkflowWriteError as exc:
                     raise _map_workflow_write_error(exc) from exc
                 return status, data
@@ -1421,6 +1434,7 @@ const state = {
   bundleAction: { busy: false, channelSlug: null, projectSlug: null, stepId: null, requestId: 0 },
   parseOutputAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 },
   saveCandidateAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, rawOutputSha256: null, expectedStateRevision: null, requestId: 0 },
+  candidateDecisionAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, candidateGroupId: null, expectedStateRevision: null, action: null, requestId: 0 },
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
   actionFeedback: { kind: "", slug: null, text: "" },
@@ -1469,6 +1483,7 @@ function workflowErrorSummary(error, fallback) {
   const known = {
     WORKFLOW_NOT_CONFIGURED: "No workflow is configured for this channel yet.",
     WORKFLOW_STATE_INVALID: "The saved workflow state could not be read safely.",
+    WORKFLOW_RECOVERY_REQUIRED: "An incomplete workflow transaction requires review before this workflow can be read safely.",
     PROMPT_SET_UNAVAILABLE: "Prompt bundle unavailable for this workflow version.",
     PROMPT_MANIFEST_INVALID: "The workflow prompt manifest is not currently usable.",
     PROMPT_FILE_NOT_FOUND: "A workflow prompt file is missing.",
@@ -1489,6 +1504,7 @@ function parseOutputErrorSummary(error, fallback) {
     OUTPUT_CONTRACT_INVALID: "This workflow step does not expose a usable output contract for preview.",
     PROMPT_OUTPUT_PARSE_FAILED: "The pasted output could not be parsed for preview.",
     WORKFLOW_STEP_NOT_FOUND: "The selected workflow step is no longer available.",
+    WORKFLOW_RECOVERY_REQUIRED: "An incomplete workflow transaction requires review before parsing can continue.",
   };
   return known[code] || describeError(error, fallback);
 }
@@ -1511,6 +1527,27 @@ function saveCandidateErrorSummary(error, fallback) {
     REVISION_STORAGE_INVALID: "The workflow revision storage paths are not safe to use.",
     REVISION_ID_CONFLICT: "A workflow revision id conflict was detected.",
     WORKFLOW_WRITE_FAILED: "The workflow candidate could not be saved safely.",
+  };
+  return known[code] || describeError(error, fallback);
+}
+
+function candidateDecisionErrorSummary(error, fallback) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  const known = {
+    STATE_REVISION_CONFLICT: "The workflow changed before the candidate decision completed. Refresh the workflow and try again.",
+    WORKFLOW_STEP_NOT_DECIDABLE: "This workflow step does not currently expose a candidate decision.",
+    CANDIDATE_GROUP_MISMATCH: "The selected candidate is stale. Refresh the workflow and try again.",
+    CANDIDATE_NOT_FOUND: "The selected candidate could not be found safely.",
+    CANDIDATE_DECISION_CONFLICT: "This candidate already has the opposite final decision recorded.",
+    CANDIDATE_ALREADY_DECIDED: "This candidate has already been finalized.",
+    CANDIDATE_ALREADY_APPROVED: "This candidate was already approved.",
+    CANDIDATE_ALREADY_REJECTED: "This candidate was already rejected.",
+    STABLE_ARTIFACT_CONFLICT: "A stable workflow output already exists for this step.",
+    PROJECT_WORKFLOW_BUSY: "Another workflow save is already running for this project.",
+    PROJECT_WORKFLOW_LOCK_STALE: "The workflow lock is stale and requires review before another decision.",
+    WORKFLOW_RECOVERY_REQUIRED: "An incomplete workflow transaction requires review before another decision.",
+    WORKFLOW_STATE_INVALID: "The saved workflow state could not be read safely.",
+    WORKFLOW_WRITE_FAILED: "The candidate decision could not be completed safely.",
   };
   return known[code] || describeError(error, fallback);
 }
@@ -1601,7 +1638,11 @@ function clearProjectSelectionState() {
   state.workflowError = "";
   state.bundleError = "";
   state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
+  state.saveCandidateAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, rawOutputSha256: null, expectedStateRevision: null, requestId: 0 };
+  state.candidateDecisionAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, candidateGroupId: null, expectedStateRevision: null, action: null, requestId: 0 };
   state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
+  state.candidateSaveFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
+  state.lastSaveCandidateResult = null;
 }
 
 function clearProjectState() {
@@ -1658,6 +1699,7 @@ function invalidateLoadedBundle() {
   state.parsedOutputError = "";
   state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
   state.saveCandidateAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, rawOutputSha256: null, expectedStateRevision: null, requestId: 0 };
+  state.candidateDecisionAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, candidateGroupId: null, expectedStateRevision: null, action: null, requestId: 0 };
   state.lastSaveCandidateResult = null;
   clearBundleFeedback();
   clearCandidateSaveFeedback();
@@ -1940,6 +1982,50 @@ function saveCandidateButtonModel() {
     disabled: busy,
     label: busy ? "Saving Candidate..." : "Save Candidate",
     helper: busy ? "Persisting immutable candidate revisions for the current parsed output..." : "Save a candidate revision group only. No stable artifact files are published in this phase."
+  };
+}
+
+function candidateDecisionButtonModel(actionName) {
+  const workflow = state.selectedProjectWorkflow;
+  const step = selectedWorkflowStepRecord();
+  const candidate = step && stepCandidateSummary(step.step_id);
+  const action = workflow && workflow.available_actions && step ? (workflow.available_actions[step.step_id] || {}) : {};
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !step || !candidate || candidate.status !== "CANDIDATE" || !candidate.candidate_group_id) {
+    return {
+      disabled: true,
+      label: actionName === "APPROVE" ? "Approve Candidate" : "Reject Candidate",
+      helper: "Load the current candidate state for this workflow step before deciding."
+    };
+  }
+  const actionKey = actionName === "APPROVE" ? "approve_candidate" : "reject_candidate";
+  if (!action[actionKey]) {
+    return {
+      disabled: true,
+      label: actionName === "APPROVE" ? "Approve Candidate" : "Reject Candidate",
+      helper: "This workflow step does not currently allow that candidate decision."
+    };
+  }
+  const busy = state.candidateDecisionAction.busy
+    && state.candidateDecisionAction.channelSlug === state.selectedChannelSlug
+    && state.candidateDecisionAction.projectSlug === state.selectedProjectSlug
+    && state.candidateDecisionAction.workflowId === (workflow.binding && workflow.binding.workflow_id)
+    && state.candidateDecisionAction.workflowVersion === (workflow.binding && workflow.binding.workflow_version)
+    && state.candidateDecisionAction.stepId === step.step_id
+    && state.candidateDecisionAction.candidateGroupId === candidate.candidate_group_id
+    && state.candidateDecisionAction.expectedStateRevision === (workflow.state && workflow.state.state_revision)
+    && state.candidateDecisionAction.action === actionName;
+  return {
+    disabled: busy,
+    label: busy
+      ? (actionName === "APPROVE" ? "Approving Candidate..." : "Rejecting Candidate...")
+      : (actionName === "APPROVE" ? "Approve Candidate" : "Reject Candidate"),
+    helper: busy
+      ? (actionName === "APPROVE"
+        ? "Publishing the candidate into stable workflow outputs..."
+        : "Finalizing the candidate rejection without publishing stable artifacts...")
+      : (actionName === "APPROVE"
+        ? "Approve this candidate and publish its stable workflow output files."
+        : "Reject this candidate and return the step to READY without publishing stable outputs.")
   };
 }
 
@@ -2339,6 +2425,8 @@ function renderProjectDetailState() {
   const copyButton = copyBundleButtonModel();
   const parseButton = parseOutputButtonModel();
   const saveCandidateButton = saveCandidateButtonModel();
+  const approveCandidateButton = candidateDecisionButtonModel("APPROVE");
+  const rejectCandidateButton = candidateDecisionButtonModel("REJECT");
   const candidateSaveFeedback = candidateSaveFeedbackForSelection();
   const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
   const currentStepLabel = workflowSteps.find((step) => step.step_id === workflowState.current_step_id);
@@ -2481,6 +2569,8 @@ function renderProjectDetailState() {
               <div class="card"><strong>Resulting Lifecycle State</strong><div class="meta">${escapeHtml(selectedStep.resulting_lifecycle_state || "Unknown")}</div></div>
               <div class="card"><strong>Output Artifacts</strong><div class="meta">${escapeHtml(String((selectedStep.output_artifact_ids || []).length))}</div></div>
               <div class="card"><strong>Save Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].save_candidate ? "READY" : "WAITING")}</div></div>
+              <div class="card"><strong>Approve Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].approve_candidate ? "READY" : "WAITING")}</div></div>
+              <div class="card"><strong>Reject Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].reject_candidate ? "READY" : "WAITING")}</div></div>
             </div>
             <div class="row" style="margin-top:12px">
               <button type="button" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
@@ -2539,6 +2629,8 @@ function renderProjectDetailState() {
               <div class="row" style="margin-top:12px">
                 <button type="button" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
                 <button type="button" class="secondary" id="saveCandidateBtn" ${saveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(saveCandidateButton.label)}</button>
+                <button type="button" id="approveCandidateBtn" ${approveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(approveCandidateButton.label)}</button>
+                <button type="button" class="secondary" id="rejectCandidateBtn" ${rejectCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(rejectCandidateButton.label)}</button>
               </div>
               <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
               <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
@@ -3377,6 +3469,148 @@ async function saveCandidateAction() {
   }
 }
 
+async function candidateDecisionAction(actionName) {
+  const channelSlug = state.selectedChannelSlug;
+  const projectSlug = state.selectedProjectSlug;
+  const workflow = state.selectedProjectWorkflow;
+  const step = selectedWorkflowStepRecord();
+  const candidate = step && stepCandidateSummary(step.step_id);
+  const button = candidateDecisionButtonModel(actionName);
+  if (!channelSlug || !projectSlug || !workflow || !step || !candidate || !candidate.candidate_group_id) {
+    setCandidateSaveFeedback("error", channelSlug, projectSlug, state.selectedWorkflowStepId, "Load the current candidate state for this workflow step before deciding.");
+    render();
+    return;
+  }
+  if (button.disabled) {
+    if (!(state.candidateDecisionAction.busy
+      && state.candidateDecisionAction.channelSlug === channelSlug
+      && state.candidateDecisionAction.projectSlug === projectSlug
+      && state.candidateDecisionAction.stepId === step.step_id
+      && state.candidateDecisionAction.action === actionName)) {
+      setCandidateSaveFeedback("error", channelSlug, projectSlug, step.step_id, button.helper);
+      render();
+    }
+    return;
+  }
+
+  const binding = workflow.binding || {};
+  const expectedStateRevision = workflow.state && typeof workflow.state.state_revision === "number" ? workflow.state.state_revision : 0;
+  const requestId = state.candidateDecisionAction.requestId + 1;
+  state.candidateDecisionAction = {
+    busy: true,
+    channelSlug,
+    projectSlug,
+    workflowId: binding.workflow_id || null,
+    workflowVersion: binding.workflow_version || null,
+    stepId: step.step_id,
+    candidateGroupId: candidate.candidate_group_id,
+    expectedStateRevision,
+    action: actionName,
+    requestId
+  };
+  setCandidateSaveFeedback(
+    "info",
+    channelSlug,
+    projectSlug,
+    step.step_id,
+    actionName === "APPROVE"
+      ? "Approving the current candidate and publishing stable workflow outputs..."
+      : "Rejecting the current candidate and returning the step to READY..."
+  );
+  render();
+
+  try {
+    const data = await v2Api(
+      `channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/candidate/${actionName === "APPROVE" ? "approve" : "reject"}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          candidate_group_id: candidate.candidate_group_id,
+          expected_state_revision: expectedStateRevision
+        })
+      }
+    );
+    const currentWorkflow = state.selectedProjectWorkflow;
+    const currentStep = selectedWorkflowStepRecord();
+    const currentCandidate = currentStep && stepCandidateSummary(currentStep.step_id);
+    if (
+      state.candidateDecisionAction.requestId !== requestId
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || !currentWorkflow
+      || !currentStep
+      || currentStep.step_id !== step.step_id
+      || (currentCandidate && currentCandidate.candidate_group_id !== candidate.candidate_group_id)
+    ) {
+      if (
+        state.candidateDecisionAction.requestId === requestId
+        && state.candidateDecisionAction.channelSlug === channelSlug
+        && state.candidateDecisionAction.projectSlug === projectSlug
+        && state.candidateDecisionAction.stepId === step.step_id
+        && state.candidateDecisionAction.action === actionName
+      ) {
+        state.candidateDecisionAction.busy = false;
+        clearCandidateSaveFeedback();
+        render();
+      }
+      return;
+    }
+    if (actionName === "APPROVE") {
+      invalidateLoadedBundle();
+    } else {
+      invalidateParsedOutputResult();
+    }
+    setCandidateSaveFeedback(
+      "success",
+      channelSlug,
+      projectSlug,
+      step.step_id,
+      actionName === "APPROVE"
+        ? `Candidate approved as ${data.revision_group_id || candidate.candidate_group_id}.`
+        : `Candidate rejected for ${data.revision_group_id || candidate.candidate_group_id}.`
+    );
+    await loadSelectedProjectWorkflow(projectSlug, channelSlug, true);
+  } catch (error) {
+    if (
+      state.candidateDecisionAction.requestId !== requestId
+      || channelSlug !== state.selectedChannelSlug
+      || projectSlug !== state.selectedProjectSlug
+      || step.step_id !== state.selectedWorkflowStepId
+    ) {
+      if (
+        state.candidateDecisionAction.requestId === requestId
+        && state.candidateDecisionAction.channelSlug === channelSlug
+        && state.candidateDecisionAction.projectSlug === projectSlug
+        && state.candidateDecisionAction.stepId === step.step_id
+        && state.candidateDecisionAction.action === actionName
+      ) {
+        state.candidateDecisionAction.busy = false;
+        clearCandidateSaveFeedback();
+        render();
+      }
+      return;
+    }
+    setCandidateSaveFeedback(
+      "error",
+      channelSlug,
+      projectSlug,
+      step.step_id,
+      candidateDecisionErrorSummary(error, `Could not ${actionName === "APPROVE" ? "approve" : "reject"} the current candidate.`)
+    );
+  } finally {
+    if (
+      state.candidateDecisionAction.requestId === requestId
+      && state.candidateDecisionAction.channelSlug === channelSlug
+      && state.candidateDecisionAction.projectSlug === projectSlug
+      && state.candidateDecisionAction.stepId === step.step_id
+      && state.candidateDecisionAction.action === actionName
+    ) {
+      state.candidateDecisionAction.busy = false;
+      render();
+    }
+  }
+}
+
 async function saveTranscriptAction() {
   const save = transcriptSaveModel();
   const slug = state.selectedChannelSlug;
@@ -3620,6 +3854,14 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
   }
   if (event.target.id === "saveCandidateBtn") {
     saveCandidateAction();
+    return;
+  }
+  if (event.target.id === "approveCandidateBtn") {
+    candidateDecisionAction("APPROVE");
+    return;
+  }
+  if (event.target.id === "rejectCandidateBtn") {
+    candidateDecisionAction("REJECT");
   }
 });
 

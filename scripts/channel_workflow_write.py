@@ -81,8 +81,22 @@ def _safe_relative_path(value: str, *, field_name: str) -> PurePosixPath:
     return pure
 
 
+def _validate_windows_safe_components(pure: PurePosixPath, *, code: str, field_name: str) -> None:
+    lowered_seen: set[str] = set()
+    for part in pure.parts:
+        lowered = part.lower()
+        if lowered in lowered_seen:
+            raise _error(code, f"{field_name} contains a case-insensitive duplicate path component.", 409)
+        lowered_seen.add(lowered)
+        if lowered in WINDOWS_RESERVED_NAMES:
+            raise _error(code, f"{field_name} contains a Windows reserved name.", 409)
+        if part.rstrip(" .") != part:
+            raise _error(code, f"{field_name} contains a trailing dot or space component.", 409)
+
+
 def _safe_join(root: Path, relative_path: str, *, field_name: str) -> Path:
     pure = _safe_relative_path(relative_path, field_name=field_name)
+    _validate_windows_safe_components(pure, code="REVISION_STORAGE_INVALID", field_name=field_name)
     resolved_root = root.resolve()
     resolved = (resolved_root / pure).resolve()
     try:
@@ -101,6 +115,7 @@ class WorkflowWritePaths:
     revisions_dir: Path
     groups_dir: Path
     artifacts_dir: Path
+    decisions_dir: Path
 
 
 def workflow_write_paths(project_dir: Path) -> WorkflowWritePaths:
@@ -113,14 +128,19 @@ def workflow_write_paths(project_dir: Path) -> WorkflowWritePaths:
         revisions_dir=workflow_dir / "revisions",
         groups_dir=workflow_dir / "revisions" / "groups",
         artifacts_dir=workflow_dir / "revisions" / "artifacts",
+        decisions_dir=workflow_dir / "revisions" / "decisions",
     )
 
 
-def _artifact_output_exists(project_dir: Path, artifact: dict[str, Any]) -> bool:
+def _artifact_output_exists(project_dir: Path, artifact: dict[str, Any], *, binding: dict[str, Any], definition: dict[str, Any]) -> bool:
     from scripts import channel_prompt_bundle
 
-    artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
-    return not channel_prompt_bundle._artifact_usability_error(artifact_path, artifact["artifact_id"])  # type: ignore[attr-defined]
+    return channel_prompt_bundle._workflow_managed_artifact_is_trusted(  # type: ignore[attr-defined]
+        project_dir=project_dir,
+        artifact=artifact,
+        binding=binding,
+        definition=definition,
+    )
 
 
 def _derive_workflow_progress(project: dict[str, Any], project_dir: Path, definition: dict[str, Any]) -> dict[str, Any]:
@@ -140,10 +160,15 @@ def _derive_workflow_progress(project: dict[str, Any], project_dir: Path, defini
 
     previous_lifecycle_state = definition["entry_lifecycle_state"]
     for index, step in enumerate(steps):
+        binding = project.get("workflow_binding")
+        if not isinstance(binding, dict):
+            raise _error("WORKFLOW_STATE_INVALID", "Project workflow binding is missing for workflow-managed artifact trust checks.", 409)
         outputs_ready = all(
             _artifact_output_exists(
                 project_dir,
                 next(artifact for artifact in definition["artifacts"] if artifact["artifact_id"] == artifact_id),
+                binding=binding,
+                definition=definition,
             )
             for artifact_id in step["output_artifact_ids"]
         )
@@ -253,22 +278,37 @@ def validate_workflow_state_v2(
         unknown_step = set(step_state) - required_step_fields
         if missing_step or unknown_step:
             raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} has invalid fields.", 409)
-        if step_state["status"] != "CANDIDATE":
+        status = step_state["status"]
+        if status not in {"READY", "CANDIDATE", "APPROVED"}:
             raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} has an unsupported v2 status.", 409)
-        if not isinstance(step_state["candidate_group_id"], str) or not step_state["candidate_group_id"].startswith("grp_"):
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} is missing a valid candidate_group_id.", 409)
-        if step_state["approved_group_id"] is not None:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} must not define approved_group_id in Phase 7C2C1.", 409)
-        step_digest = _validate_digest(
-            step_state["candidate_idempotency_sha256"],
-            field_name=f"workflow_state.step_states.{step_id}.candidate_idempotency_sha256",
-            code="WORKFLOW_STATE_INVALID",
-        )
+        candidate_group_id = step_state["candidate_group_id"]
+        approved_group_id = step_state["approved_group_id"]
+        candidate_digest = step_state["candidate_idempotency_sha256"]
+        if status == "READY":
+            if candidate_group_id is not None or approved_group_id is not None or candidate_digest is not None:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state READY step {step_id} must not retain candidate or approved references.", 409)
+            step_digest = None
+        elif status == "CANDIDATE":
+            if not isinstance(candidate_group_id, str) or not candidate_group_id.startswith("grp_"):
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} is missing a valid candidate_group_id.", 409)
+            if approved_group_id is not None:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state for step {step_id} must not define approved_group_id while candidate is active.", 409)
+            step_digest = _validate_digest(
+                candidate_digest,
+                field_name=f"workflow_state.step_states.{step_id}.candidate_idempotency_sha256",
+                code="WORKFLOW_STATE_INVALID",
+            )
+        else:
+            if candidate_group_id is not None or candidate_digest is not None:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state APPROVED step {step_id} must not retain candidate references.", 409)
+            if not isinstance(approved_group_id, str) or not approved_group_id.startswith("grp_"):
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state APPROVED step {step_id} must define a valid approved_group_id.", 409)
+            step_digest = None
         _ensure_iso_timestamp(step_state["updated_at"], f"workflow_state.step_states.{step_id}.updated_at")
         normalized_step_states[step_id] = {
-            "status": "CANDIDATE",
-            "candidate_group_id": step_state["candidate_group_id"],
-            "approved_group_id": None,
+            "status": status,
+            "candidate_group_id": candidate_group_id,
+            "approved_group_id": approved_group_id,
             "candidate_idempotency_sha256": step_digest,
             "updated_at": step_state["updated_at"],
         }
@@ -294,11 +334,12 @@ def validate_workflow_state_v2(
         candidate_revision_id = head["candidate_revision_id"]
         if candidate_revision_id is not None and (not isinstance(candidate_revision_id, str) or not candidate_revision_id.startswith("rev_")):
             raise _error("WORKFLOW_STATE_INVALID", f"workflow_state artifact head for {artifact_id} has an invalid candidate revision id.", 409)
-        if head["approved_revision_id"] is not None:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state artifact head for {artifact_id} must not define approved_revision_id in Phase 7C2C1.", 409)
+        approved_revision_id = head["approved_revision_id"]
+        if approved_revision_id is not None and (not isinstance(approved_revision_id, str) or not approved_revision_id.startswith("rev_")):
+            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state artifact head for {artifact_id} has an invalid approved revision id.", 409)
         normalized_heads[artifact_id] = {
             "candidate_revision_id": candidate_revision_id,
-            "approved_revision_id": None,
+            "approved_revision_id": approved_revision_id,
         }
 
     counters = payload["counters"]
@@ -318,71 +359,106 @@ def validate_workflow_state_v2(
             raise _error("WORKFLOW_STATE_INVALID", f"workflow_state revision counter for {artifact_id} must be a positive integer.", 409)
         normalized_revision_counters[artifact_id] = number
 
+    revision_group_by_artifact_head: dict[tuple[str, str], str] = {}
     for artifact_id, head in normalized_heads.items():
-        revision_id = head["candidate_revision_id"]
-        if revision_id is None:
-            continue
-        revision_dir = workflow_write_paths(project_dir).artifacts_dir / artifact_id / revision_id
-        if not revision_dir.exists():
-            if not require_persisted_targets:
+        for head_field in ("candidate_revision_id", "approved_revision_id"):
+            revision_id = head[head_field]
+            if revision_id is None:
                 continue
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references missing candidate revision {revision_id}.", 409)
-        actual_files = {item.name for item in revision_dir.iterdir()}
-        if actual_files != {"content.md", "metadata.json"}:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references an invalid revision directory for {revision_id}.", 409)
-        metadata_path = revision_dir / "metadata.json"
-        metadata = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message=f"workflow_state references malformed revision metadata for {revision_id}.")
-        _validate_revision_metadata(
-            metadata,
-            artifact_id=artifact_id,
-            revision_id=revision_id,
-            group_id=metadata.get("revision_group_id"),
-            binding=binding,
-        )
+            revision_dir = workflow_write_paths(project_dir).artifacts_dir / artifact_id / revision_id
+            if not revision_dir.exists():
+                if not require_persisted_targets:
+                    continue
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references missing revision {revision_id}.", 409)
+            actual_files = {item.name for item in revision_dir.iterdir()}
+            if actual_files != {"content.md", "metadata.json"}:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references an invalid revision directory for {revision_id}.", 409)
+            metadata_path = revision_dir / "metadata.json"
+            metadata = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message=f"workflow_state references malformed revision metadata for {revision_id}.")
+            _validate_revision_metadata(
+                metadata,
+                artifact_id=artifact_id,
+                revision_id=revision_id,
+                group_id=metadata.get("revision_group_id"),
+                binding=binding,
+            )
+            revision_group_by_artifact_head[(artifact_id, revision_id)] = metadata["revision_group_id"]
 
-    group_dir_map: dict[str, dict[str, Any]] = {}
+    candidate_group_dir_map: dict[str, dict[str, Any]] = {}
+    approved_group_dir_map: dict[str, dict[str, Any]] = {}
     step_output_map = {step["step_id"]: set(step["output_artifact_ids"]) for step in definition["steps"]}
     for step_id, step_state in normalized_step_states.items():
-        group_id = step_state["candidate_group_id"]
-        group_dir = _candidate_group_dir(workflow_write_paths(project_dir), group_id)
-        metadata_path = group_dir / "metadata.json"
-        if not metadata_path.exists():
-            if not require_persisted_targets:
+        for group_field, target_map in (("candidate_group_id", candidate_group_dir_map), ("approved_group_id", approved_group_dir_map)):
+            group_id = step_state[group_field]
+            if group_id is None:
                 continue
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references missing candidate group {group_id}.", 409)
-        actual_group_files = {item.name for item in group_dir.iterdir()}
-        if actual_group_files != {"metadata.json"}:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references an invalid candidate group directory for {group_id}.", 409)
-        group_payload = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message=f"workflow_state references malformed candidate group metadata for {group_id}.")
-        artifact_revision_ids = _validate_group_metadata_for_step(
-            group_payload,
-            group_id=group_id,
-            step_id=step_id,
-            binding=binding,
-            definition=definition,
-        )
-        if set(artifact_revision_ids) != step_output_map[step_id]:
-            raise _error("WORKFLOW_STATE_INVALID", f"workflow_state candidate group {group_id} does not match the workflow step output contract.", 409)
-        group_dir_map[group_id] = artifact_revision_ids
+            group_dir = _candidate_group_dir(workflow_write_paths(project_dir), group_id)
+            metadata_path = group_dir / "metadata.json"
+            if not metadata_path.exists():
+                if not require_persisted_targets:
+                    continue
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references missing candidate group {group_id}.", 409)
+            actual_group_files = {item.name for item in group_dir.iterdir()}
+            if actual_group_files != {"metadata.json"}:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state references an invalid candidate group directory for {group_id}.", 409)
+            group_payload = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message=f"workflow_state references malformed candidate group metadata for {group_id}.")
+            artifact_revision_ids = _validate_group_metadata_for_step(
+                group_payload,
+                group_id=group_id,
+                step_id=step_id,
+                binding=binding,
+                definition=definition,
+            )
+            if set(artifact_revision_ids) != step_output_map[step_id]:
+                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state candidate group {group_id} does not match the workflow step output contract.", 409)
+            target_map[group_id] = artifact_revision_ids
 
     if require_persisted_targets:
-        referenced_artifacts = {
+        candidate_artifacts = {
             artifact_id
-            for artifact_revision_ids in group_dir_map.values()
+            for artifact_revision_ids in candidate_group_dir_map.values()
             for artifact_id in artifact_revision_ids
         }
-        if set(normalized_heads) != referenced_artifacts:
-            raise _error("WORKFLOW_STATE_INVALID", "workflow_state artifact heads do not match the candidate group artifact set.", 409)
+        approved_artifacts = {
+            artifact_id
+            for artifact_revision_ids in approved_group_dir_map.values()
+            for artifact_id in artifact_revision_ids
+        }
+        candidate_head_artifacts = {artifact_id for artifact_id, head in normalized_heads.items() if head["candidate_revision_id"] is not None}
+        approved_head_artifacts = {artifact_id for artifact_id, head in normalized_heads.items() if head["approved_revision_id"] is not None}
+        if candidate_head_artifacts != candidate_artifacts:
+            raise _error("WORKFLOW_STATE_INVALID", "workflow_state candidate heads do not match the candidate group artifact set.", 409)
+        if approved_head_artifacts != approved_artifacts:
+            raise _error("WORKFLOW_STATE_INVALID", "workflow_state approved heads do not match the approved group artifact set.", 409)
         for artifact_id, head in normalized_heads.items():
-            revision_id = head["candidate_revision_id"]
-            if revision_id is None:
-                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state artifact head for {artifact_id} is missing a candidate revision id.", 409)
-            matching_groups = [group_id for group_id, mapping in group_dir_map.items() if mapping.get(artifact_id) == revision_id]
-            if len(matching_groups) != 1:
-                raise _error("WORKFLOW_STATE_INVALID", f"workflow_state artifact head for {artifact_id} does not match a unique candidate group revision.", 409)
+            if head["candidate_revision_id"] is not None:
+                matching_groups = [
+                    group_id
+                    for group_id, mapping in candidate_group_dir_map.items()
+                    if mapping.get(artifact_id) == head["candidate_revision_id"]
+                ]
+                if len(matching_groups) != 1:
+                    raise _error("WORKFLOW_STATE_INVALID", f"workflow_state candidate head for {artifact_id} does not match a unique candidate group revision.", 409)
+            if head["approved_revision_id"] is not None:
+                matching_groups = [
+                    group_id
+                    for group_id, mapping in approved_group_dir_map.items()
+                    if mapping.get(artifact_id) == head["approved_revision_id"]
+                ]
+                if len(matching_groups) != 1:
+                    raise _error("WORKFLOW_STATE_INVALID", f"workflow_state approved head for {artifact_id} does not match a unique approved group revision.", 409)
 
     max_group_number = 0
-    group_ids_for_counter = group_dir_map.keys() if require_persisted_targets else [step_state["candidate_group_id"] for step_state in normalized_step_states.values()]
+    group_ids_for_counter = (
+        [*candidate_group_dir_map.keys(), *approved_group_dir_map.keys()]
+        if require_persisted_targets
+        else [
+            group_id
+            for step_state in normalized_step_states.values()
+            for group_id in (step_state["candidate_group_id"], step_state["approved_group_id"])
+            if group_id is not None
+        ]
+    )
     for group_id in group_ids_for_counter:
         try:
             max_group_number = max(max_group_number, int(group_id.split("_", 1)[1]))
@@ -391,14 +467,30 @@ def validate_workflow_state_v2(
     if counters["next_group_number"] <= max_group_number:
         raise _error("WORKFLOW_STATE_INVALID", "workflow_state next_group_number must be greater than all allocated group ids.", 409)
     for artifact_id, number in normalized_revision_counters.items():
-        revision_dirs = workflow_write_paths(project_dir).artifacts_dir / artifact_id
         max_revision_number = 0
-        if revision_dirs.exists():
-            for child in revision_dirs.iterdir():
-                if not child.is_dir():
-                    raise _error("WORKFLOW_STATE_INVALID", f"workflow_state revision storage for {artifact_id} is invalid.", 409)
+        if require_persisted_targets:
+            revision_dirs = workflow_write_paths(project_dir).artifacts_dir / artifact_id
+            if revision_dirs.exists():
+                for child in revision_dirs.iterdir():
+                    if not child.is_dir():
+                        raise _error("WORKFLOW_STATE_INVALID", f"workflow_state revision storage for {artifact_id} is invalid.", 409)
+                    try:
+                        max_revision_number = max(max_revision_number, int(child.name.split("_", 1)[1]))
+                    except Exception as exc:
+                        raise _error("WORKFLOW_STATE_INVALID", f"workflow_state revision id for {artifact_id} is malformed.", 409) from exc
+        else:
+            head = normalized_heads.get(
+                artifact_id,
+                {"candidate_revision_id": None, "approved_revision_id": None},
+            )
+            for revision_id in (
+                head["candidate_revision_id"],
+                head["approved_revision_id"],
+            ):
+                if revision_id is None:
+                    continue
                 try:
-                    max_revision_number = max(max_revision_number, int(child.name.split("_", 1)[1]))
+                    max_revision_number = max(max_revision_number, int(revision_id.split("_", 1)[1]))
                 except Exception as exc:
                     raise _error("WORKFLOW_STATE_INVALID", f"workflow_state revision id for {artifact_id} is malformed.", 409) from exc
         if number <= max_revision_number:
@@ -552,6 +644,44 @@ def build_read_state_model(
     if current_step_state and current_step_state.get("status") == "CANDIDATE":
         current_step_status = "CANDIDATE"
 
+    step_summaries: dict[str, Any] = {}
+    for step in steps:
+        step_state = step_states_for_view.get(step["step_id"], {})
+        candidate_group_summary = None
+        approved_group_summary = None
+        if isinstance(step_state, dict) and step_state.get("candidate_group_id"):
+            candidate_group_summary = _load_group_summary(workflow_write_paths(project_dir), step_state["candidate_group_id"])
+        if isinstance(step_state, dict) and step_state.get("approved_group_id"):
+            approved_group_summary = _load_group_summary(workflow_write_paths(project_dir), step_state["approved_group_id"])
+        if step_state.get("status") == "APPROVED":
+            step_status = "APPROVED"
+        elif step_state.get("status") == "CANDIDATE":
+            step_status = "CANDIDATE"
+        elif step_state.get("status") == "READY":
+            step_status = "READY"
+        elif progress["current_step_id"] == step["step_id"]:
+            step_status = current_step_status
+        else:
+            all_outputs_ready = all(
+                _artifact_output_exists(
+                    project_dir,
+                    next(artifact for artifact in definition["artifacts"] if artifact["artifact_id"] == artifact_id),
+                    binding=binding,
+                    definition=definition,
+                )
+                for artifact_id in step["output_artifact_ids"]
+            )
+            step_status = "APPROVED" if all_outputs_ready else "BLOCKED"
+        step_summaries[step["step_id"]] = {
+            "step_id": step["step_id"],
+            "status": step_status,
+            "candidate_group_id": step_state.get("candidate_group_id") if isinstance(step_state, dict) else None,
+            "approved_group_id": step_state.get("approved_group_id") if isinstance(step_state, dict) else None,
+            "candidate_group": candidate_group_summary,
+            "approved_group": approved_group_summary,
+            "candidate_idempotency_sha256": step_state.get("candidate_idempotency_sha256") if isinstance(step_state, dict) else None,
+        }
+
     available_actions: dict[str, Any] = {}
     for step in steps:
         step_id = step["step_id"]
@@ -559,12 +689,12 @@ def build_read_state_model(
         save_candidate = (
             progress["current_step_id"] == step_id
             and current_step_status == "READY"
-            and candidate is None
+            and not (candidate and candidate.get("status") == "CANDIDATE")
         )
         available_actions[step_id] = {
             "save_candidate": bool(save_candidate),
-            "approve_candidate": False,
-            "reject_candidate": False,
+            "approve_candidate": bool(candidate and candidate.get("status") == "CANDIDATE"),
+            "reject_candidate": bool(candidate and candidate.get("status") == "CANDIDATE"),
         }
 
     return {
@@ -578,7 +708,7 @@ def build_read_state_model(
         "current_step_status": current_step_status,
         "next_step_id": progress["next_step_id"],
         "blocking_reason": progress["blocking_reason"],
-        "step_states": step_states_for_view,
+        "step_states": step_summaries,
         "artifact_heads": artifact_heads_for_view,
         "available_actions": available_actions,
     }
@@ -592,6 +722,7 @@ def load_workflow_state_for_read(
     definition: dict[str, Any],
 ) -> dict[str, Any]:
     paths = workflow_write_paths(project_dir)
+    assert_no_pending_read_transaction(project_dir=project_dir)
     if not paths.workflow_state_json.exists():
         return build_read_state_model(
             project=project,
@@ -675,6 +806,12 @@ def _validate_expected_state_revision(value: Any) -> int:
     return value
 
 
+def _validate_group_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.startswith("grp_"):
+        raise _error("CANDIDATE_NOT_FOUND", "candidate_group_id must be a valid group id.", 400)
+    return value
+
+
 def _validate_output_artifact_storage(output_artifact_ids: list[str]) -> None:
     lowered: set[str] = set()
     for artifact_id in output_artifact_ids:
@@ -686,6 +823,30 @@ def _validate_output_artifact_storage(output_artifact_ids: list[str]) -> None:
         lowered.add(lowered_id)
         if lowered_id in WINDOWS_RESERVED_NAMES:
             raise _error("REVISION_STORAGE_INVALID", f"Output artifact id {artifact_id} is not Windows-safe.", 409)
+
+
+def _validate_stable_artifact_target_paths(
+    *,
+    project_dir: Path,
+    definition: dict[str, Any],
+    artifact_ids: list[str],
+) -> dict[str, Path]:
+    artifact_map = {artifact["artifact_id"]: artifact for artifact in definition["artifacts"]}
+    final_paths: dict[str, Path] = {}
+    lowered_paths: set[str] = set()
+    for artifact_id in artifact_ids:
+        artifact = artifact_map.get(artifact_id)
+        if artifact is None:
+            raise _error("STABLE_ARTIFACT_PATH_INVALID", f"Artifact {artifact_id} is not part of the workflow definition.", 409)
+        pure = _safe_relative_path(artifact["relative_path"], field_name=f"artifacts.{artifact_id}.relative_path")
+        _validate_windows_safe_components(pure, code="STABLE_ARTIFACT_PATH_INVALID", field_name=f"artifacts.{artifact_id}.relative_path")
+        lowered_path = pure.as_posix().lower()
+        if lowered_path in lowered_paths:
+            raise _error("STABLE_ARTIFACT_PATH_INVALID", "Stable artifact paths collide on a case-insensitive filesystem.", 409)
+        lowered_paths.add(lowered_path)
+        final_path = _safe_join(project_dir, pure.as_posix(), field_name=f"artifacts.{artifact_id}.relative_path")
+        final_paths[artifact_id] = final_path
+    return final_paths
 
 
 @dataclass(frozen=True)
@@ -760,10 +921,16 @@ def _expected_relative_files_for_target(target: dict[str, Any]) -> set[str]:
         return {"content.md", "metadata.json"}
     if target["kind"] == "REVISION_GROUP_METADATA":
         return {"metadata.json"}
+    if target["kind"] == "DECISION_RECORD":
+        return {relative_path.name}
+    if target["kind"] == "STABLE_ARTIFACT":
+        return {relative_path.name}
     raise _error("WORKFLOW_RECOVERY_REQUIRED", "Transaction manifest target kind is unsupported.", 409)
 
 
 def _validate_immutable_target_directory(final_path: Path, target: dict[str, Any]) -> None:
+    if target["kind"] not in {"ARTIFACT_REVISION_CONTENT", "ARTIFACT_REVISION_METADATA", "REVISION_GROUP_METADATA"}:
+        return
     target_dir = final_path.parent
     if not target_dir.exists():
         return
@@ -812,6 +979,61 @@ def _validate_group_metadata_for_step(
     return artifact_revision_ids
 
 
+def _validate_decision_record(
+    payload: dict[str, Any],
+    *,
+    group_id: str,
+    step_id: str,
+    action: str | None = None,
+    binding: dict[str, Any],
+    definition: dict[str, Any],
+) -> dict[str, Any]:
+    required = {
+        "schema_version",
+        "decision_id",
+        "revision_group_id",
+        "step_id",
+        "action",
+        "workflow_id",
+        "workflow_version",
+        "workflow_definition_sha256",
+        "artifact_revision_ids",
+        "base_state_revision",
+        "target_state_revision",
+        "decided_at",
+        "decided_by",
+    }
+    if set(payload) != required:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record fields are invalid.", 409)
+    if payload["schema_version"] != 1:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record schema_version is unsupported.", 409)
+    if payload["decision_id"] != f"decision_{group_id}":
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record id is inconsistent.", 409)
+    if payload["revision_group_id"] != group_id or payload["step_id"] != step_id:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record does not match the workflow step candidate group.", 409)
+    if payload["action"] not in {"APPROVE", "REJECT"}:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record action is unsupported.", 409)
+    if action is not None and payload["action"] != action:
+        raise _error("CANDIDATE_DECISION_CONFLICT", "The candidate group already has the opposite final decision.", 409)
+    if payload["workflow_id"] != binding["workflow_id"] or payload["workflow_version"] != binding["workflow_version"]:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record workflow binding does not match the project binding.", 409)
+    if payload["workflow_definition_sha256"] != binding["workflow_definition_sha256"]:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record workflow digest does not match the project binding.", 409)
+    if not isinstance(payload["artifact_revision_ids"], dict) or not payload["artifact_revision_ids"]:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record artifact revision map is invalid.", 409)
+    expected_artifacts = next(step for step in definition["steps"] if step["step_id"] == step_id)["output_artifact_ids"]
+    if set(payload["artifact_revision_ids"]) != set(expected_artifacts):
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record artifact map does not match the workflow step output contract.", 409)
+    if not isinstance(payload["base_state_revision"], int) or payload["base_state_revision"] < 0:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record base_state_revision is invalid.", 409)
+    if not isinstance(payload["target_state_revision"], int) or payload["target_state_revision"] < payload["base_state_revision"]:
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record target_state_revision is invalid.", 409)
+    _ensure_iso_timestamp(payload["decided_at"], "decision_record.decided_at")
+    if not isinstance(payload["decided_by"], str) or not payload["decided_by"].strip():
+        raise _error("WORKFLOW_STATE_INVALID", "Decision record decided_by is required.", 409)
+    return payload
+
+
 def _validate_revision_metadata(
     metadata: dict[str, Any],
     *,
@@ -837,10 +1059,11 @@ def _validate_revision_metadata(
 def _published_target_state(
     *,
     paths: WorkflowWritePaths,
+    project_dir: Path,
     txn_dir: Path,
     target: dict[str, Any],
 ) -> str:
-    final_path = paths.workflow_dir / PurePosixPath(target["relative_path"])
+    final_path = _transaction_target_final_path(paths=paths, project_dir=project_dir, target=target)
     staged_path = txn_dir / "staged" / PurePosixPath(target["relative_path"])
     expected_hash = target["sha256"]
     if final_path.exists():
@@ -869,7 +1092,11 @@ def classify_transaction_state(
         if staged_root.exists() or (txn_dir / "next_workflow_state.json").exists():
             return "STAGING_INCOMPLETE"
         return "AMBIGUOUS"
-    manifest = _validate_transaction_manifest(_load_json_file(manifest_path, code="WORKFLOW_RECOVERY_REQUIRED", message="Transaction manifest is malformed."), paths.workflow_dir)
+    manifest = _validate_transaction_manifest(
+        _load_json_file(manifest_path, code="WORKFLOW_RECOVERY_REQUIRED", message="Transaction manifest is malformed."),
+        paths=paths,
+        project_dir=project_dir,
+    )
     next_state_path = txn_dir / "next_workflow_state.json"
     if not next_state_path.exists():
         return "STAGING_INCOMPLETE"
@@ -884,11 +1111,20 @@ def classify_transaction_state(
         project_dir=project_dir,
         require_persisted_targets=False,
     )
-    target_states = [_published_target_state(paths=paths, txn_dir=txn_dir, target=target) for target in manifest["targets"]]
+    target_states = [
+        _published_target_state(paths=paths, project_dir=project_dir, txn_dir=txn_dir, target=target)
+        for target in manifest["targets"]
+    ]
     state_payload = _load_state_payload_for_write(paths)
     current_revision = 0
     if state_payload is not None and state_payload.get("schema_version") == 2:
-        current_revision = validate_workflow_state_v2(state_payload, binding=binding, definition=definition, project_dir=project_dir)["state_revision"]
+        current_revision = validate_workflow_state_v2(
+            state_payload,
+            binding=binding,
+            definition=definition,
+            project_dir=project_dir,
+            require_persisted_targets=False,
+        )["state_revision"]
     elif state_payload is not None and state_payload.get("schema_version") == 1:
         current_revision = 0
     if all(item == "STAGED" for item in target_states):
@@ -904,6 +1140,18 @@ def classify_transaction_state(
     if any(item == "FINAL" for item in target_states) and any(item == "STAGED" for item in target_states):
         return "PARTIALLY_PUBLISHED"
     return "AMBIGUOUS"
+
+
+def assert_no_pending_read_transaction(
+    *,
+    project_dir: Path,
+) -> None:
+    paths = workflow_write_paths(project_dir)
+    if not paths.transactions_dir.exists():
+        return
+    pending = [item for item in sorted(paths.transactions_dir.glob("txn_*")) if item.is_dir()]
+    if pending:
+        raise _error("WORKFLOW_RECOVERY_REQUIRED", "An incomplete workflow transaction requires review before continuing.", 409)
 
 
 def _candidate_group_dir(paths: WorkflowWritePaths, group_id: str) -> Path:
@@ -950,6 +1198,26 @@ def _load_group_summary(paths: WorkflowWritePaths, group_id: str) -> dict[str, A
     }
 
 
+def _decision_record_path(paths: WorkflowWritePaths, group_id: str) -> Path:
+    return paths.decisions_dir / f"{group_id}.json"
+
+
+def _load_decision_record(
+    paths: WorkflowWritePaths,
+    *,
+    group_id: str,
+    step_id: str,
+    action: str | None,
+    binding: dict[str, Any],
+    definition: dict[str, Any],
+) -> dict[str, Any] | None:
+    decision_path = _decision_record_path(paths, group_id)
+    if not decision_path.exists():
+        return None
+    payload = _load_json_file(decision_path, code="WORKFLOW_STATE_INVALID", message="The saved decision record is malformed.")
+    return _validate_decision_record(payload, group_id=group_id, step_id=step_id, action=action, binding=binding, definition=definition)
+
+
 def _build_candidate_response(
     *,
     channel_slug: str,
@@ -974,6 +1242,25 @@ def _build_candidate_response(
         "state_revision": state_revision,
         "revision_group": group_summary,
     }
+
+
+def _build_decision_response(
+    *,
+    status: str,
+    idempotent_replay: bool,
+    state_revision: int,
+    group_id: str,
+    artifacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload = {
+        "status": status,
+        "idempotent_replay": idempotent_replay,
+        "state_revision": state_revision,
+        "revision_group_id": group_id,
+    }
+    if artifacts is not None:
+        payload["artifacts"] = artifacts
+    return payload
 
 
 def _load_state_payload_for_write(paths: WorkflowWritePaths) -> dict[str, Any] | None:
@@ -1064,12 +1351,67 @@ def _validate_step_writable(
     return state_view
 
 
+def _load_decidable_step_context(
+    *,
+    paths: WorkflowWritePaths,
+    binding: dict[str, Any],
+    definition: dict[str, Any],
+    step_id: str,
+    state_payload: dict[str, Any] | None,
+    state_view: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, str]]:
+    step_state = state_view["step_states"].get(step_id)
+    if not isinstance(step_state, dict):
+        raise _error("WORKFLOW_STEP_NOT_DECIDABLE", "The selected workflow step is not currently decidable.", 409)
+    status = step_state.get("status")
+    if status == "CANDIDATE":
+        group_id = step_state.get("candidate_group_id")
+    elif status == "APPROVED":
+        group_id = step_state.get("approved_group_id")
+    else:
+        raise _error("WORKFLOW_STEP_NOT_DECIDABLE", "The selected workflow step is not currently decidable.", 409)
+    if not isinstance(group_id, str) or not group_id.startswith("grp_"):
+        raise _error("CANDIDATE_NOT_FOUND", "The selected workflow step has no valid candidate group.", 409)
+    group_path = _candidate_group_dir(paths, group_id) / "metadata.json"
+    if not group_path.exists():
+        raise _error("CANDIDATE_NOT_FOUND", "The selected candidate group could not be found.", 409)
+    group_payload = _load_json_file(group_path, code="WORKFLOW_STATE_INVALID", message="The candidate group metadata is malformed.")
+    artifact_revision_ids = _validate_group_metadata_for_step(
+        group_payload,
+        group_id=group_id,
+        step_id=step_id,
+        binding=binding,
+        definition=definition,
+    )
+    for artifact_id, revision_id in artifact_revision_ids.items():
+        metadata_path = _candidate_revision_dir(paths, artifact_id, revision_id) / "metadata.json"
+        content_path = _candidate_revision_dir(paths, artifact_id, revision_id) / "content.md"
+        if not metadata_path.exists() or not content_path.exists():
+            raise _error("CANDIDATE_NOT_FOUND", "The selected candidate revision could not be found.", 409)
+        metadata = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message="The candidate revision metadata is malformed.")
+        _validate_revision_metadata(
+            metadata,
+            artifact_id=artifact_id,
+            revision_id=revision_id,
+            group_id=group_id,
+            binding=binding,
+        )
+        if _sha256_bytes(content_path.read_bytes()) != metadata["content_sha256"]:
+            raise _error("WORKFLOW_STATE_INVALID", "The candidate revision content hash does not match its metadata.", 409)
+    return step_state, group_payload, artifact_revision_ids
+
+
 def _maybe_fail(stage: str, fail_stage: str | None) -> None:
     if fail_stage == stage:
         raise _error("WORKFLOW_WRITE_FAILED", f"Injected failure at stage: {stage}", 500)
 
 
-def _validate_transaction_manifest(manifest: dict[str, Any], workflow_dir: Path) -> dict[str, Any]:
+def _validate_transaction_manifest(
+    manifest: dict[str, Any],
+    *,
+    paths: WorkflowWritePaths,
+    project_dir: Path,
+) -> dict[str, Any]:
     required = {"schema_version", "transaction_id", "operation", "base_state_revision", "target_state_revision", "revision_group_id", "targets", "next_state_sha256", "created_at"}
     if not isinstance(manifest, dict) or required - set(manifest):
         raise _error("WORKFLOW_RECOVERY_REQUIRED", "Transaction manifest is malformed.", 409)
@@ -1087,9 +1429,21 @@ def _validate_transaction_manifest(manifest: dict[str, Any], workflow_dir: Path)
         relative_path = item.get("relative_path")
         if not isinstance(relative_path, str):
             raise _error("WORKFLOW_RECOVERY_REQUIRED", "Transaction manifest target path is missing.", 409)
-        _safe_join(workflow_dir, relative_path, field_name=f"transaction_manifest.targets[{index}].relative_path")
+        _transaction_target_final_path(paths=paths, project_dir=project_dir, target=item)
         _validate_digest(item.get("sha256"), field_name=f"transaction_manifest.targets[{index}].sha256", code="WORKFLOW_RECOVERY_REQUIRED")
     return manifest
+
+
+def _transaction_target_final_path(
+    *,
+    paths: WorkflowWritePaths,
+    project_dir: Path,
+    target: dict[str, Any],
+) -> Path:
+    relative_path = target["relative_path"]
+    if target.get("kind") == "STABLE_ARTIFACT":
+        return _safe_join(project_dir, relative_path, field_name="transaction_manifest.targets[].relative_path")
+    return _safe_join(paths.workflow_dir, relative_path, field_name="transaction_manifest.targets[].relative_path")
 
 
 def _copy_staged_file_to_final(staged_path: Path, final_path: Path) -> None:
@@ -1122,14 +1476,21 @@ def _recover_transactions(
 
         manifest = _validate_transaction_manifest(
             _load_json_file(txn_dir / "manifest.json", code="WORKFLOW_RECOVERY_REQUIRED", message="Transaction manifest is malformed."),
-            paths.workflow_dir,
+            paths=paths,
+            project_dir=project_dir,
         )
         state_payload = _load_state_payload_for_write(paths)
         current_revision = 0
         if state_payload is not None:
             schema_version = state_payload.get("schema_version")
             if schema_version == 2:
-                current_revision = validate_workflow_state_v2(state_payload, binding=binding, definition=definition, project_dir=project_dir)["state_revision"]
+                current_revision = validate_workflow_state_v2(
+                    state_payload,
+                    binding=binding,
+                    definition=definition,
+                    project_dir=project_dir,
+                    require_persisted_targets=False,
+                )["state_revision"]
             elif schema_version == 1:
                 current_revision = 0
         target_group_id = manifest["revision_group_id"]
@@ -1152,7 +1513,7 @@ def _recover_transactions(
         )
 
         for target in manifest["targets"]:
-            final_path = paths.workflow_dir / PurePosixPath(target["relative_path"])
+            final_path = _transaction_target_final_path(paths=paths, project_dir=project_dir, target=target)
             if final_path.exists():
                 continue
             staged_path = txn_dir / "staged" / PurePosixPath(target["relative_path"])
@@ -1217,18 +1578,8 @@ def save_candidate(
             definition=definition,
             project_dir=project_dir,
         )
-        if expected_revision != current_state_revision:
-            raise _error("STATE_REVISION_CONFLICT", "The workflow state changed before the candidate save completed.", 409)
-
-        state_view = build_read_state_model(
-            project=project,
-            project_dir=project_dir,
-            binding=binding,
-            definition=definition,
-            state_payload=state_payload,
-        )
-        existing_step_state = state_view["step_states"].get(step_id)
-        if existing_step_state is not None:
+        existing_step_state = state_for_write["step_states"].get(step_id)
+        if existing_step_state is not None and existing_step_state.get("status") == "CANDIDATE":
             if existing_step_state.get("candidate_idempotency_sha256") == idempotency_sha256:
                 group_summary = _load_group_summary(paths, existing_step_state["candidate_group_id"])
                 return 200, _build_candidate_response(
@@ -1242,6 +1593,8 @@ def save_candidate(
                     idempotent_replay=True,
                 )
             raise _error("CANDIDATE_EXISTS", "A different candidate already exists for this workflow step.", 409)
+        if expected_revision != current_state_revision:
+            raise _error("STATE_REVISION_CONFLICT", "The workflow state changed before the candidate save completed.", 409)
         _validate_step_writable(
             project=project,
             project_dir=project_dir,
@@ -1437,3 +1790,313 @@ def save_candidate(
         raise _error("WORKFLOW_WRITE_FAILED", "The candidate workflow write could not be completed safely.", 500) from exc
     finally:
         _release_lock(lock_handle)
+
+
+def _stable_publication_targets(
+    *,
+    project_dir: Path,
+    definition: dict[str, Any],
+    artifact_revision_ids: dict[str, str],
+    paths: WorkflowWritePaths,
+    allow_existing_exact: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    final_paths = _validate_stable_artifact_target_paths(project_dir=project_dir, definition=definition, artifact_ids=list(artifact_revision_ids))
+    targets: list[dict[str, Any]] = []
+    artifact_summaries: list[dict[str, Any]] = []
+    for artifact_id, revision_id in artifact_revision_ids.items():
+        revision_dir = _candidate_revision_dir(paths, artifact_id, revision_id)
+        content_path = revision_dir / "content.md"
+        metadata_path = revision_dir / "metadata.json"
+        metadata = _load_json_file(metadata_path, code="WORKFLOW_STATE_INVALID", message="Candidate revision metadata is malformed.")
+        content_bytes = content_path.read_bytes()
+        final_path = final_paths[artifact_id]
+        if final_path.exists() and not allow_existing_exact:
+            raise _error("STABLE_ARTIFACT_CONFLICT", "A stable artifact already exists for this workflow output.", 409)
+        targets.append(
+            {
+                "kind": "STABLE_ARTIFACT",
+                "relative_path": str(final_path.relative_to(project_dir)).replace("\\", "/"),
+                "sha256": _sha256_bytes(content_bytes),
+                "source_revision_path": revision_dir / "content.md",
+            }
+        )
+        artifact_summaries.append(
+            {
+                "artifact_id": artifact_id,
+                "revision_id": revision_id,
+                "content_sha256": metadata["content_sha256"],
+                "character_count": metadata["character_count"],
+            }
+        )
+    return targets, artifact_summaries
+
+
+def _decision_response_status(action: str, *, replay: bool) -> str:
+    if action == "APPROVE":
+        return "CANDIDATE_ALREADY_APPROVED" if replay else "CANDIDATE_APPROVED"
+    return "CANDIDATE_ALREADY_REJECTED" if replay else "CANDIDATE_REJECTED"
+
+
+def decide_candidate(
+    root: Path | str,
+    channel_slug: str,
+    project_slug: str,
+    step_id: str,
+    candidate_group_id: Any,
+    expected_state_revision: Any,
+    *,
+    action: str,
+    fail_stage: str | None = None,
+    publish_log: list[str] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    from scripts import channel_projects, channel_workflow
+
+    if action not in {"APPROVE", "REJECT"}:
+        raise _error("INVALID_REQUEST", "Unsupported decision action.", 400)
+    requested_group_id = _validate_group_id(candidate_group_id)
+    expected_revision = _validate_expected_state_revision(expected_state_revision)
+    project = channel_projects.load_channel_project(root, channel_slug, project_slug)
+    project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+    binding = channel_workflow.resolve_project_workflow_binding(root, channel_slug, project)
+    definition = channel_workflow.load_workflow_definition(root, binding["workflow_id"], binding["workflow_version"])
+    step = next((item for item in definition["steps"] if item["step_id"] == step_id), None)
+    if step is None:
+        raise _error("WORKFLOW_STEP_NOT_FOUND", "The selected workflow step was not found for this project binding.", 404)
+    prompt_set = definition["prompt_set"]
+    if prompt_set.get("status") != "AVAILABLE" or not prompt_set.get("bundle_available"):
+        raise _error("PROMPT_SET_UNAVAILABLE", "The pinned workflow version does not expose an available prompt set.", 409)
+
+    paths = workflow_write_paths(project_dir)
+    transaction_id = f"txn_{_sha256_text(json.dumps({'action': action, 'channel_slug': channel_slug, 'project_slug': project_slug, 'step_id': step_id, 'candidate_group_id': requested_group_id}, sort_keys=True, separators=(',', ':')))[:16].lower()}"
+    lock_handle: LockHandle | None = None
+    try:
+        lock_handle = _acquire_lock(paths.lock_file, transaction_id=transaction_id, operation=f"{action}_CANDIDATE")
+        _recover_transactions(paths=paths, binding=binding, definition=definition, project_dir=project_dir)
+
+        state_payload = _load_state_payload_for_write(paths)
+        state_for_write, current_state_revision = _load_state_for_write(
+            paths=paths,
+            binding=binding,
+            definition=definition,
+            project_dir=project_dir,
+        )
+        state_view = build_read_state_model(
+            project=project,
+            project_dir=project_dir,
+            binding=binding,
+            definition=definition,
+            state_payload=state_payload,
+        )
+
+        existing_decision = _load_decision_record(
+            paths,
+            group_id=requested_group_id,
+            step_id=step_id,
+            action=None,
+            binding=binding,
+            definition=definition,
+        )
+        if existing_decision is not None:
+            if existing_decision["action"] != action:
+                raise _error("CANDIDATE_DECISION_CONFLICT", "The candidate group already has the opposite final decision.", 409)
+            return 200, _build_decision_response(
+                status=_decision_response_status(action, replay=True),
+                idempotent_replay=True,
+                state_revision=current_state_revision,
+                group_id=requested_group_id,
+                artifacts=None if action == "REJECT" else _load_group_summary(paths, requested_group_id)["artifacts"],
+            )
+
+        if expected_revision != current_state_revision:
+            raise _error("STATE_REVISION_CONFLICT", "The workflow state changed before the candidate decision completed.", 409)
+
+        step_state, group_payload, artifact_revision_ids = _load_decidable_step_context(
+            paths=paths,
+            binding=binding,
+            definition=definition,
+            step_id=step_id,
+            state_payload=state_payload,
+            state_view=state_view,
+        )
+        if step_state.get("status") != "CANDIDATE":
+            raise _error("WORKFLOW_STEP_NOT_DECIDABLE", "The selected workflow step is not currently in candidate state.", 409)
+        if step_state.get("candidate_group_id") != requested_group_id:
+            raise _error("CANDIDATE_GROUP_MISMATCH", "The requested candidate group is not the current candidate for this workflow step.", 409)
+        if any(head.get("approved_revision_id") is not None for artifact_id, head in state_for_write["artifact_heads"].items() if artifact_id in artifact_revision_ids):
+            raise _error("CANDIDATE_ALREADY_DECIDED", "This workflow step already has approved artifact heads.", 409)
+
+        now = utc_now_iso()
+        decision_record = {
+            "schema_version": 1,
+            "decision_id": f"decision_{requested_group_id}",
+            "revision_group_id": requested_group_id,
+            "step_id": step_id,
+            "action": action,
+            "workflow_id": binding["workflow_id"],
+            "workflow_version": binding["workflow_version"],
+            "workflow_definition_sha256": binding["workflow_definition_sha256"],
+            "artifact_revision_ids": artifact_revision_ids,
+            "base_state_revision": current_state_revision,
+            "target_state_revision": current_state_revision + 1,
+            "decided_at": now,
+            "decided_by": "ui_approve_candidate" if action == "APPROVE" else "ui_reject_candidate",
+        }
+        decision_rel = f"revisions/decisions/{requested_group_id}.json"
+
+        next_state = json.loads(json.dumps(state_for_write))
+        next_state["state_revision"] = current_state_revision + 1
+        next_state["updated_at"] = now
+
+        stable_targets: list[dict[str, Any]] = []
+        artifact_summaries: list[dict[str, Any]] | None = None
+        if action == "APPROVE":
+            stable_targets, artifact_summaries = _stable_publication_targets(
+                project_dir=project_dir,
+                definition=definition,
+                artifact_revision_ids=artifact_revision_ids,
+                paths=paths,
+                allow_existing_exact=False,
+            )
+            next_state["step_states"][step_id] = {
+                "status": "APPROVED",
+                "candidate_group_id": None,
+                "approved_group_id": requested_group_id,
+                "candidate_idempotency_sha256": None,
+                "updated_at": now,
+            }
+            for artifact_id, revision_id in artifact_revision_ids.items():
+                next_state["artifact_heads"][artifact_id] = {
+                    "candidate_revision_id": None,
+                    "approved_revision_id": revision_id,
+                }
+        else:
+            next_state["step_states"][step_id] = {
+                "status": "READY",
+                "candidate_group_id": None,
+                "approved_group_id": None,
+                "candidate_idempotency_sha256": None,
+                "updated_at": now,
+            }
+            for artifact_id in artifact_revision_ids:
+                next_state["artifact_heads"].pop(artifact_id, None)
+
+        validate_workflow_state_v2(next_state, binding=binding, definition=definition, project_dir=project_dir, require_persisted_targets=False)
+        next_state_bytes = _json_bytes(next_state)
+
+        transaction_dir = paths.transactions_dir / transaction_id
+        if transaction_dir.exists():
+            shutil.rmtree(transaction_dir, ignore_errors=True)
+        transaction_dir.mkdir(parents=True, exist_ok=False)
+        staged_root = transaction_dir / "staged"
+
+        _maybe_fail("before_decision_staging_complete", fail_stage)
+        for target in stable_targets:
+            source_path = target["source_revision_path"]
+            _write_staged_file(staged_root / PurePosixPath(target["relative_path"]), source_path.read_bytes())
+        _write_staged_file(staged_root / PurePosixPath(decision_rel), _json_bytes(decision_record))
+        _write_staged_file(transaction_dir / "next_workflow_state.json", next_state_bytes)
+        manifest = {
+            "schema_version": SUPPORTED_TRANSACTION_MANIFEST_SCHEMA_VERSION,
+            "transaction_id": transaction_id,
+            "operation": f"{action}_CANDIDATE",
+            "base_state_revision": current_state_revision,
+            "target_state_revision": next_state["state_revision"],
+            "revision_group_id": requested_group_id,
+            "targets": [
+                *[
+                    {
+                        "kind": "STABLE_ARTIFACT",
+                        "relative_path": target["relative_path"],
+                        "sha256": target["sha256"],
+                    }
+                    for target in stable_targets
+                ],
+                {"kind": "DECISION_RECORD", "relative_path": decision_rel, "sha256": _sha256_bytes(_json_bytes(decision_record))},
+            ],
+            "next_state_sha256": _sha256_bytes(next_state_bytes),
+            "created_at": now,
+        }
+        _write_staged_file(transaction_dir / "manifest.json", _json_bytes(manifest))
+
+        published_stable_count = 0
+        for target in stable_targets:
+            final_path = project_dir / PurePosixPath(target["relative_path"])
+            staged_path = staged_root / PurePosixPath(target["relative_path"])
+            _copy_staged_file_to_final(staged_path, final_path)
+            published_stable_count += 1
+            if publish_log is not None:
+                publish_log.append(f"stable:{target['relative_path']}")
+            if published_stable_count == 1:
+                _maybe_fail("after_one_stable_artifact_published", fail_stage)
+        if action == "APPROVE":
+            _maybe_fail("after_all_stable_artifacts_before_decision", fail_stage)
+        decision_final_path = paths.workflow_dir / PurePosixPath(decision_rel)
+        decision_staged_path = staged_root / PurePosixPath(decision_rel)
+        _copy_staged_file_to_final(decision_staged_path, decision_final_path)
+        if publish_log is not None:
+            publish_log.append(f"decision:{decision_rel}")
+        _maybe_fail("after_decision_before_state", fail_stage)
+        _write_bytes_atomic(paths.workflow_state_json, next_state_bytes)
+        if publish_log is not None:
+            publish_log.append("state:workflow/workflow_state.json")
+        _maybe_fail("after_state_before_cleanup", fail_stage)
+        shutil.rmtree(transaction_dir, ignore_errors=True)
+        if publish_log is not None:
+            publish_log.append("cleanup:workflow/_transactions")
+        return 200, _build_decision_response(
+            status=_decision_response_status(action, replay=False),
+            idempotent_replay=False,
+            state_revision=next_state["state_revision"],
+            group_id=requested_group_id,
+            artifacts=artifact_summaries,
+        )
+    finally:
+        _release_lock(lock_handle)
+
+
+def approve_candidate(
+    root: Path | str,
+    channel_slug: str,
+    project_slug: str,
+    step_id: str,
+    candidate_group_id: Any,
+    expected_state_revision: Any,
+    *,
+    fail_stage: str | None = None,
+    publish_log: list[str] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    return decide_candidate(
+        root,
+        channel_slug,
+        project_slug,
+        step_id,
+        candidate_group_id,
+        expected_state_revision,
+        action="APPROVE",
+        fail_stage=fail_stage,
+        publish_log=publish_log,
+    )
+
+
+def reject_candidate(
+    root: Path | str,
+    channel_slug: str,
+    project_slug: str,
+    step_id: str,
+    candidate_group_id: Any,
+    expected_state_revision: Any,
+    *,
+    fail_stage: str | None = None,
+    publish_log: list[str] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    return decide_candidate(
+        root,
+        channel_slug,
+        project_slug,
+        step_id,
+        candidate_group_id,
+        expected_state_revision,
+        action="REJECT",
+        fail_stage=fail_stage,
+        publish_log=publish_log,
+    )
