@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7C2C2 - Candidate Approval, Rejection, Stable Publication, and Scaffold/Trust-Rule Closure
+Phase 7C2C3A - Replacement Candidate, Replacement Approval, and Downstream Stale Propagation
 
 ## Phase Status
 COMPLETE
@@ -63,6 +63,44 @@ MVP_ACCEPTED
 - Phase 7C2B: pasted AI output intake, zero-write output parser, structural validation, and in-memory parsed artifact preview completed locally without runtime mutation
 - Phase 7C2C1: candidate-only workflow write path, persisted workflow state v2, immutable revision/group storage, per-project transaction locking, recovery-aware candidate commit, Save Candidate API, and minimal Save Candidate UI completed locally without runtime mutation
 - Phase 7C2C2: approval/rejection write path, stable publication gate, no-placeholder-overwrite rule, workflow-generated output scaffold removal, approved-state trust enforcement, and recovery verification completed locally without runtime mutation
+- Phase 7C2C3A: workflow-state schema v3, write-time v2-to-v3 replacement conversion, approved-plus-candidate coexistence, replacement save/approve/reject, stable replacement recovery, content-hash changed-artifact detection, downstream stale propagation, downstream candidate invalidation, stale bundle gating, and minimal replacement/stale UI completed locally without runtime mutation
+
+## Phase 7C2C3A Scope
+- Introduced workflow-state schema v3 in `scripts/channel_workflow_write.py` so an approved group and a replacement candidate group can coexist safely on the same step while preserving the exact allowed status vocabulary `READY`, `CANDIDATE`, and `APPROVED`.
+- Kept reads backward-compatible for schema v1/v2, but made replacement-specific writes convert approved schema-v2 state to schema v3 in the same authorized transaction only.
+- Extended candidate save to allow replacement candidates on approved steps when trusted upstream inputs remain valid, while keeping the old approved stable bytes authoritative until approval.
+- Extended approve/reject to support replacement decisions with unchanged decision-file layout at `workflow/revisions/decisions/<revision_group_id>.json`, including optional `replaces_approved_group_id`.
+- Implemented stable replacement publication guarded by old-byte identity plus transaction-manifest `previous_sha256` and `target_sha256`, and extended recovery to resume only when old/new byte identity remains provable.
+- Added generic changed-artifact detection and generic producer/consumer traversal from the pinned workflow definition; no Prompt-specific stale propagation logic was introduced.
+- Added step-level `stale_reason` and `invalidated_candidate_group_id` metadata only; stale stable files remain inspectable but no longer satisfy downstream workflow-produced required inputs.
+- Extended `scripts/channel_prompt_bundle.py` so stale workflow-produced required inputs fail closed with `STALE_INPUT_ARTIFACT`, while stale steps themselves may still build replacement bundles when their own upstream inputs are trusted.
+- Extended the embedded UI in `scripts/ui_server.py` minimally with replacement save labeling, stale badges/notices, invalidated-candidate notices, and replacement approve/reject readiness while keeping history/restore/diff out of scope.
+
+## Phase 7C2C3A Evidence
+- Focused workflow-write regression: `python -m unittest tests.test_channel_workflow_write` passing (`71` run, `70` passed, `0` failures, `0` errors, `1` skipped for unsupported symlink capability in this environment).
+- Focused output-parser regression: `python -m unittest tests.test_channel_output_parser` passing.
+- Focused workflow regression: `python -m unittest tests.test_channel_workflow` passing with the existing environment-dependent symlink skip.
+- Focused prompt-bundle regression: `python -m unittest tests.test_channel_prompt_bundle` passing (`20` run, `20` passed, `0` failures, `0` errors, `0` skipped).
+- Focused V2 backend regression: `python -m unittest tests.test_multichannel_api` passing (`58` run, `58` passed, `0` failures, `0` errors, `0` skipped).
+- Focused frontend contract plus runtime harness: `python -m unittest tests.test_ui_frontend_contract` passing (`40` run, `40` passed, `0` failures, `0` errors, `0` skipped).
+- Explicit Node-backed runtime harness: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests` passing (`16` run, `16` passed, `0` failures, `0` errors, `0` skipped).
+- Replacement-specific coverage now includes replacement save conversion, replacement rejection, replacement approval stale propagation, downstream approved-plus-candidate invalidation, stale bundle gating, and replacement recovery after decision publication before state replacement.
+- Replacement-specific coverage now also proves the full replacement recovery matrix A-J, direct/transitive/branch-safe stale propagation, first-candidate invalidation, stale clearing, write-only schema-v3 conversion, and inert stale-reason rendering.
+- Production workflow defaults remain unchanged: `default_version = 1`, `legacy_unpinned_version = 1`.
+- Workflow v1 SHA-256 remains `BF0845A079F4083BB1AC8101AA8846D00577C738EAA2DCDAB582FDB4A4E9935E`.
+- Workflow v2 SHA-256 remains `5D236DC52EC23150033E40200E9DE3CB8B589A609CD5EF9D185004C9CC4B5606`.
+- Prompt manifest SHA-256 remains `E78644AA2DED747A38414D0BEFFD6A0DECB0FD671CA759FD0A8EAA7CBF539602`.
+- Full offline regression: `python -m unittest discover -s tests` passing (`430` run, `428` passed, `0` failures, `0` errors, `2` skipped for unsupported symlink capability in this environment).
+- Protected-runtime snapshots before focused verification, after focused verification, and after full regression remained byte-identical; all new write-path tests use temporary roots only.
+- No history endpoint, history UI, restore flow, diff viewer, decision-number counter, or manual stale-accept path was added.
+
+## Phase 7C2C3A Gate
+- Replacement candidate save/approve/reject now exists on the local implementation path only.
+- Downstream stale propagation and stale input gating now exist without introducing any history or restore surface.
+- Phase 7C2C3B history remains blocked pending a separate Tech Lead execution prompt.
+- Phase 7C2C3C restore remains blocked pending a separate Tech Lead execution prompt.
+- No Phase 7C2C3A commit has been created.
+- No Phase 7C2C3A push has been performed.
 
 ## Phase 7C2C2 Scope
 - Removed workflow-generated stable artifact scaffolding from new workflow-bound project creation in `scripts/channel_projects.py`. New projects now create only legitimate source/input artifacts plus an empty `workflow/` directory.

@@ -846,7 +846,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             };
             state.pastedOutputDraft = "first";
             state.parsedOutputResult = {
-              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
               raw_output: { sha256: "sha-first", character_count: 5 },
               contract: { response_mode: "SINGLE_ARTIFACT" },
               status: "VALID",
@@ -1480,6 +1480,146 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertEqual(result["feedback"], "Candidate approved as grp_000001.")
         self.assertEqual(result["workflowFetchCount"], 1)
         self.assertFalse(result["bundlePresentAfterApprove"])
+
+    def test_replacement_save_label_and_helper_are_rendered_for_approved_step(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-1", order: 1, display_name: "Step 1", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-a"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-1", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 2, state_persisted: true, step_states: { "step-1": { status: "APPROVED", approved_group_id: "grp_000001", candidate_group_id: null, stale_reason: null, invalidated_candidate_group_id: null, updated_at: "2026-07-02T00:00:00Z" } } },
+              available_actions: { "step-1": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: true }],
+            };
+            state.selectedWorkflowStepId = "step-1";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-1",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "Draft";
+            state.parsedOutputResult = {
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-1", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "raw-sha", character_count: 5 },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "VALID",
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", filename: "artifact_a.md", content: "Draft", sha256: "artifact-sha", character_count: 5, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+              validation: { errors: [], warnings: [] },
+            };
+            render();
+            const saveModel = saveCandidateButtonModel();
+            return {
+              saveLabel: saveModel.label,
+              saveHelper: saveModel.helper,
+              panelHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["saveLabel"], "Save Replacement Candidate")
+        self.assertIn("current approved stable output remains authoritative", result["saveHelper"])
+
+    def test_replacement_candidate_controls_and_stale_badge_render_without_history_ui(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-2", order: 2, display_name: "Step 2", required_model: "Gemini", input_artifact_ids: ["artifact-a"], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-b"], resulting_lifecycle_state: "TWO", constraints: [] }],
+              },
+              state: { current_step_id: "step-2", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 6, state_persisted: true, step_states: { "step-2": { status: "APPROVED", approved_group_id: "grp_000001", candidate_group_id: "grp_000002", stale_reason: { upstream_artifact_ids: ["artifact-a"], caused_by_step_ids: ["step-1"], caused_by_group_ids: ["grp_000009"], caused_by_state_revision: 6, invalidated_at: "2026-07-02T00:00:00Z" }, invalidated_candidate_group_id: "grp_000002", updated_at: "2026-07-02T00:00:00Z", candidate_group: { revision_group_id: "grp_000002", artifacts: [] }, approved_group: { revision_group_id: "grp_000001", artifacts: [] } } } },
+              available_actions: { "step-2": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: true }, { artifact_id: "artifact-b", display_name: "Artifact B", relative_path: "workflow/artifact_b.md", exists: true }],
+            };
+            state.selectedWorkflowStepId = "step-2";
+            render();
+            const html = document.getElementById("projectDetailPanel").innerHTML;
+            return {
+              hasStaleBadge: html.includes(">STALE<"),
+              hasInvalidatedNotice: html.includes("Invalidated Candidate"),
+              approveDisabled: html.includes('id="approveCandidateBtn" disabled'),
+              rejectDisabled: html.includes('id="rejectCandidateBtn" disabled'),
+              containsHistory: html.includes("History"),
+              containsRestore: html.includes("Restore"),
+              containsDiff: html.includes("Diff"),
+            };
+            """
+        )
+        self.assertTrue(result["hasStaleBadge"])
+        self.assertTrue(result["hasInvalidatedNotice"])
+        self.assertTrue(result["approveDisabled"])
+        self.assertTrue(result["rejectDisabled"])
+        self.assertFalse(result["containsHistory"])
+        self.assertFalse(result["containsRestore"])
+        self.assertFalse(result["containsDiff"])
+
+    def test_stale_reason_strings_render_inert_html(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-2", order: 2, display_name: "Step 2", required_model: "Gemini", input_artifact_ids: ["artifact-a"], optional_input_artifact_ids: [], output_artifact_ids: ["artifact-b"], resulting_lifecycle_state: "TWO", constraints: [] }],
+              },
+              state: { current_step_id: "step-2", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 6, state_persisted: true, step_states: { "step-2": { status: "APPROVED", approved_group_id: "grp_000001", candidate_group_id: null, stale_reason: { upstream_artifact_ids: ["<img src=x onerror=1>"], caused_by_step_ids: ["step-1"], caused_by_group_ids: ["grp_000009"], caused_by_state_revision: 6, invalidated_at: "2026-07-02T00:00:00Z" }, invalidated_candidate_group_id: null, updated_at: "2026-07-02T00:00:00Z" } } },
+              available_actions: { "step-2": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: true }, { artifact_id: "artifact-b", display_name: "Artifact B", relative_path: "workflow/artifact_b.md", exists: true }],
+            };
+            state.selectedWorkflowStepId = "step-2";
+            render();
+            const html = document.getElementById("projectDetailPanel").innerHTML;
+            return {
+              containsRawImgTag: html.includes("<img"),
+              containsEscapedString: html.includes("&lt;img src=x onerror=1&gt;"),
+            };
+            """
+        )
+        self.assertFalse(result["containsRawImgTag"])
+        self.assertTrue(result["containsEscapedString"])
 
     def test_stale_approve_candidate_response_is_ignored(self):
         result = run_ui_runtime_scenario(

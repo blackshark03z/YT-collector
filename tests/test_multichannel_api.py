@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from scripts import channel_projects, channel_prompt_bundle, channel_workspace, ui_server
 from tests.runtime_isolation_helpers import snapshot_runtime_state
-from tests.test_channel_prompt_bundle import prepare_step2_inputs
+from tests.test_channel_prompt_bundle import prepare_step2_inputs, seed_approved_step_outputs
 
 
 def make_channel(root: Path, slug: str, channel_id: str, *, with_metrics: bool = True) -> None:
@@ -647,6 +647,189 @@ class MultiChannelApiTests(unittest.TestCase):
             self.assertEqual(status, 200)
             self.assertEqual(data["status"], "CANDIDATE_APPROVED")
             self.assertIn("## Subject\nRome\n", (project_dir / "workflow" / "transcript_analysis.md").read_text(encoding="utf-8"))
+
+    def test_replacement_candidate_save_route_keeps_old_stable_output_active(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
+            first_bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_1_transcript_analysis", project, project_dir)
+            saved = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/revisions",
+                {
+                    "bundle_sha256": first_bundle["bundle_sha256"],
+                    "output_text": "## Subject\nRome\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                    "expected_state_revision": 0,
+                },
+                context=ui_server.build_app_context(root=root),
+            )[1]
+            ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/candidate/approve",
+                {
+                    "candidate_group_id": saved["revision_group"]["revision_group_id"],
+                    "expected_state_revision": 1,
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            stable_path = project_dir / "workflow" / "transcript_analysis.md"
+            stable_before = stable_path.read_text(encoding="utf-8")
+
+            replacement_bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_1_transcript_analysis", project, project_dir)
+            status, replacement = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/revisions",
+                {
+                    "bundle_sha256": replacement_bundle["bundle_sha256"],
+                    "output_text": "## Subject\nRome\n## Competitor Promise\nPromise revised\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                    "expected_state_revision": 2,
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            workflow_status, workflow = ui_server.dispatch_v2_request(
+                "GET",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow",
+                context=ui_server.build_app_context(root=root),
+            )
+            step_state = workflow["state"]["step_states"]["prompt_1_transcript_analysis"]
+            self.assertEqual(status, 201)
+            self.assertEqual(workflow_status, 200)
+            self.assertEqual(replacement["status"], "CANDIDATE_SAVED")
+            self.assertEqual(stable_path.read_text(encoding="utf-8"), stable_before)
+            self.assertEqual(step_state["status"], "APPROVED")
+            self.assertEqual(step_state["approved_group_id"], saved["revision_group"]["revision_group_id"])
+            self.assertEqual(step_state["candidate_group_id"], replacement["revision_group"]["revision_group_id"])
+            self.assertTrue(step_state["replacement_candidate"])
+
+    def test_stale_input_bundle_and_parse_routes_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            __import__("shutil").copytree(ROOT / "workflows", root / "workflows")
+            registry_path = root / "workflows" / "registry.json"
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            registry["workflows"]["mist_of_ages_assisted_content"]["default_version"] = "2"
+            registry["channel_defaults"]["channel_a"] = {"workflow_id": "mist_of_ages_assisted_content"}
+            registry_path.write_text(json.dumps(registry, indent=2) + "\n", encoding="utf-8", newline="\n")
+            make_channel(root, "channel_a", "UC1")
+            created = channel_projects.create_channel_project(
+                root,
+                "channel_a",
+                "VIDEO12345A",
+                "https://youtube.com/watch?v=VIDEO12345A",
+                {
+                    "title": "Why Rome Executed Jesus",
+                    "channelTitle": "Competitor",
+                    "channelId": "UC_COMP",
+                    "publishedAt": "2026-07-01T00:00:00+00:00",
+                    "duration": "PT10M",
+                    "description": "desc",
+                    "tags": ["rome"],
+                    "viewCount": "123",
+                    "likeCount": "4",
+                    "commentCount": "5",
+                    "thumbnailUrl": "https://example.com/thumb.jpg",
+                },
+                created_at="2026-07-01T00:00:00+00:00",
+            )
+            channel_projects.save_project_transcript(root, "channel_a", created["project_slug"], "real transcript " * 12)
+            project_dir = channel_workspace.canonical_channel_paths(root, "channel_a").projects_dir / created["project_slug"]
+            project = channel_projects.load_channel_project(root, "channel_a", created["project_slug"])
+            first_bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_1_transcript_analysis", project, project_dir)
+            first_saved = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/revisions",
+                {
+                    "bundle_sha256": first_bundle["bundle_sha256"],
+                    "output_text": "## Subject\nRome\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                    "expected_state_revision": 0,
+                },
+                context=ui_server.build_app_context(root=root),
+            )[1]
+            ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/candidate/approve",
+                {
+                    "candidate_group_id": first_saved["revision_group"]["revision_group_id"],
+                    "expected_state_revision": 1,
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+            seed_approved_step_outputs(
+                root,
+                "channel_a",
+                created["project_slug"],
+                "prompt_2_historical_research",
+                {
+                    "research_pack": "## Topic Overview\nOverview\n## Reliable Timeline\nTimeline\n## Key People and Roles\nPeople\n## Anchor Facts\nFacts\n## Human Details and Human Cost\nCost\n## Myths, Disputes, and Later Accounts\nMyths\n## Facts That Contradict the Competitor\nContradictions\n## Possible Evidence-Based Contradictions\nEvidence\n## Documented Visual Details\nVisuals\n## Source Notes\nSources\n",
+                    "evidence_ledger": "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+                },
+            )
+            replacement_bundle = channel_prompt_bundle.build_prompt_bundle(root, "channel_a", created["project_slug"], "prompt_1_transcript_analysis", project, project_dir)
+            replacement = ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/revisions",
+                {
+                    "bundle_sha256": replacement_bundle["bundle_sha256"],
+                    "output_text": "## Subject\nRome\n## Competitor Promise\nPromise revised\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                    "expected_state_revision": 3,
+                },
+                context=ui_server.build_app_context(root=root),
+            )[1]
+            ui_server.dispatch_v2_request(
+                "POST",
+                f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_1_transcript_analysis/candidate/approve",
+                {
+                    "candidate_group_id": replacement["revision_group"]["revision_group_id"],
+                    "expected_state_revision": 4,
+                },
+                context=ui_server.build_app_context(root=root),
+            )
+
+            with self.assertRaises(ui_server.V2Error) as bundle_ctx:
+                ui_server.dispatch_v2_request(
+                    "GET",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_3_creative_package/bundle",
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(bundle_ctx.exception.code, "STALE_INPUT_ARTIFACT")
+
+            with self.assertRaises(ui_server.V2Error) as parse_ctx:
+                ui_server.dispatch_v2_request(
+                    "POST",
+                    f"/api/v2/channels/channel_a/projects/{created['project_slug']}/workflow/steps/prompt_3_creative_package/parse-output",
+                    {"bundle_sha256": "A" * 64, "output_text": "bad"},
+                    context=ui_server.build_app_context(root=root),
+                )
+            self.assertEqual(parse_ctx.exception.code, "STALE_INPUT_ARTIFACT")
 
     def test_workflow_read_routes_reject_pending_transaction(self):
         with tempfile.TemporaryDirectory() as tmp:

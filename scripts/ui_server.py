@@ -1884,9 +1884,22 @@ function stepStatusLabel(step) {
   return "READY";
 }
 
+function staleReasonSummary(step) {
+  const candidate = step && stepCandidateSummary(step.step_id);
+  const staleReason = candidate && candidate.stale_reason ? candidate.stale_reason : null;
+  if (!staleReason) return "";
+  const upstream = Array.isArray(staleReason.upstream_artifact_ids) && staleReason.upstream_artifact_ids.length
+    ? staleReason.upstream_artifact_ids.join(", ")
+    : "upstream workflow output";
+  return `Stale because ${upstream} changed.`;
+}
+
 function stepAvailabilitySummary(step) {
   const workflow = state.selectedProjectWorkflow;
   if (!workflow || !step) return "Waiting for workflow data";
+  const candidate = stepCandidateSummary(step.step_id);
+  if (candidate && candidate.stale_reason) return staleReasonSummary(step);
+  if (candidate && candidate.invalidated_candidate_group_id) return `Candidate ${candidate.invalidated_candidate_group_id} was invalidated by an upstream approved change.`;
   const promptSet = workflow.definition && workflow.definition.prompt_set ? workflow.definition.prompt_set : {};
   if (promptSet.status !== "AVAILABLE" || !promptSet.bundle_available) {
     return "Prompt bundle unavailable for this workflow version.";
@@ -1956,18 +1969,22 @@ function saveCandidateButtonModel() {
   const bundle = activeBundleRecord();
   const step = selectedWorkflowStepRecord();
   const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
+  const stepState = step ? stepCandidateSummary(step.step_id) : null;
+  const replacementSave = !!(stepState && stepState.status === "APPROVED");
+  const idleLabel = replacementSave ? "Save Replacement Candidate" : "Save Candidate";
+  const busyLabel = replacementSave ? "Saving Replacement..." : "Saving Candidate...";
   if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !bundle || !step || !parsedOutput) {
-    return { disabled: true, label: "Save Candidate", helper: "Parse a current valid output preview before saving a candidate." };
+    return { disabled: true, label: idleLabel, helper: "Parse a current valid output preview before saving a candidate." };
   }
   if (parsedOutput.status !== "VALID") {
-    return { disabled: true, label: "Save Candidate", helper: "Only a valid parsed output preview can be saved as a candidate." };
+    return { disabled: true, label: idleLabel, helper: "Only a valid parsed output preview can be saved as a candidate." };
   }
   const action = workflow.available_actions && workflow.available_actions[step.step_id] ? workflow.available_actions[step.step_id] : {};
   if (!action.save_candidate) {
-    return { disabled: true, label: "Save Candidate", helper: "This workflow step does not currently allow candidate save." };
+    return { disabled: true, label: idleLabel, helper: "This workflow step does not currently allow candidate save." };
   }
   if (!parsedOutput.raw_output || typeof parsedOutput.raw_output.sha256 !== "string") {
-    return { disabled: true, label: "Save Candidate", helper: "The current parsed output preview is missing its raw-output identity." };
+    return { disabled: true, label: idleLabel, helper: "The current parsed output preview is missing its raw-output identity." };
   }
   const busy = state.saveCandidateAction.busy
     && state.saveCandidateAction.channelSlug === state.selectedChannelSlug
@@ -1980,8 +1997,12 @@ function saveCandidateButtonModel() {
     && state.saveCandidateAction.expectedStateRevision === (workflow.state && workflow.state.state_revision);
   return {
     disabled: busy,
-    label: busy ? "Saving Candidate..." : "Save Candidate",
-    helper: busy ? "Persisting immutable candidate revisions for the current parsed output..." : "Save a candidate revision group only. No stable artifact files are published in this phase."
+    label: busy ? busyLabel : idleLabel,
+    helper: busy
+      ? "Persisting immutable candidate revisions for the current parsed output..."
+      : (replacementSave
+        ? "Save a replacement candidate while the current approved stable output remains authoritative."
+        : "Save a candidate revision group only. No stable artifact files are published in this phase.")
   };
 }
 
@@ -1990,7 +2011,7 @@ function candidateDecisionButtonModel(actionName) {
   const step = selectedWorkflowStepRecord();
   const candidate = step && stepCandidateSummary(step.step_id);
   const action = workflow && workflow.available_actions && step ? (workflow.available_actions[step.step_id] || {}) : {};
-  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !step || !candidate || candidate.status !== "CANDIDATE" || !candidate.candidate_group_id) {
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !step || !candidate || !candidate.candidate_group_id) {
     return {
       disabled: true,
       label: actionName === "APPROVE" ? "Approve Candidate" : "Reject Candidate",
@@ -2446,7 +2467,7 @@ function renderProjectDetailState() {
         data-workflow-step-id="${escapeHtml(step.step_id)}"
         style="width:100%;text-align:left"
       >
-        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong>${pill(selected ? "SELECTED" : stepStatusLabel(step))}</div>
+        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong><span>${pill(selected ? "SELECTED" : stepStatusLabel(step))}${stepCandidateSummary(step.step_id) && stepCandidateSummary(step.step_id).stale_reason ? pill("STALE") : ""}</span></div>
         <div class="meta">Required model: ${escapeHtml(step.required_model || "Unspecified")}</div>
         <div class="meta">Resulting state: ${escapeHtml(step.resulting_lifecycle_state || "Unknown")}</div>
         <div class="meta">Availability: ${escapeHtml(stepAvailabilitySummary(step))}</div>
@@ -2577,6 +2598,8 @@ function renderProjectDetailState() {
               <button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>
             </div>
             <div class="status" style="margin-top:12px" role="status" aria-live="polite">${bundleFeedbackHtml}</div>
+            ${selectedCandidate && selectedCandidate.stale_reason ? `<div class="notice" style="margin-top:12px"><strong>Stale Output</strong><span class="meta">${escapeHtml(staleReasonSummary(selectedStep))}</span></div>` : ""}
+            ${selectedCandidate && selectedCandidate.invalidated_candidate_group_id ? `<div class="notice" style="margin-top:12px"><strong>Invalidated Candidate</strong><span class="meta">${escapeHtml(`Candidate ${selectedCandidate.invalidated_candidate_group_id} is no longer actionable because an upstream approved output changed.`)}</span></div>` : ""}
             <div class="summary-grid" style="margin-top:12px">
               <div class="card">
                 <strong>Required Input Artifacts</strong>

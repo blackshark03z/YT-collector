@@ -800,6 +800,101 @@ class PromptBundleTests(unittest.TestCase):
             after = file_tree_snapshot(project_dir)
             self.assertEqual(before, after)
 
+    def test_stale_approved_input_remains_viewable_but_blocks_downstream_bundle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            copy_workflows(root)
+            set_default_workflow_version(root, "2")
+            make_channel(root, "mist_of_ages", "UC123")
+            project = create_project(root, "mist_of_ages")
+            project_dir = channel_workspace.canonical_channel_paths(root, "mist_of_ages").projects_dir / project["project_slug"]
+            channel_projects.save_project_transcript(root, "mist_of_ages", project["project_slug"], "real transcript " * 12)
+            project_data = channel_projects.load_channel_project(root, "mist_of_ages", project["project_slug"])
+
+            first_bundle = channel_prompt_bundle.build_prompt_bundle(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                project_data,
+                project_dir,
+            )
+            first_saved = channel_workflow_write.save_candidate(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                first_bundle["bundle_sha256"],
+                "## Subject\nRome\n## Competitor Promise\nPromise\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                0,
+            )[1]
+            channel_workflow_write.approve_candidate(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                first_saved["revision_group"]["revision_group_id"],
+                1,
+            )
+            seed_approved_step_outputs(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_2_historical_research",
+                {
+                    "research_pack": "## Topic Overview\nOverview\n## Reliable Timeline\nTimeline\n## Key People and Roles\nPeople\n## Anchor Facts\nFacts\n## Human Details and Human Cost\nCost\n## Myths, Disputes, and Later Accounts\nMyths\n## Facts That Contradict the Competitor\nContradictions\n## Possible Evidence-Based Contradictions\nEvidence\n## Documented Visual Details\nVisuals\n## Source Notes\nSources\n",
+                    "evidence_ledger": "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+                },
+            )
+
+            replacement_bundle = channel_prompt_bundle.build_prompt_bundle(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                project_data,
+                project_dir,
+            )
+            replacement = channel_workflow_write.save_candidate(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                replacement_bundle["bundle_sha256"],
+                "## Subject\nRome\n## Competitor Promise\nPromise revised\n## Narrative Map\nMap\n## Strong Idea-Level Elements\nStrong\n## Weak or Removable Elements\nWeak\n## Claims Requiring Verification\nClaims\n## Originality Risks\nRisks\n## Neutral Research Questions\nQuestions\n",
+                3,
+            )[1]
+            channel_workflow_write.approve_candidate(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_1_transcript_analysis",
+                replacement["revision_group"]["revision_group_id"],
+                4,
+            )
+
+            self.assertTrue((project_dir / "workflow" / "research_pack.md").exists())
+            self.assertTrue((project_dir / "workflow" / "evidence_ledger.md").exists())
+            step2_bundle = channel_prompt_bundle.build_prompt_bundle(
+                root,
+                "mist_of_ages",
+                project["project_slug"],
+                "prompt_2_historical_research",
+                project_data,
+                project_dir,
+            )
+            self.assertTrue(step2_bundle["bundle_sha256"])
+            with self.assertRaises(channel_prompt_bundle.PromptBundleError) as ctx:
+                channel_prompt_bundle.build_prompt_bundle(
+                    root,
+                    "mist_of_ages",
+                    project["project_slug"],
+                    "prompt_3_creative_package",
+                    project_data,
+                    project_dir,
+                )
+            self.assertEqual(ctx.exception.code, "STALE_INPUT_ARTIFACT")
+
     def test_existing_workflow_and_project_detail_endpoints_remain_unchanged(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

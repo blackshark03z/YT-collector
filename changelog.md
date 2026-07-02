@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Phase 7C2C3A - Replacement Candidate, Replacement Approval, and Downstream Stale Propagation
+- Introduced workflow-state schema v3 in `scripts/channel_workflow_write.py` so approved and candidate heads can coexist on the same step while preserving the exact status vocabulary `READY`, `CANDIDATE`, and `APPROVED`.
+- Added write-time schema-v2 to schema-v3 conversion only for authorized replacement-specific writes; reads remain backward-compatible and zero-migration.
+- Added replacement candidate save on approved steps with idempotency that now includes the current approved group id.
+- Added replacement approve/reject support while preserving the existing decision-record path layout `workflow/revisions/decisions/<revision_group_id>.json`.
+- Added stable replacement publication with `previous_sha256` and `target_sha256` manifest fields plus recovery that refuses to overwrite externally modified stable files.
+- Added content-hash-based changed-artifact detection and generic downstream stale propagation from the pinned workflow definition, with downstream approved-plus-candidate invalidation and first-candidate invalidation.
+- Added `stale_reason` and `invalidated_candidate_group_id` read-model/UI exposure, plus stale input gating in `scripts/channel_prompt_bundle.py` so stale workflow-produced required inputs now fail closed with `STALE_INPUT_ARTIFACT`.
+- Added minimal replacement/stale UI behavior in `scripts/ui_server.py` for replacement save labeling, stale badges, stale notices, and invalidated-candidate notices only.
+- Expanded `tests/test_channel_workflow_write.py`, `tests/test_channel_prompt_bundle.py`, `tests/test_multichannel_api.py`, and `tests/test_ui_frontend_contract.py` with replacement save/approve/reject, stale propagation, stale bundle gating, route-level stale conflicts, and replacement UI/runtime coverage.
+- Final verification round proved the replacement recovery matrix A-J, exact stale-graph branch behavior, candidate invalidation persistence, stale clearing, write-only schema-v3 conversion, and read-path fail-closed behavior during partial replacement.
+- Re-ran focused evidence individually (`27` run, `27` passed), then re-ran `tests.test_channel_workflow_write` (`71` run, `70` passed, `0` failures, `0` errors, `1` skipped), `tests.test_ui_frontend_contract` (`40` run, all passed), explicit UI runtime (`16` run, all passed), and the full offline regression (`430` run, `428` passed, `0` failures, `0` errors, `2` skipped).
+- Preserved production workflow defaults and prompt/workflow digests unchanged, kept real runtime data untouched, kept `implement.docx` unrelated and untracked, and kept Phase 7C2C3B history plus Phase 7C2C3C restore explicitly out of scope.
+
 ### Phase 7C2C2 - Approval, Rejection, Stable Publication, and Scaffold/Trust-Rule Closure
 - Removed workflow-generated stable artifact scaffolding from new workflow-bound projects in `scripts/channel_projects.py`; only legitimate source/input artifacts plus an empty `workflow/` directory are created now.
 - Audited the active legacy production creator in `scripts/ui_server.py:create_project(...)` and corrected it independently so `/api/create_project` no longer scaffolds workflow-generated output placeholders either.

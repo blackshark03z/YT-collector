@@ -387,51 +387,74 @@ def _workflow_managed_artifact_is_trusted(
     binding: dict[str, Any],
     definition: dict[str, Any],
 ) -> bool:
+    return _workflow_managed_artifact_state(
+        project_dir=project_dir,
+        artifact=artifact,
+        binding=binding,
+        definition=definition,
+    ) == "TRUSTED"
+
+
+def _workflow_managed_artifact_state(
+    *,
+    project_dir: Path,
+    artifact: dict[str, Any],
+    binding: dict[str, Any],
+    definition: dict[str, Any],
+) -> str:
     from scripts import channel_workflow_write
 
     producer_step_id = _workflow_output_producers(definition).get(artifact["artifact_id"])
     if producer_step_id is None:
         artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
-        return not _artifact_usability_error(artifact_path, artifact["artifact_id"])
+        return "TRUSTED" if not _artifact_usability_error(artifact_path, artifact["artifact_id"]) else "MISSING"
 
     paths = channel_workflow_write.workflow_write_paths(project_dir)
     if not paths.workflow_state_json.exists():
-        return False
+        return "MISSING"
     try:
         payload = json.loads(paths.workflow_state_json.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise _error("WORKFLOW_STATE_INVALID", "workflow_state.json is malformed JSON.", 409) from exc
-    if payload.get("schema_version") != 2:
-        return False
-
-    validated = channel_workflow_write.validate_workflow_state_v2(
-        payload,
-        binding=binding,
-        definition=definition,
-        project_dir=project_dir,
-    )
+    schema_version = payload.get("schema_version")
+    if schema_version == channel_workflow_write.SUPPORTED_STATE_SCHEMA_VERSION:
+        validated = channel_workflow_write.validate_workflow_state_v3(
+            payload,
+            binding=binding,
+            definition=definition,
+            project_dir=project_dir,
+        )
+    elif schema_version == channel_workflow_write.SUPPORTED_STATE_SCHEMA_VERSION_V2:
+        validated = channel_workflow_write.validate_workflow_state_v2(
+            payload,
+            binding=binding,
+            definition=definition,
+            project_dir=project_dir,
+        )
+    else:
+        return "MISSING"
     step_state = validated["step_states"].get(producer_step_id)
     if not isinstance(step_state, dict) or step_state.get("status") != "APPROVED":
-        return False
+        return "MISSING"
+    if step_state.get("stale_reason") is not None:
+        return "STALE"
     if not isinstance(step_state.get("approved_group_id"), str) or not step_state["approved_group_id"].startswith("grp_"):
-        return False
+        return "MISSING"
     head = validated["artifact_heads"].get(artifact["artifact_id"])
     if not isinstance(head, dict):
-        return False
+        return "MISSING"
     approved_revision_id = head.get("approved_revision_id")
     if not isinstance(approved_revision_id, str) or not approved_revision_id.startswith("rev_"):
-        return False
-    if head.get("candidate_revision_id") is not None:
-        return False
+        return "MISSING"
 
     artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
     if _artifact_usability_error(artifact_path, artifact["artifact_id"]):
-        return False
+        return "MISSING"
     revision_dir = paths.artifacts_dir / artifact["artifact_id"] / approved_revision_id
     metadata_path = revision_dir / "metadata.json"
     content_path = revision_dir / "content.md"
     if not metadata_path.exists() or not content_path.exists():
-        return False
+        return "MISSING"
     try:
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -439,10 +462,10 @@ def _workflow_managed_artifact_is_trusted(
     stable_bytes = artifact_path.read_bytes()
     revision_bytes = content_path.read_bytes()
     stable_sha = _sha256_bytes(stable_bytes)
-    return (
+    return "TRUSTED" if (
         stable_bytes == revision_bytes
         and metadata.get("content_sha256") == stable_sha
-    )
+    ) else "MISSING"
 
 
 def _read_artifact(project_dir: Path, artifact: dict[str, Any]) -> tuple[Path, bytes, str]:
@@ -496,9 +519,22 @@ def build_prompt_bundle(
     required_artifact_ids: list[str] = []
     required_hashes: dict[str, str] = {}
     missing_required: list[str] = []
+    stale_required: list[str] = []
     for artifact_id in step["input_artifact_ids"]:
         artifact = artifacts_by_id[artifact_id]
         artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
+        artifact_state = _workflow_managed_artifact_state(
+            project_dir=project_dir,
+            artifact=artifact,
+            binding=binding,
+            definition=definition,
+        )
+        if artifact_state != "TRUSTED":
+            if artifact_state == "STALE":
+                stale_required.append(artifact_id)
+            else:
+                missing_required.append(artifact_id)
+            continue
         if not _workflow_managed_artifact_is_trusted(
             project_dir=project_dir,
             artifact=artifact,
@@ -511,6 +547,12 @@ def build_prompt_bundle(
         required_hashes[artifact_id] = _sha256_bytes(data)
         required_artifact_ids.append(artifact_id)
         required_blocks.append(f"--- ARTIFACT: {PurePosixPath(artifact['relative_path']).name} ---\n{data.decode('utf-8').rstrip()}")
+    if stale_required:
+        raise _error(
+            "STALE_INPUT_ARTIFACT",
+            f"Required workflow input artifacts are stale and must be regenerated: {', '.join(stale_required)}",
+            409,
+        )
     if missing_required:
         raise _error(
             "BUNDLE_REQUIRED_INPUT_MISSING",
@@ -523,12 +565,12 @@ def build_prompt_bundle(
     for artifact_id in step["optional_input_artifact_ids"]:
         artifact = artifacts_by_id[artifact_id]
         artifact_path = project_dir / PurePosixPath(artifact["relative_path"])
-        if not _workflow_managed_artifact_is_trusted(
+        if _workflow_managed_artifact_state(
             project_dir=project_dir,
             artifact=artifact,
             binding=binding,
             definition=definition,
-        ):
+        ) != "TRUSTED":
             missing_optional_inputs.append(artifact_id)
             optional_blocks.append(f"--- OPTIONAL ARTIFACT: {PurePosixPath(artifact['relative_path']).name} ---\nNOT PROVIDED")
             continue
