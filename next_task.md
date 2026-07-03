@@ -4,56 +4,50 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-Phase 7D1A2 - Blocked Pilot Cleanup and Retry Gate
+Phase 7D1B2 - Push Review and Prompt 3 Bundle Preparation Gate
 
 ## Do Not Start Yet
-Do not begin Phase 7D1A2 until a separate Tech Lead execution prompt authorizes cleanup of the blocked v1 pilot project and any later retry.
+Do not begin Phase 7D1B2 until a separate Tech Lead execution prompt authorizes final push review for the committed parser fix and then separately authorizes Prompt 3 bundle preparation.
 
 ## Proposed Objective
-Handle the failed real pilot artifact separately from the 7D1A1 create-path fix: decide whether to archive, delete, or otherwise clean up `channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/`, then authorize a fresh pilot retry only after cleanup rules are explicit.
+Close out the committed parser-fix branch state safely, then prepare and verify the Prompt 3 bundle for the current pilot project in a separate workflow step without running Prompt 3 itself.
 
 ## Current Phase Evidence
-- Phase 7D1A1 confirmed the real blocker exactly: canonical V2 project creation silently inherited registry `default_version = 1` because no explicit binding crossed the canonical create boundary.
-- Canonical create now requires explicit `workflow_id` plus `workflow_version`, uses server-owned workflow choices only, and persists the authoritative server-calculated binding.
-- Registry defaults remain unchanged at `default_version = 1` and `legacy_unpinned_version = 1`.
-- The blocked v1 pilot project remains untouched and byte-identical.
-- Transcript save and Prompt 1 execution were not performed.
-- No second real project was created.
-- Cleanup and pilot retry remain blocked pending separate authorization.
-- History and Restore remain deferred.
+- Phase 7D1B1 confirmed the exact parser defect root cause: Prompt 2 `evidence_ledger` headings were counted globally, valid multi-record ledgers were rejected, and Markdown field labels such as `## CLAIM:` were not recognized.
+- The local parser now supports repeatable ordered evidence-ledger records with both plain and Markdown-prefixed field labels while preserving non-ledger behavior.
+- Focused parser regression passed (`32` tests), the focused multichannel parse-route regression passed, and the live API parse-preview smoke on the current restarted single-listener server returned `VALID`.
+- The real Prompt 2 raw response parsed validly with raw SHA-256 `CA6C664A86C5AC52F54E3C7F4CAD3A14543286E8CD0D3AF98F7D0FC877B9960D`.
+- Prompt 2 candidate `grp_000002` was approved, `research_pack` `rev_000001` and `evidence_ledger` `rev_000001` were published to stable, workflow state revision is now `4`, and Prompt 3 is effectively `READY`.
+- The exact next workflow step id is `prompt_3_creative_package`.
+- The parser fix has been committed locally on `master`, the repository is ahead of `origin/master` by one commit, and no push has been performed.
 
 ## Preconditions
-- Do not mutate the blocked project without an explicit cleanup decision.
-- Do not treat the blocked project as automatically migrated to workflow version `2`.
-- Preserve the explicit canonical create contract from Phase 7D1A1: browser authority is limited to `workflow_id` and `workflow_version`; digest/path authority remains server-owned.
-- Preserve the real-runtime baseline with exactly one canonical project directory and zero real `workflow_state.json` files unless a separate cleanup prompt explicitly authorizes change.
-- Preserve workflow defaults and prompt/workflow assets unchanged.
+- Do not alter the live pilot runtime while reviewing the parser fix commit scope.
+- Preserve workflow defaults, prompt/workflow assets, prompt manifests, and registry defaults unchanged.
+- Preserve the current pilot project state at workflow schema `2`, state revision `4`, Prompt 1 `APPROVED`, Prompt 2 `APPROVED`, and Prompt 3 `READY` until the next separate execution prompt.
 
 ## Required Focus
-- preserve immutable project workflow bindings
-- preserve channel-scoped `/api/v2/` ownership checks
-- preserve server-owned workflow-option authority
-- preserve zero automatic migration of existing projects
-- preserve the untouched blocked pilot artifact until cleanup is separately authorized
+- preserve the reviewed parser fix diff exactly as validated
+- preserve non-ledger parser behavior
+- preserve the approved Prompt 2 stable artifacts and decision state unchanged
 - preserve workflow/prompt asset digests and registry default semantics
+- prepare Prompt 3 bundle verification only in a later separate step
 
 ## Forbidden Work
-- do not edit, validate, delete, rename, or recreate the blocked pilot project without separate authorization
-- do not save the real transcript for the blocked pilot project
-- do not start Prompt 1 or any later workflow step on the blocked pilot project
-- do not auto-migrate existing projects to workflow version `2`
-- do not change workflow defaults away from `default_version = 1` and `legacy_unpinned_version = 1`
+- do not modify the parser implementation or parser tests unless a separate prompt authorizes further changes
+- do not mutate the real pilot project runtime
+- do not change workflow defaults or prompt/workflow assets
+- do not build or run Prompt 3 in this closeout/commit-review gate
 - do not add AI API calls
 - do not mutate protected runtime data outside approved temporary-root tests
-- do not start History or Restore work in this cleanup phase
+- do not start History or Restore work
 
 ## Verification Requirements
-- confirm explicit workflow pinning still survives registry default values remaining at v1
-- confirm the blocked pilot artifact is either preserved untouched or changed only by a separately authorized cleanup action
+- confirm the exact five tracked files intended for commit only
+- confirm no runtime or protected files are included in commit scope
+- confirm parser module SHA-256 for `scripts/channel_output_parser.py` remains `71A967ABF55373D1795612A900CD20F7975180F58D72F007C52A7BE9C9901EA0`
+- confirm the pilot remains at Prompt 3 `READY` without bundling or running Prompt 3
 - confirm real Mist of Ages runtime and token files remain protected from accidental mutation
-- preserve the runtime-baseline methodology: compare before/after protected-runtime hashes and blocked-project hashes
-- keep `/api/create_project` parity-safe with the no-output-scaffolding contract
-- keep browser authority limited to selection ids/versions, never digests or paths
 
 ## Reasoning Effort
 High
@@ -62,10 +56,10 @@ High
 History and Restore remain deferred
 
 ## Explicitly Blocked
-- Blocked pilot cleanup remains blocked pending a separate Tech Lead execution prompt.
-- Pilot retry remains blocked pending a separate Tech Lead execution prompt.
+- Final push remains blocked pending separate review.
+- Prompt 3 bundle preparation remains blocked pending a separate execution prompt.
 - History remains deferred.
 - Restore remains deferred.
 
 ## Exact First Action
-Verify the blocked pilot project state and choose an explicit cleanup/disposition plan before authorizing any fresh real pilot creation attempt.
+Review the committed parser-fix change for final push readiness, then authorize a separate Prompt 3 bundle preparation step for `prompt_3_creative_package`.

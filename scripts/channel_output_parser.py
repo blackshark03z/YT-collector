@@ -57,6 +57,105 @@ def _heading_occurrences(text: str, heading: str) -> list[int]:
     return [index for index, line in enumerate(lines) if line == heading]
 
 
+EVIDENCE_LEDGER_FIELDS = ["CLAIM:", "SOURCE:", "STATUS:", "ALLOWED WORDING:", "NOTES:"]
+EVIDENCE_LEDGER_MARKDOWN_PREFIX = re.compile(r"^(#{1,6} )(?P<label>.+)$")
+
+
+def _normalize_evidence_ledger_heading(line: str, required_headings: set[str]) -> str | None:
+    if line in required_headings:
+        return line
+    match = EVIDENCE_LEDGER_MARKDOWN_PREFIX.match(line)
+    if not match:
+        return None
+    label = match.group("label")
+    if label in required_headings:
+        return label
+    return None
+
+
+def _validate_evidence_ledger_records(text: str, required_headings: list[str]) -> dict[str, Any]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    heading_counts = {heading: 0 for heading in required_headings}
+    heading_results = []
+    required_heading_set = set(required_headings)
+    expected_order = {heading: index for index, heading in enumerate(required_headings)}
+    current_record_fields: list[str] = []
+    current_record_seen: set[str] = set()
+    complete_records = 0
+
+    def finalize_record() -> None:
+        nonlocal complete_records, current_record_fields, current_record_seen
+        complete_records += 1
+        current_record_fields = []
+        current_record_seen = set()
+
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        heading = _normalize_evidence_ledger_heading(raw_line, required_heading_set)
+        if heading is None:
+            continue
+        heading_counts[heading] += 1
+        if not current_record_fields:
+            if heading != required_headings[0]:
+                errors.append(f"Field out of order in evidence_ledger record at line {line_number}: {heading} appears before {required_headings[0]}.")
+                continue
+            current_record_fields = [heading]
+            current_record_seen = {heading}
+            continue
+        if heading == required_headings[0]:
+            if len(current_record_fields) == len(required_headings):
+                finalize_record()
+                current_record_fields = [heading]
+                current_record_seen = {heading}
+                continue
+            errors.append(
+                f"New record begins before previous evidence_ledger record is complete at line {line_number}: {heading} appears before {required_headings[len(current_record_fields)]}."
+            )
+            continue
+        if heading in current_record_seen:
+            errors.append(f"Duplicate field in evidence_ledger record at line {line_number}: {heading}")
+            continue
+        expected_heading = required_headings[len(current_record_fields)]
+        if heading != expected_heading:
+            errors.append(f"Field out of order in evidence_ledger record at line {line_number}: {heading} appears before {expected_heading}.")
+            continue
+        current_record_fields.append(heading)
+        current_record_seen.add(heading)
+
+    if current_record_fields:
+        missing_fields = [heading for heading in required_headings if heading not in current_record_seen]
+        if missing_fields:
+            for heading in missing_fields:
+                errors.append(f"Missing field in evidence_ledger record: {heading}")
+        else:
+            finalize_record()
+    if complete_records == 0:
+        errors.append("Evidence ledger must contain at least one complete record.")
+
+    for heading in required_headings:
+        status = "VALID"
+        result_errors: list[str] = []
+        if heading_counts[heading] == 0:
+            status = "INVALID"
+            result_errors.append("MISSING")
+        heading_results.append(
+            {
+                "heading": heading,
+                "status": status,
+                "occurrences": heading_counts[heading],
+                "errors": result_errors,
+            }
+        )
+
+    return {
+        "status": "VALID" if not errors else "INVALID",
+        "errors": errors,
+        "warnings": warnings,
+        "heading_results": heading_results,
+        "complete_record_count": complete_records,
+    }
+
+
 def _validate_required_headings(text: str, required_headings: list[str]) -> dict[str, Any]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -110,7 +209,11 @@ def _single_artifact_parse(
     artifact_contract: dict[str, Any],
     definition_artifact: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    validation = _validate_required_headings(output_text, list(artifact_contract.get("required_headings", [])))
+    required_headings = list(artifact_contract.get("required_headings", []))
+    if artifact_contract.get("artifact_id") == "evidence_ledger" and required_headings == EVIDENCE_LEDGER_FIELDS:
+        validation = _validate_evidence_ledger_records(output_text, required_headings)
+    else:
+        validation = _validate_required_headings(output_text, required_headings)
     artifact_validation_errors = list(validation["errors"])
     if not output_text:
         artifact_validation_errors.append("Artifact content is empty.")
@@ -203,12 +306,18 @@ def _parse_multi_artifact_output(
         body = output_text[marker_end:next_start]
         definition_artifact = definition_artifacts_by_id[contract_artifact["artifact_id"]]
         required_headings = list(contract_artifact.get("required_headings", []))
-        heading_validation = _validate_required_headings(body, required_headings) if required_headings else {
-            "status": "VALID",
-            "errors": [],
-            "warnings": [],
-            "heading_results": [],
-        }
+        if required_headings:
+            if contract_artifact.get("artifact_id") == "evidence_ledger" and required_headings == EVIDENCE_LEDGER_FIELDS:
+                heading_validation = _validate_evidence_ledger_records(body, required_headings)
+            else:
+                heading_validation = _validate_required_headings(body, required_headings)
+        else:
+            heading_validation = {
+                "status": "VALID",
+                "errors": [],
+                "warnings": [],
+                "heading_results": [],
+            }
         artifact_errors = list(heading_validation["errors"])
         if not body:
             artifact_errors.append(f"Parsed artifact {contract_artifact['artifact_id']} is empty.")

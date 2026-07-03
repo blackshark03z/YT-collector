@@ -63,6 +63,30 @@ def parse_for_step(
     )
 
 
+def prompt2_research_pack_text() -> str:
+    return (
+        "## Topic Overview\nOverview\n"
+        "## Reliable Timeline\nTimeline\n"
+        "## Key People and Roles\nPeople\n"
+        "## Anchor Facts\nFacts\n"
+        "## Human Details and Human Cost\nCost\n"
+        "## Myths, Disputes, and Later Accounts\nMyths\n"
+        "## Facts That Contradict the Competitor\nContradictions\n"
+        "## Possible Evidence-Based Contradictions\nEvidence\n"
+        "## Documented Visual Details\nVisuals\n"
+        "## Source Notes\nSources\n"
+    )
+
+
+def prompt2_envelope_text(evidence_ledger_text: str) -> str:
+    return (
+        "=== FILE 1: research_pack.md ===\n"
+        f"{prompt2_research_pack_text()}"
+        "=== FILE 2: evidence_ledger.md ===\n"
+        f"{evidence_ledger_text}"
+    )
+
+
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8", newline="\n")
@@ -231,26 +255,104 @@ class ChannelOutputParserTests(unittest.TestCase):
             root = Path(tmp)
             project, project_dir = make_v2_project(root)
             prepare_step2_inputs(root, "mist_of_ages", project["project_slug"])
-            output_text = (
-                "=== FILE 1: research_pack.md ===\n"
-                "## Topic Overview\nOverview\n"
-                "## Reliable Timeline\nTimeline\n"
-                "## Key People and Roles\nPeople\n"
-                "## Anchor Facts\nFacts\n"
-                "## Human Details and Human Cost\nCost\n"
-                "## Myths, Disputes, and Later Accounts\nMyths\n"
-                "## Facts That Contradict the Competitor\nContradictions\n"
-                "## Possible Evidence-Based Contradictions\nEvidence\n"
-                "## Documented Visual Details\nVisuals\n"
-                "## Source Notes\nSources\n"
-                "=== FILE 2: evidence_ledger.md ===\n"
-                "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n"
-            )
+            output_text = prompt2_envelope_text("CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n")
             parsed = parse_for_step(root, project, project_dir, "prompt_2_historical_research", output_text)
             self.assertEqual(parsed["status"], "VALID")
             self.assertEqual([item["artifact_id"] for item in parsed["artifacts"]], ["research_pack", "evidence_ledger"])
             self.assertTrue(parsed["artifacts"][0]["content"].startswith("## Topic Overview"))
             self.assertTrue(parsed["artifacts"][1]["content"].startswith("CLAIM:"))
+
+    def test_evidence_ledger_plain_single_record_remains_valid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "VALID")
+        self.assertEqual(validation["complete_record_count"], 1)
+
+    def test_evidence_ledger_two_plain_records_are_valid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact 1\nSOURCE:\nBook 1\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay 1.\nNOTES:\nNone.\n\n"
+            "CLAIM:\nFact 2\nSOURCE:\nBook 2\nSTATUS:\nDISPUTED\nALLOWED WORDING:\nOkay 2.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "VALID")
+        self.assertEqual(validation["complete_record_count"], 2)
+
+    def test_evidence_ledger_two_markdown_records_are_valid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "## CLAIM:\nFact 1\n## SOURCE:\nBook 1\n## STATUS:\nVERIFIED\n## ALLOWED WORDING:\nOkay 1.\n## NOTES:\nNone.\n\n"
+            "## CLAIM:\nFact 2\n## SOURCE:\nBook 2\n## STATUS:\nDISPUTED\n## ALLOWED WORDING:\nOkay 2.\n## NOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "VALID")
+        self.assertEqual(validation["complete_record_count"], 2)
+
+    def test_evidence_ledger_mixed_plain_and_markdown_records_are_valid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact 1\nSOURCE:\nBook 1\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay 1.\nNOTES:\nNone.\n\n"
+            "### CLAIM:\nFact 2\n### SOURCE:\nBook 2\n### STATUS:\nDISPUTED\n### ALLOWED WORDING:\nOkay 2.\n### NOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "VALID")
+        self.assertEqual(validation["complete_record_count"], 2)
+
+    def test_evidence_ledger_incomplete_second_record_is_invalid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact 1\nSOURCE:\nBook 1\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay 1.\nNOTES:\nNone.\n\n"
+            "CLAIM:\nFact 2\nSOURCE:\nBook 2\nSTATUS:\nDISPUTED\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "INVALID")
+        self.assertTrue(any(item.startswith("Missing field in evidence_ledger record: ALLOWED WORDING:") for item in validation["errors"]))
+
+    def test_evidence_ledger_duplicate_field_inside_record_is_invalid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact\nSOURCE:\nBook\nSTATUS:\nVERIFIED\nSTATUS:\nDISPUTED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "INVALID")
+        self.assertTrue(any(item.startswith("Duplicate field in evidence_ledger record") for item in validation["errors"]))
+
+    def test_evidence_ledger_wrong_order_is_invalid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact\nSTATUS:\nVERIFIED\nSOURCE:\nBook\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "INVALID")
+        self.assertTrue(any(item.startswith("Field out of order in evidence_ledger record") for item in validation["errors"]))
+
+    def test_evidence_ledger_new_claim_before_previous_record_is_invalid(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact 1\nSOURCE:\nBook 1\nCLAIM:\nFact 2\nSOURCE:\nBook 2\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "INVALID")
+        self.assertTrue(any(item.startswith("New record begins before previous evidence_ledger record is complete") for item in validation["errors"]))
+
+    def test_evidence_ledger_markdown_content_inside_notes_is_not_treated_as_heading(self):
+        validation = channel_output_parser._validate_evidence_ledger_records(
+            "CLAIM:\nFact 1\nSOURCE:\nBook 1\nSTATUS:\nVERIFIED\nALLOWED WORDING:\nOkay 1.\nNOTES:\n# The Tomb of Eurysaces...\n\n"
+            "CLAIM:\nFact 2\nSOURCE:\nBook 2\nSTATUS:\nDISPUTED\nALLOWED WORDING:\nOkay 2.\nNOTES:\nNone.\n",
+            channel_output_parser.EVIDENCE_LEDGER_FIELDS,
+        )
+        self.assertEqual(validation["status"], "VALID")
+        self.assertEqual(validation["complete_record_count"], 2)
+
+    def test_evidence_ledger_realistic_two_artifact_envelope_with_multiple_records_is_valid(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            project, project_dir = make_v2_project(root)
+            prepare_step2_inputs(root, "mist_of_ages", project["project_slug"])
+            output_text = prompt2_envelope_text(
+                "## CLAIM:\nFact 1\n## SOURCE:\nBook 1\n## STATUS:\nVERIFIED\n## ALLOWED WORDING:\nOkay 1.\n## NOTES:\nNone.\n\n"
+                "## CLAIM:\nFact 2\n## SOURCE:\nBook 2\n## STATUS:\nDISPUTED\n## ALLOWED WORDING:\nOkay 2.\n## NOTES:\n# The Tomb of Eurysaces...\n"
+            )
+            parsed = parse_for_step(root, project, project_dir, "prompt_2_historical_research", output_text)
+            self.assertEqual(parsed["status"], "VALID")
+            self.assertEqual(len(parsed["artifacts"]), 2)
+            self.assertEqual(parsed["artifacts"][0]["validation"]["status"], "VALID")
+            self.assertEqual(parsed["artifacts"][1]["validation"]["status"], "VALID")
 
     def test_prompt_native_output_parses_in_memory_only(self):
         with tempfile.TemporaryDirectory() as tmp:

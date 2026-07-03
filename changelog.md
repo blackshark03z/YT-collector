@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 7D1B1 - Prompt 2 Evidence Ledger Parser Fix
+- Fixed the Prompt 2 `evidence_ledger` parser in `scripts/channel_output_parser.py` so repeatable claim records are validated per record instead of counting all configured labels globally.
+- Added support for canonical plain labels and Markdown label forms `# CLAIM:` through `###### CLAIM:` for Prompt 2 evidence-ledger fields only.
+- Preserved exact matching after optional Markdown prefix removal, left STATUS-value semantics unchanged, and preserved all non-ledger heading-validation behavior.
+- Added focused parser coverage in `tests/test_channel_output_parser.py` for multi-record plain labels, multi-record Markdown labels, mixed records, incomplete records, duplicate fields, out-of-order fields, premature new-`CLAIM` boundaries, Markdown content inside `NOTES:`, and a realistic Prompt 2 two-artifact envelope with multiple ledger records.
+- Re-ran the focused parser module successfully (`32` pass) and the focused multichannel parse-route regression successfully.
+- Verified the live API on the current restarted single-listener server now returns `VALID` for a Prompt 2 parse-preview smoke with repeated Markdown evidence-ledger labels.
+- Verified the real Prompt 2 raw response parses validly with raw SHA-256 `CA6C664A86C5AC52F54E3C7F4CAD3A14543286E8CD0D3AF98F7D0FC877B9960D`.
+- Completed the Prompt 2 pilot approval only: candidate `grp_000002` was approved, `research_pack` `rev_000001` and `evidence_ledger` `rev_000001` were published to stable, stable SHA-256 values are `1AAC8842AFDDB238FE243D4DE1F35417B4B3B3340435A703C120875BFBC1E72E` and `B136B8C69D1875629C56CDD8894D68BDFBFD5B4DF13C42EE8F1C28D4763005D3`, workflow state revision advanced to `4`, and Prompt 3 became `READY`.
+- The next workflow step remains `prompt_3_creative_package`, but Prompt 3 has not been bundled or run in this phase.
+- The parser fix has been committed locally on `master`, remains unpushed, and awaits final push review.
+
 ### Phase 7D1A1 - Explicit Workflow Binding at Project Creation
 - Confirmed the real pilot blocker from code instead of assumption: canonical V2 project creation in `scripts/ui_server.py` entered `channel_projects.create_channel_project(...)` without an explicit binding, which then fell back to `channel_workflow.get_channel_default_workflow(...)` and therefore persisted the registry `default_version = 1`.
 - Added `channel_workflow.list_channel_workflow_options(...)` so the visible canonical create UI can use server-owned workflow options derived from the registry and channel defaults.

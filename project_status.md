@@ -12,13 +12,46 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7D1A1 - Explicit Workflow Binding at Project Creation
+Phase 7D1B1 - Prompt 2 Evidence Ledger Parser Fix
 
 ## Phase Status
-COMPLETE
+COMPLETE_PENDING_PUSH_REVIEW
 
 ## Approval
 IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
+
+## Phase 7D1B1 Scope
+- Confirmed the Prompt 2 `evidence_ledger` parser defect exactly: `scripts/channel_output_parser.py` counted configured required headings globally, so valid repeatable claim records failed as duplicates and Markdown label variants like `## CLAIM:` failed as missing headings.
+- Added a narrowly scoped `evidence_ledger`-only validator in `scripts/channel_output_parser.py` that preserves existing non-ledger heading behavior while allowing one or more complete claim records with optional Markdown label prefixes `#` through `######`.
+- Kept matching exact after optional prefix removal: case-sensitive, colon-sensitive, and literal against the configured heading names `CLAIM:`, `SOURCE:`, `STATUS:`, `ALLOWED WORDING:`, and `NOTES:`.
+- Allowed blank lines between labels and content and ensured Markdown content such as `# The Tomb of Eurysaces...` inside `NOTES:` remains ordinary content instead of being misclassified as a field heading.
+- Added focused parser coverage in `tests/test_channel_output_parser.py` for valid plain/Markdown/mixed repeatable records, incomplete records, duplicate fields, out-of-order fields, premature new-`CLAIM` boundaries, Markdown content inside `NOTES:`, and a realistic two-artifact Prompt 2 envelope carrying multiple ledger records.
+- Preserved all non-ledger parser behavior, output markers, raw bytes, artifact SHA calculation, and STATUS-value validation semantics unchanged.
+
+## Phase 7D1B1 Verification
+- Focused parser regression passed: `python -m unittest tests.test_channel_output_parser` (`32` run, `32` passed, `0` failures, `0` errors).
+- Focused API parse-route regression passed: `python -m unittest tests.test_multichannel_api.MultiChannelApiTests.test_parse_output_route_returns_parsed_preview_for_selected_project_step`.
+- Live API smoke on the current restarted single-listener server returned `VALID` for a two-artifact Prompt 2 parse preview with repeated Markdown evidence-ledger labels.
+- The real Prompt 2 raw response was parsed validly with raw SHA-256 `CA6C664A86C5AC52F54E3C7F4CAD3A14543286E8CD0D3AF98F7D0FC877B9960D`.
+- No runtime project, workflow asset, prompt asset, manifest, registry default, token file, or protected channel runtime was modified by parser verification.
+
+## Prompt 2 Pilot Result
+- Prompt 2 candidate group `grp_000002` was approved through the supported workflow decision API.
+- `research_pack` candidate revision `rev_000001` was published to stable `workflow/research_pack.md`.
+- `evidence_ledger` candidate revision `rev_000001` was published to stable `workflow/evidence_ledger.md`.
+- Stable `research_pack` SHA-256 is `1AAC8842AFDDB238FE243D4DE1F35417B4B3B3340435A703C120875BFBC1E72E`.
+- Stable `evidence_ledger` SHA-256 is `B136B8C69D1875629C56CDD8894D68BDFBFD5B4DF13C42EE8F1C28D4763005D3`.
+- Workflow state schema remains `2` and state revision is now `4`.
+- Prompt 1 remains `APPROVED`.
+- Prompt 2 is now `APPROVED` with approved group `grp_000002`.
+- Prompt 3 effective status is `READY`.
+- The exact next workflow step id is `prompt_3_creative_package`.
+
+## Commit State
+- The parser fix has been committed locally on `master`.
+- No push has been performed.
+- The repository is ahead of `origin/master` by one local commit pending final push review.
+- Prompt 3 bundle preparation and verification remain a separate next workflow step and have not been started in this phase.
 
 ## Repository Baseline
 - Branch: master
