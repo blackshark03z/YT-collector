@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Phase 7D1B2 - Prompt 3 Candidate-Action UI Capability Fix
+- Fixed a narrow embedded-frontend capability mismatch in `scripts/ui_server.py` where Prompt 3 could show the blocked candidate-save helper and disabled save button even after a valid parse preview, despite the current backend workflow read model allowing `save_candidate`.
+- Updated successful Parse and Preview handling to refresh the selected workflow read model for the same step while preserving the visible workflow panel, selected step, loaded bundle, and parsed preview.
+- Preserved backend authority for action gating: Save Candidate now remains enabled only when the parsed preview is `VALID` and the refreshed backend `available_actions[step_id].save_candidate` is true; Approve/Reject still require a current candidate plus backend decision capability.
+- Added focused frontend contract coverage for Prompt 3 capability refresh, valid-preview enable/disable behavior, invalid-preview blocking, and candidate-decision button gating.
+- Re-ran `python -m py_compile scripts/ui_server.py` successfully and re-ran `python -m unittest tests.test_ui_frontend_contract` successfully (`48` pass).
+- Verified the live UI retry passed: the stale blocked helper disappeared, `Save Candidate` became enabled, and the Prompt 3 raw output identity remained `16504` characters with SHA-256 `0FC2C5CB100A99424D6550539C8C34F51FFAFF68FAD107FD856759EE36EFE65A`.
+- Completed the Prompt 3 pilot approval only: candidate `grp_000003` was approved, `locked_creative_package` `rev_000001` was published to stable `workflow/locked_creative_package.md`, the stable SHA-256 is `0FC2C5CB100A99424D6550539C8C34F51FFAFF68FAD107FD856759EE36EFE65A`, workflow state revision advanced to `6`, and Prompt 4 became `READY`.
+- The next workflow operation is prepare/verify bundle for `prompt_4_retention_outline`; Prompt 4 has not been bundled or run in this phase.
+- Repository closeout for the Prompt 3 UI capability-refresh fix is in progress and the fix has not been pushed yet.
+
 ### Phase 7D1B1 - Prompt 2 Evidence Ledger Parser Fix
 - Fixed the Prompt 2 `evidence_ledger` parser in `scripts/channel_output_parser.py` so repeatable claim records are validated per record instead of counting all configured labels globally.
 - Added support for canonical plain labels and Markdown label forms `# CLAIM:` through `###### CLAIM:` for Prompt 2 evidence-ledger fields only.

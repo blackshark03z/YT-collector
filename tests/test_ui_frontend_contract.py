@@ -971,6 +971,279 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertEqual(result["parsedPreviewValue"], "## Subject\nRome\n<img src=x onerror=1>")
         self.assertFalse(result["panelContainsRawImg"])
 
+    def test_parse_output_refreshes_workflow_capabilities_and_enables_save_for_ready_step(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            const workflowDefinition = {
+              workflow_id: "wf-demo",
+              workflow_version: "2",
+              display_name: "Workflow Demo",
+              execution_mode: "ASSISTED",
+              prompt_set: { status: "AVAILABLE", bundle_available: true },
+              steps: [{ step_id: "step-3", order: 3, display_name: "Step 3", required_model: "GPT", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["locked-creative-package"], resulting_lifecycle_state: "THREE", constraints: [] }],
+            };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: workflowDefinition,
+              state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+              available_actions: { "step-3": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-3";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-3",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "GPT",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-3", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "# Locked Creative Package\\n## Topic Verdict\\nPRODUCE\\n";
+            fetchHandler = async (path) => {
+              if (path.endsWith("/steps/step-3/parse-output")) {
+                return jsonResponse({
+                  identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-3", bundle_sha256: "sha-bundle" },
+                  raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+                  contract: { response_mode: "SINGLE_ARTIFACT" },
+                  status: "VALID",
+                  artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", filename: "locked_creative_package.md", content: state.pastedOutputDraft, sha256: "artifact-sha", character_count: state.pastedOutputDraft.length, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+                  validation: { errors: [], warnings: [] },
+                });
+              }
+              if (path.endsWith("/workflow")) {
+                return jsonResponse({
+                  channel_slug: "channel-a",
+                  project_slug: "project-a",
+                  binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+                  definition: workflowDefinition,
+                  state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+                  available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+                  artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            await parseOutputAction();
+            await flush();
+            const saveButton = saveCandidateButtonModel();
+            return {
+              workflowFetchCount: fetchCalls.filter((call) => call.path.endsWith("/workflow")).length,
+              previewStatus: state.parsedOutputResult && state.parsedOutputResult.status,
+              previewValue: document.getElementById("parsedArtifactPreview0").value,
+              saveDisabled: saveButton.disabled,
+              saveHelper: saveButton.helper,
+              saveReady: state.selectedProjectWorkflow.available_actions["step-3"].save_candidate,
+              panelShowsBlockedHelper: document.getElementById("projectDetailPanel").innerHTML.includes("This workflow step does not currently allow candidate save."),
+            };
+            """
+        )
+        self.assertEqual(result["workflowFetchCount"], 1)
+        self.assertEqual(result["previewStatus"], "VALID")
+        self.assertEqual(result["previewValue"], "# Locked Creative Package\n## Topic Verdict\nPRODUCE\n")
+        self.assertTrue(result["saveReady"])
+        self.assertFalse(result["saveDisabled"])
+        self.assertFalse(result["panelShowsBlockedHelper"])
+        self.assertNotIn("does not currently allow candidate save", result["saveHelper"])
+
+    def test_parse_output_refresh_keeps_save_blocked_when_backend_capability_is_false(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            const workflowDefinition = {
+              workflow_id: "wf-demo",
+              workflow_version: "2",
+              display_name: "Workflow Demo",
+              execution_mode: "ASSISTED",
+              prompt_set: { status: "AVAILABLE", bundle_available: true },
+              steps: [{ step_id: "step-3", order: 3, display_name: "Step 3", required_model: "GPT", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["locked-creative-package"], resulting_lifecycle_state: "THREE", constraints: [] }],
+            };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: workflowDefinition,
+              state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+              available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-3";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-3",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "GPT",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-3", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "# Locked Creative Package\\n## Topic Verdict\\nPRODUCE\\n";
+            fetchHandler = async (path) => {
+              if (path.endsWith("/steps/step-3/parse-output")) {
+                return jsonResponse({
+                  identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-3", bundle_sha256: "sha-bundle" },
+                  raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+                  contract: { response_mode: "SINGLE_ARTIFACT" },
+                  status: "VALID",
+                  artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", filename: "locked_creative_package.md", content: state.pastedOutputDraft, sha256: "artifact-sha", character_count: state.pastedOutputDraft.length, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+                  validation: { errors: [], warnings: [] },
+                });
+              }
+              if (path.endsWith("/workflow")) {
+                return jsonResponse({
+                  channel_slug: "channel-a",
+                  project_slug: "project-a",
+                  binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+                  definition: workflowDefinition,
+                  state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+                  available_actions: { "step-3": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+                  artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            render();
+            await parseOutputAction();
+            await flush();
+            const saveButton = saveCandidateButtonModel();
+            return {
+              saveDisabled: saveButton.disabled,
+              saveHelper: saveButton.helper,
+              saveReady: state.selectedProjectWorkflow.available_actions["step-3"].save_candidate,
+            };
+            """
+        )
+        self.assertFalse(result["saveReady"])
+        self.assertTrue(result["saveDisabled"])
+        self.assertEqual(result["saveHelper"], "This workflow step does not currently allow candidate save.")
+
+    def test_invalid_preview_keeps_save_disabled_even_when_backend_capability_is_true(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-3", order: 3, display_name: "Step 3", required_model: "GPT", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["locked-creative-package"], resulting_lifecycle_state: "THREE", constraints: [] }],
+              },
+              state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+              available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-3";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "step-3",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "Prompt bundle",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: "Prompt bundle".length,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "GPT",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-3", bundle_sha256: "sha-bundle" },
+            };
+            state.pastedOutputDraft = "# bad\\n";
+            state.parsedOutputResult = {
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", step_id: "step-3", bundle_sha256: "sha-bundle" },
+              raw_output: { sha256: "raw-sha", character_count: state.pastedOutputDraft.length },
+              contract: { response_mode: "SINGLE_ARTIFACT" },
+              status: "INVALID",
+              artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", filename: "locked_creative_package.md", content: state.pastedOutputDraft, sha256: "artifact-sha", character_count: state.pastedOutputDraft.length, validation: { status: "INVALID", errors: ["Missing heading"], warnings: [], heading_results: [] } }],
+              validation: { errors: ["Artifact invalid"], warnings: [] },
+            };
+            render();
+            const saveButton = saveCandidateButtonModel();
+            return { saveDisabled: saveButton.disabled, saveHelper: saveButton.helper };
+            """
+        )
+        self.assertTrue(result["saveDisabled"])
+        self.assertEqual(result["saveHelper"], "Only a valid parsed output preview can be saved as a candidate.")
+
+    def test_candidate_decision_buttons_follow_backend_capabilities_and_candidate_presence(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            const workflowDefinition = {
+              workflow_id: "wf-demo",
+              workflow_version: "2",
+              display_name: "Workflow Demo",
+              execution_mode: "ASSISTED",
+              prompt_set: { status: "AVAILABLE", bundle_available: true },
+              steps: [{ step_id: "step-3", order: 3, display_name: "Step 3", required_model: "GPT", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["locked-creative-package"], resulting_lifecycle_state: "THREE", constraints: [] }],
+            };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: workflowDefinition,
+              state: { current_step_id: "step-3", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "TWO", state_revision: 4, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "READY", candidate_group_id: null, approved_group_id: null } } },
+              available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "step-3";
+            render();
+            const noCandidateApprove = candidateDecisionButtonModel("APPROVE");
+            const noCandidateReject = candidateDecisionButtonModel("REJECT");
+            state.selectedProjectWorkflow = {
+              ...state.selectedProjectWorkflow,
+              state: { current_step_id: "step-3", current_step_status: "CANDIDATE", next_step_id: null, current_lifecycle_state: "THREE", state_revision: 5, state_persisted: true, step_states: { "step-3": { step_id: "step-3", status: "CANDIDATE", candidate_group_id: "grp_000003", approved_group_id: null, candidate_group: { revision_group_id: "grp_000003", artifacts: [] }, approved_group: null } } },
+              available_actions: { "step-3": { save_candidate: false, approve_candidate: true, reject_candidate: true } },
+            };
+            render();
+            const withCandidateApprove = candidateDecisionButtonModel("APPROVE");
+            const withCandidateReject = candidateDecisionButtonModel("REJECT");
+            return {
+              noCandidateApproveDisabled: noCandidateApprove.disabled,
+              noCandidateRejectDisabled: noCandidateReject.disabled,
+              withCandidateApproveDisabled: withCandidateApprove.disabled,
+              withCandidateRejectDisabled: withCandidateReject.disabled,
+            };
+            """
+        )
+        self.assertTrue(result["noCandidateApproveDisabled"])
+        self.assertTrue(result["noCandidateRejectDisabled"])
+        self.assertFalse(result["withCandidateApproveDisabled"])
+        self.assertFalse(result["withCandidateRejectDisabled"])
+
     def test_output_textarea_stays_disabled_without_bundle_and_paste_does_not_auto_parse(self):
         result = run_ui_runtime_scenario(
             """

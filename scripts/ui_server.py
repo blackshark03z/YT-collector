@@ -3159,16 +3159,20 @@ async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
   }
 }
 
-async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, preserveBundleStateArg) {
+async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, preserveBundleStateArg, preserveVisibleWorkflowArg) {
   const channelSlug = channelSlugArg || state.selectedChannelSlug;
   const projectSlug = projectSlugArg || state.selectedProjectSlug;
   const preserveBundleState = !!preserveBundleStateArg;
+  const preserveVisibleWorkflow = !!preserveVisibleWorkflowArg;
   if (!channelSlug || !projectSlug || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
 
   const requestId = ++state.workflowRequestId;
+  const previousWorkflow = state.selectedProjectWorkflow;
   state.isLoadingWorkflow = true;
   state.workflowError = "";
-  state.selectedProjectWorkflow = null;
+  if (!preserveVisibleWorkflow) {
+    state.selectedProjectWorkflow = null;
+  }
   if (!preserveBundleState) {
     state.selectedWorkflowStepId = null;
     invalidateLoadedBundle();
@@ -3187,7 +3191,7 @@ async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, prese
     }
   } catch (error) {
     if (requestId !== state.workflowRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
-    state.selectedProjectWorkflow = null;
+    state.selectedProjectWorkflow = preserveVisibleWorkflow ? previousWorkflow : null;
     if (!preserveBundleState) state.selectedWorkflowStepId = null;
     state.workflowError = workflowErrorSummary(error, "Could not load the selected project workflow.");
   } finally {
@@ -3416,6 +3420,7 @@ async function parseOutputAction() {
     ) return;
     state.parsedOutputResult = data;
     state.parsedOutputError = "";
+    await loadSelectedProjectWorkflow(projectSlug, channelSlug, true, true);
   } catch (error) {
     if (
       state.parseOutputAction.requestId !== requestId

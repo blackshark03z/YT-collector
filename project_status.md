@@ -12,13 +12,40 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7D1B1 - Prompt 2 Evidence Ledger Parser Fix
+Phase 7D1B2 - Prompt 3 Candidate-Action UI Capability Fix
 
 ## Phase Status
-COMPLETE_PENDING_PUSH_REVIEW
+COMPLETE_PENDING_COMMIT_REVIEW
 
 ## Approval
-IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
+LIVE_RETRY_AND_PILOT_VERIFIED
+
+## Phase 7D1B2 Scope
+- Confirmed the Prompt 3 UI mismatch exactly: the live backend read model reported `save_candidate = true` for `prompt_3_creative_package` in `READY`, but the embedded UI still surfaced the blocked save helper and disabled the button from stale workflow capability state.
+- Narrowly updated the embedded frontend in `scripts/ui_server.py` so a successful Parse and Preview now refreshes the selected workflow read model for the same channel/project/step while preserving the visible workflow, selected step, loaded bundle, and valid parsed preview.
+- Kept Save Candidate gated by both conditions only: parsed preview must remain `VALID`, and the latest backend `available_actions[step_id].save_candidate` must be `true`.
+- Preserved the existing backend-controlled decision gating: Approve and Reject remain disabled unless a current candidate exists and backend `approve_candidate` / `reject_candidate` are true.
+- Avoided widening scope into workflow assets, prompt assets, parser behavior, runtime mutation, or candidate actions.
+
+## Phase 7D1B2 Verification
+- Focused compile check passed: `python -m py_compile scripts/ui_server.py`.
+- Focused frontend contract rerun passed: `python -m unittest tests.test_ui_frontend_contract` (`48` run, `48` passed, `0` failures, `0` errors).
+- Live UI retry passed: the blocked helper disappeared and `Save Candidate` became enabled for Prompt 3 after a valid Parse and Preview while backend capability remained authoritative.
+- Added focused UI coverage for Prompt 3 capability refresh after parse, valid-preview save enablement only when backend capability is true, valid-preview save blocking when backend capability is false, invalid-preview save blocking even when backend capability is true, and candidate-decision buttons following backend capability plus candidate presence.
+- Prompt 3 raw output identity remained stable through the successful live retry and save path: character count `16504`, SHA-256 `0FC2C5CB100A99424D6550539C8C34F51FFAFF68FAD107FD856759EE36EFE65A`.
+- No runtime project, workflow asset, prompt asset, manifest, registry, token file, or protected channel runtime was modified during the implementation pass.
+
+## Prompt 3 Pilot Result
+- Prompt 3 candidate group `grp_000003` was saved successfully from the live UI retry path and then approved through the supported workflow decision API.
+- `locked_creative_package` candidate revision `rev_000001` was published to stable `workflow/locked_creative_package.md`.
+- Stable `locked_creative_package` SHA-256 is `0FC2C5CB100A99424D6550539C8C34F51FFAFF68FAD107FD856759EE36EFE65A`.
+- Workflow state schema remains `2` and state revision is now `6`.
+- Prompt 1 remains `APPROVED`.
+- Prompt 2 remains `APPROVED`.
+- Prompt 3 is now `APPROVED` with approved group `grp_000003`.
+- Prompt 4 effective status is now `READY`.
+- The current actionable step id is `prompt_4_retention_outline`.
+- The read model `next_step_id` is `prompt_5_narration_v1`.
 
 ## Phase 7D1B1 Scope
 - Confirmed the Prompt 2 `evidence_ledger` parser defect exactly: `scripts/channel_output_parser.py` counted configured required headings globally, so valid repeatable claim records failed as duplicates and Markdown label variants like `## CLAIM:` failed as missing headings.
@@ -48,10 +75,9 @@ IMPLEMENTATION_COMPLETE_PENDING_TECH_LEAD_REVIEW
 - The exact next workflow step id is `prompt_3_creative_package`.
 
 ## Commit State
-- The parser fix has been committed locally on `master`.
-- No push has been performed.
-- The repository is ahead of `origin/master` by one local commit pending final push review.
-- Prompt 3 bundle preparation and verification remain a separate next workflow step and have not been started in this phase.
+- Repository closeout for the Prompt 3 UI capability-refresh fix is in progress.
+- This fix has not been pushed yet.
+- Prompt 4 bundle preparation and verification remain a separate next workflow step and have not been started in this phase.
 
 ## Repository Baseline
 - Branch: master
