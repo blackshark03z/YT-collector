@@ -12,13 +12,42 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 7D1B2 - Prompt 3 Candidate-Action UI Capability Fix
+Phase 8A - Production Handoff MVP
 
 ## Phase Status
-COMPLETE_PENDING_COMMIT_REVIEW
+COMPLETE_PENDING_TECH_LEAD_REVIEW
 
 ## Approval
-LIVE_RETRY_AND_PILOT_VERIFIED
+IMPLEMENTED_LOCAL_VERIFICATION_COMPLETE
+
+## Phase 8A Scope
+- Added a focused read-only production handoff/export module in `scripts/channel_production_export.py` for canonical channel projects whose supported workflow read model reports `PRODUCTION_READY`.
+- Added a supported summary endpoint and a supported ZIP download endpoint in `scripts/ui_server.py` for the selected canonical project:
+  - `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/production-package`
+  - `GET /api/v2/channels/<channel_slug>/projects/<project_slug>/production-package/download`
+- The ZIP is built in memory and contains exactly `content.md`, `publishing_package.md`, and `manifest.json`.
+- `manifest.json` includes `schema_version`, `channel_slug`, `project_slug`, `workflow_id`, `workflow_version`, `state_revision`, `lifecycle`, `approved_group_id`, artifact filenames, character counts, SHA-256 values, and the export timestamp.
+- Export refuses unless the workflow read model is `PRODUCTION_READY`, both stable artifacts exist, and the stable artifact bytes match the approved revision metadata for the final approved group.
+- The implementation uses the supported workflow read model rather than trusting nullable derived fields directly from `workflow_state.json`.
+- Added an embedded UI Production Handoff section for the selected project that shows readiness, approved artifact identity, read-only artifact links, and a `Download Production ZIP` action.
+- Kept the phase strictly read-only with respect to approved runtime workflow artifacts, revisions, decisions, workflow state, and transaction directories.
+
+## Phase 8A Verification
+- Focused compile verification passed: `python -m py_compile scripts/channel_production_export.py scripts/ui_server.py tests/test_channel_production_export.py`.
+- Focused production-export regression passed: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors).
+- Focused UI runtime verification for the Production Handoff panel passed: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests.test_production_handoff_panel_renders_ready_download_and_artifact_links`.
+- Added focused coverage for successful export, `PRODUCTION_READY` gating, missing stable-artifact rejection, hash/revision mismatch rejection, exact ZIP/manifest contents, and no-project-mutation guarantees.
+- Added focused UI coverage proving the selected-project detail panel renders the Production Handoff section, readiness summary, artifact links, and ZIP download action from supported backend state.
+
+## Phase 8A Pilot Baseline
+- The authoritative pilot project remains `channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes`.
+- The supported workflow read model baseline for this phase is `workflow_id = mist_of_ages_assisted_content`, `workflow_version = 2`, `state_revision = 14`, `lifecycle = PRODUCTION_READY`, and final approved group `grp_000007`.
+- The required stable production artifacts remain `content.md` with SHA-256 `FD5E257BE6B34B0A45919D6E0CFCEA5167D33A73481E0F5D72589595C4501D9F` and `publishing_package.md` with SHA-256 `E4FD22AE4D40057C0D192839B94C65DF1C5542EA22405EACF5E4B3B5052B02BC`.
+
+## Phase 8A Repository State
+- The Production Handoff MVP implementation is local only and has not been committed or pushed.
+- No approved project artifact, workflow revision, decision record, workflow state file, or transaction directory was modified by the implementation pass.
+- `implement.docx` remains unrelated and untracked.
 
 ## Phase 7D1B2 Scope
 - Confirmed the Prompt 3 UI mismatch exactly: the live backend read model reported `save_candidate = true` for `prompt_3_creative_package` in `READY`, but the embedded UI still surfaced the blocked save helper and disabled the button from stale workflow capability state.

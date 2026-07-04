@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace
+from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_production_export, channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -913,6 +913,10 @@ def _map_output_parser_error(exc: channel_output_parser.ChannelOutputParserError
     return _v2_error(exc.code, exc.message, exc.status)
 
 
+def _map_production_export_error(exc: channel_production_export.ProductionExportError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
 def _map_workflow_write_error(exc: channel_workflow_write.ChannelWorkflowWriteError) -> V2Error:
     return _v2_error(exc.code, exc.message, exc.status)
 
@@ -1135,6 +1139,48 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
                 except channel_workflow.ChannelWorkflowError as exc:
                     raise _map_workflow_error(exc) from exc
                 return 200, workflow
+            if len(parts) == 7 and parts[4] == "projects" and parts[6] == "production-package" and method == "GET":
+                project_slug = parts[5]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                try:
+                    summary = channel_production_export.build_production_package_summary(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        project=project,
+                        project_dir=project_dir,
+                    )
+                except channel_production_export.ProductionExportError as exc:
+                    raise _map_production_export_error(exc) from exc
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
+                return 200, {"production_package": summary}
+            if len(parts) == 8 and parts[4] == "projects" and parts[6] == "production-package" and parts[7] == "download" and method == "GET":
+                project_slug = parts[5]
+                project = _load_project_or_error(root, channel_slug, project_slug)
+                project_dir = channel_workspace.canonical_channel_paths(root, channel_slug).projects_dir / project_slug
+                try:
+                    download = channel_production_export.build_production_package_download(
+                        root,
+                        channel_slug,
+                        project_slug,
+                        project=project,
+                        project_dir=project_dir,
+                    )
+                except channel_production_export.ProductionExportError as exc:
+                    raise _map_production_export_error(exc) from exc
+                except channel_workflow.ChannelWorkflowError as exc:
+                    raise _map_workflow_error(exc) from exc
+                except channel_workflow_write.ChannelWorkflowWriteError as exc:
+                    raise _map_workflow_write_error(exc) from exc
+                return 200, {
+                    "__binary__": download["body_bytes"],
+                    "content_type": download["content_type"],
+                    "filename": download["filename"],
+                }
             if len(parts) == 10 and parts[4] == "projects" and parts[6] == "workflow" and parts[7] == "steps" and parts[9] == "bundle" and method == "GET":
                 project_slug = parts[5]
                 step_id = parts[8]
@@ -1432,6 +1478,7 @@ const state = {
   projects: [],
   selectedProjectSlug: null,
   selectedProjectDetail: null,
+  selectedProjectProductionPackage: null,
   selectedProjectTranscript: null,
   selectedProjectValidation: null,
   selectedProjectWorkflow: null,
@@ -1445,16 +1492,19 @@ const state = {
   isLoadingSummary: false,
   isLoadingProjects: false,
   isLoadingProjectDetail: false,
+  isLoadingProductionPackage: false,
   isLoadingWorkflow: false,
   errorMessage: "",
   projectListError: "",
   projectDetailError: "",
+  productionPackageError: "",
   workflowError: "",
   bundleError: "",
   summaryRequestId: 0,
   summaryAbortController: null,
   projectListRequestId: 0,
   projectDetailRequestId: 0,
+  productionPackageRequestId: 0,
   workflowRequestId: 0,
   bundleAction: { busy: false, channelSlug: null, projectSlug: null, stepId: null, requestId: 0 },
   parseOutputAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 },
@@ -1681,6 +1731,7 @@ function projectFeedbackForSelection() {
 function clearProjectSelectionState() {
   state.selectedProjectSlug = null;
   state.selectedProjectDetail = null;
+  state.selectedProjectProductionPackage = null;
   state.selectedProjectTranscript = null;
   state.selectedProjectValidation = null;
   state.selectedProjectWorkflow = null;
@@ -1691,6 +1742,7 @@ function clearProjectSelectionState() {
   state.parsedOutputError = "";
   state.transcriptDraft = "";
   state.projectDetailError = "";
+  state.productionPackageError = "";
   state.workflowError = "";
   state.bundleError = "";
   state.parseOutputAction = { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, bundleSha256: null, outputText: "", requestId: 0 };
@@ -1763,8 +1815,11 @@ function invalidateLoadedBundle() {
 
 function clearWorkflowState() {
   state.selectedProjectWorkflow = null;
+  state.selectedProjectProductionPackage = null;
   state.selectedWorkflowStepId = null;
   state.isLoadingWorkflow = false;
+  state.isLoadingProductionPackage = false;
+  state.productionPackageError = "";
   state.workflowError = "";
   invalidateLoadedBundle();
 }
@@ -2508,6 +2563,27 @@ function renderProjectDetailState() {
   }
 
   const detail = state.selectedProjectDetail.project || {};
+  const productionPackage = state.selectedProjectProductionPackage;
+  const productionArtifacts = productionPackage && Array.isArray(productionPackage.artifacts) ? productionPackage.artifacts : [];
+  const productionStatus = state.isLoadingProductionPackage
+    ? "LOADING"
+    : (productionPackage && productionPackage.ready_for_export ? "READY" : (productionPackage ? "WAITING" : "UNKNOWN"));
+  const productionErrorHtml = state.productionPackageError
+    ? `<div class="notice" style="margin-top:12px"><strong>Production Handoff Error</strong><span class="meta">${escapeHtml(state.productionPackageError)}</span></div>`
+    : "";
+  const productionArtifactHtml = productionArtifacts.length
+    ? productionArtifacts.map((artifact) => `
+      <div class="check">
+        <div>
+          <strong>${escapeHtml(artifact.filename || artifact.artifact_id || "Artifact")}</strong>
+          <div class="meta mono">${escapeHtml(artifact.sha256 || "")}</div>
+          <div class="meta">${escapeHtml(String(artifact.character_count ?? artifact.approved_character_count ?? ""))} characters</div>
+          <div class="meta"><a href="${escapeHtml(artifact.file_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(artifact.relative_path || artifact.filename || "")}</a></div>
+        </div>
+        <div>${pill(artifact.exists && artifact.matches_approved_revision_metadata ? "READY" : (artifact.exists ? "CHECK" : "MISSING"))}</div>
+      </div>
+    `).join("")
+    : `<div class="notice"><strong>No production artifacts</strong><span class="meta">The selected project has not reached a supported production handoff state yet.</span></div>`;
   const workflow = state.selectedProjectWorkflow;
   const workflowState = workflow && workflow.state ? workflow.state : {};
   const binding = workflow && workflow.binding ? workflow.binding : {};
@@ -2616,6 +2692,37 @@ function renderProjectDetailState() {
     <div class="card">
       <strong>Source Video URL</strong>
       <div class="meta"><a href="${escapeHtml(detail.source_video_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(detail.source_video_url || "Unavailable")}</a></div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <strong>Production Handoff</strong>
+          <div class="meta">Read-only production export for canonical projects that the supported workflow read model reports as ready.</div>
+        </div>
+        <div>${pill(productionStatus)}</div>
+      </div>
+      ${productionErrorHtml}
+      ${productionPackage ? `
+        <div class="summary-grid" style="margin-top:12px">
+          <div class="card"><strong>Lifecycle</strong><div class="meta">${escapeHtml(productionPackage.lifecycle || "Unknown")}</div></div>
+          <div class="card"><strong>Approved Group</strong><div class="meta mono">${escapeHtml(productionPackage.approved_group_id || "")}</div></div>
+          <div class="card"><strong>State Revision</strong><div class="meta">${escapeHtml(String(productionPackage.state_revision ?? ""))}</div></div>
+          <div class="card"><strong>Download ZIP</strong><div>${pill(productionPackage.ready_for_export ? "AVAILABLE" : "BLOCKED")}</div></div>
+        </div>
+        ${productionPackage.errors && productionPackage.errors.length
+          ? `<div class="notice" style="margin-top:12px"><strong>Export Checks</strong><span class="meta">${escapeHtml(productionPackage.errors.join(" | "))}</span></div>`
+          : ""
+        }
+        <div class="row" style="margin-top:12px;align-items:center">
+          <a id="downloadProductionZipLink" href="${escapeHtml(productionPackage.download_url || "#")}"${productionPackage.ready_for_export ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(productionPackage.ready_for_export ? "Download Production ZIP" : "Production ZIP unavailable")}</a>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <strong>Artifact Identity Summary</strong>
+          <div class="stack" style="margin-top:12px">${productionArtifactHtml}</div>
+        </div>
+      ` : `
+        <div class="meta" style="margin-top:12px">${escapeHtml(state.isLoadingProductionPackage ? "Loading the production handoff summary..." : "Production handoff details will appear here once the project workflow is loaded.")}</div>
+      `}
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
@@ -3189,6 +3296,7 @@ async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, prese
     if (!preserveBundleState || !state.selectedWorkflowStepId || !definitionSteps.some((step) => step.step_id === state.selectedWorkflowStepId)) {
       state.selectedWorkflowStepId = hasCurrentStep ? currentStepId : (definitionSteps[0] ? definitionSteps[0].step_id : null);
     }
+    await loadSelectedProjectProductionPackage(projectSlug, channelSlug);
   } catch (error) {
     if (requestId !== state.workflowRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
     state.selectedProjectWorkflow = preserveVisibleWorkflow ? previousWorkflow : null;
@@ -3197,6 +3305,33 @@ async function loadSelectedProjectWorkflow(projectSlugArg, channelSlugArg, prese
   } finally {
     if (requestId === state.workflowRequestId) {
       state.isLoadingWorkflow = false;
+      render();
+    }
+  }
+}
+
+async function loadSelectedProjectProductionPackage(projectSlugArg, channelSlugArg) {
+  const channelSlug = channelSlugArg || state.selectedChannelSlug;
+  const projectSlug = projectSlugArg || state.selectedProjectSlug;
+  if (!channelSlug || !projectSlug || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+
+  const requestId = ++state.productionPackageRequestId;
+  state.isLoadingProductionPackage = true;
+  state.productionPackageError = "";
+  state.selectedProjectProductionPackage = null;
+  render();
+
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/production-package`);
+    if (requestId !== state.productionPackageRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectProductionPackage = data && data.production_package ? data.production_package : null;
+  } catch (error) {
+    if (requestId !== state.productionPackageRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
+    state.selectedProjectProductionPackage = null;
+    state.productionPackageError = describeError(error, "Could not load the production handoff summary.");
+  } finally {
+    if (requestId === state.productionPackageRequestId) {
+      state.isLoadingProductionPackage = false;
       render();
     }
   }
@@ -4007,6 +4142,15 @@ class Handler(BaseHTTPRequestHandler):
     def send_v2_error(self, code: str, message: str, status: int) -> None:
         self.send_json({"error": {"code": code, "message": message}}, status)
 
+    def send_bytes(self, body: bytes, *, content_type: str, filename: str | None = None, status: int = 200) -> None:
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        if filename:
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(body)
+
     def read_body(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
         if not length:
@@ -4018,7 +4162,9 @@ class Handler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlparse(self.path)
             if parsed.path.startswith("/api/v2/"):
                 status, data = dispatch_v2_request("GET", self.path, context=APP_CONTEXT)
-                if status in {301, 302, 303, 307, 308} and "redirect_url" in data:
+                if "__binary__" in data:
+                    self.send_bytes(data["__binary__"], content_type=data.get("content_type", "application/octet-stream"), filename=data.get("filename"), status=status)
+                elif status in {301, 302, 303, 307, 308} and "redirect_url" in data:
                     if _client_prefers_json_redirect(self.headers):
                         self.send_json(data, 200)
                     else:

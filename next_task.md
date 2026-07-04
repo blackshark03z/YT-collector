@@ -4,49 +4,46 @@
 BLOCKED_PENDING_SEPARATE_EXECUTION_PROMPT
 
 ## Proposed Phase
-Phase 7D1B3 - Commit Review and Prompt 4 Bundle Preparation Gate
+Phase 8A1 - Production Handoff Live Verification and Commit Review
 
 ## Do Not Start Yet
-Do not begin Phase 7D1B3 until a separate Tech Lead execution prompt authorizes repository commit review for the narrow Prompt 3 UI capability-refresh fix and then separately authorizes Prompt 4 bundle preparation.
+Do not begin Phase 8A1 until a separate Tech Lead execution prompt authorizes live verification of the new production-package endpoints and UI, followed by repository commit review for the narrow Production Handoff MVP diff.
 
 ## Proposed Objective
-Close out the narrow Prompt 3 UI capability-refresh repository diff safely, then prepare and verify the Prompt 4 bundle for the current pilot project without running Prompt 4 itself.
+Verify the new production handoff/export behavior against the canonical production-ready pilot project, then close out the narrow repository diff safely without mutating approved runtime workflow data.
 
 ## Current Phase Evidence
-- The Prompt 3 UI defect root cause was confirmed exactly: the embedded UI kept stale `available_actions` after Parse and Preview, so backend `save_candidate = true` could still be displayed as blocked from older capability state.
-- The local frontend fix now refreshes the selected workflow read model after Parse and Preview while preserving the current selected project/step, bundle, and parsed preview.
-- Focused compile verification passed and `tests.test_ui_frontend_contract` passed (`48` tests).
-- The live UI retry passed: the blocked helper disappeared and `Save Candidate` became enabled for Prompt 3.
-- Prompt 3 candidate `grp_000003` was saved and approved, `locked_creative_package` `rev_000001` was published to stable, workflow state revision is now `6`, and Prompt 4 is effectively `READY`.
-- The exact current actionable workflow step id is `prompt_4_retention_outline`.
-- The read model `next_step_id` is `prompt_5_narration_v1`.
-- Repository closeout for the Prompt 3 UI capability-refresh fix is in progress and the fix has not been pushed yet.
+- A focused read-only production export module now exists in `scripts/channel_production_export.py`.
+- Supported production-package summary and ZIP download endpoints now exist in `scripts/ui_server.py`.
+- The ZIP contains exactly `content.md`, `publishing_package.md`, and `manifest.json`, and the manifest is built from supported workflow/read-model identity plus approved revision metadata.
+- Export currently refuses unless the selected project read model is `PRODUCTION_READY`, both required stable files exist, and their bytes match the approved final-group revision metadata.
+- Focused compile verification passed, `tests.test_channel_production_export` passed (`6` tests), and the focused Production Handoff UI runtime test passed.
+- The canonical pilot project remains `channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes` with `workflow_version = 2`, `state_revision = 14`, `lifecycle = PRODUCTION_READY`, and approved group `grp_000007`.
+- The implementation remains local only; no commit or push has occurred.
 
 ## Preconditions
-- Do not alter the live pilot runtime while reviewing commit scope for the UI capability-refresh fix.
-- Preserve workflow defaults, prompt/workflow assets, prompt manifests, and registry defaults unchanged.
-- Preserve the current pilot project state at workflow schema `2`, state revision `6`, Prompt 1 `APPROVED`, Prompt 2 `APPROVED`, Prompt 3 `APPROVED`, and Prompt 4 `READY` until the next separate execution prompt.
+- Do not alter the live pilot runtime while verifying the production handoff/export behavior.
+- Preserve workflow defaults, prompt/workflow assets, prompt manifests, registry defaults, and protected runtime unchanged.
+- Preserve the current pilot project state at workflow schema `2`, state revision `14`, lifecycle `PRODUCTION_READY`, and approved group `grp_000007` until the next separate execution prompt.
 
 ## Required Focus
-- preserve the narrow Prompt 3 capability-refresh diff exactly as validated
-- preserve Prompt 1 and Prompt 2 candidate workflows
-- preserve the approved Prompt 2 and Prompt 3 stable artifacts and decision state unchanged
+- preserve the narrow Production Handoff MVP diff exactly as validated
+- verify the production-package summary and ZIP behavior against the supported read model only
+- preserve approved stable production artifacts, workflow revisions, decisions, and workflow state unchanged
 - preserve workflow/prompt asset digests and registry default semantics
-- prepare Prompt 4 bundle verification only in a later separate step
+- keep any later commit/push decision separate from implementation verification
 
 ## Forbidden Work
-- do not modify parser implementation, workflow assets, prompt assets, or protected runtime unless a separate prompt authorizes further changes
-- do not mutate the real pilot project runtime in this closeout/commit-review gate
-- do not change workflow defaults or prompt/workflow assets
-- do not run Prompt 4
+- do not mutate the real pilot project runtime in this verification/closeout gate
+- do not change workflow defaults, prompt/workflow assets, manifest files, or registry data
 - do not add AI API calls
-- do not mutate protected runtime data outside approved temporary-root tests
-- do not start History or Restore work
+- do not mutate protected runtime data outside approved focused tests
+- do not start unrelated workflow phases, History work, or Restore work
 
 ## Verification Requirements
-- confirm the narrow UI fix changes only `scripts/ui_server.py`, `tests/test_ui_frontend_contract.py`, and the minimal status documents
+- confirm the Production Handoff diff is limited to the export module, the focused UI integration, focused tests, and the minimal status documents
 - confirm no runtime or protected files are included in diff scope
-- confirm the pilot remains at Prompt 4 `READY` without bundling or running Prompt 4
+- confirm the pilot remains `PRODUCTION_READY` without mutating approved artifacts or workflow state
 - confirm real Mist of Ages runtime and token files remain protected from accidental mutation
 
 ## Reasoning Effort
@@ -56,10 +53,10 @@ High
 History and Restore remain deferred
 
 ## Explicitly Blocked
-- Repository closeout remains blocked pending separate review.
-- Prompt 4 bundle preparation remains blocked pending a separate execution prompt.
+- Repository commit review remains blocked pending separate review.
+- Live production-package verification remains blocked pending a separate execution prompt.
 - History remains deferred.
 - Restore remains deferred.
 
 ## Exact First Action
-Finish repository closeout for the narrow Prompt 3 capability-refresh fix, then authorize a separate Prompt 4 bundle preparation step for `prompt_4_retention_outline`.
+Run a read-only live verification of the production-package summary endpoint, the ZIP download endpoint, and the selected-project Production Handoff UI against the canonical `PRODUCTION_READY` pilot project, then review commit scope in a separate step.

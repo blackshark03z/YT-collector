@@ -2082,6 +2082,73 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertFalse(result["containsRestore"])
         self.assertFalse(result["containsDiff"])
 
+    def test_production_handoff_panel_renders_ready_download_and_artifact_links(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = {
+              project: {
+                project_slug: "project-a",
+                status: "READY",
+                workflow_input_status: "READY",
+                runnable: true,
+                source_video_id: "VID1",
+                source_video_url: "https://example.com",
+                updated_at: "2026-07-04T00:00:00Z",
+                has_content: true,
+                has_publishing_package: true,
+              }
+            };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "step-7", order: 7, display_name: "Step 7", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content", "publishing_package"], resulting_lifecycle_state: "DONE", constraints: [] }],
+              },
+              state: { current_step_id: "step-7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "step-7": { step_id: "step-7", status: "APPROVED", candidate_group_id: null, approved_group_id: "grp_000007" } } },
+              available_actions: { "step-7": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [
+                { artifact_id: "content", display_name: "Content", relative_path: "content.md", exists: true },
+                { artifact_id: "publishing_package", display_name: "Publishing Package", relative_path: "publishing_package.md", exists: true },
+              ],
+            };
+            state.selectedProjectProductionPackage = {
+              ready_for_export: true,
+              lifecycle: "PRODUCTION_READY",
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+              artifacts: [
+                { artifact_id: "content", filename: "content.md", relative_path: "channels/channel-a/projects/project-a/content.md", file_url: "/channels/channel-a/projects/project-a/content.md", exists: true, matches_approved_revision_metadata: true, sha256: "sha-content", character_count: 1200 },
+                { artifact_id: "publishing_package", filename: "publishing_package.md", relative_path: "channels/channel-a/projects/project-a/publishing_package.md", file_url: "/channels/channel-a/projects/project-a/publishing_package.md", exists: true, matches_approved_revision_metadata: true, sha256: "sha-package", character_count: 800 },
+              ],
+              errors: [],
+            };
+            render();
+            const html = document.getElementById("projectDetailPanel").innerHTML;
+            return {
+              hasSection: html.includes("Production Handoff"),
+              hasDownloadLabel: html.includes("Download Production ZIP"),
+              hasDownloadHref: html.includes("/api/v2/channels/channel-a/projects/project-a/production-package/download"),
+              hasContentLink: html.includes("/channels/channel-a/projects/project-a/content.md"),
+              hasPackageLink: html.includes("/channels/channel-a/projects/project-a/publishing_package.md"),
+            };
+            """
+        )
+        self.assertTrue(result["hasSection"])
+        self.assertTrue(result["hasDownloadLabel"])
+        self.assertTrue(result["hasDownloadHref"])
+        self.assertTrue(result["hasContentLink"])
+        self.assertTrue(result["hasPackageLink"])
+
     def test_stale_reason_strings_render_inert_html(self):
         result = run_ui_runtime_scenario(
             """

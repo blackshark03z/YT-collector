@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 8A - Production Handoff MVP
+- Added `scripts/channel_production_export.py` as a focused read-only production handoff/export module for canonical projects whose supported workflow read model reports `PRODUCTION_READY`.
+- Added supported production-package summary and ZIP download endpoints in `scripts/ui_server.py`.
+- The ZIP is generated in memory and contains exactly `content.md`, `publishing_package.md`, and `manifest.json`.
+- The manifest records schema version, channel/project identity, workflow identity, state revision, lifecycle, approved group id, artifact filenames, artifact character counts, artifact SHA-256 values, and the export timestamp.
+- Export now refuses when the workflow is not `PRODUCTION_READY`, when a required stable artifact is missing, or when stable artifact bytes do not match the approved revision metadata for the final approved group.
+- Added an embedded Production Handoff section in the selected-project UI with readiness status, artifact identity summary, read-only artifact links, and a `Download Production ZIP` action.
+- Added focused tests in `tests/test_channel_production_export.py` for successful export, non-ready rejection, missing-artifact rejection, identity-mismatch rejection, exact ZIP/manifest contents, and no runtime-state mutation.
+- Added a focused UI runtime contract check in `tests/test_ui_frontend_contract.py` proving the Production Handoff panel renders the ready summary, artifact links, and ZIP download action.
+- Re-ran the focused compile check successfully, re-ran `tests.test_channel_production_export` successfully (`6` pass), and re-ran the focused Production Handoff UI runtime test successfully.
+- No approved project artifact, workflow revision, decision, workflow state, or transaction data was mutated, and no commit or push occurred in this phase.
+
 ### Phase 7D1B2 - Prompt 3 Candidate-Action UI Capability Fix
 - Fixed a narrow embedded-frontend capability mismatch in `scripts/ui_server.py` where Prompt 3 could show the blocked candidate-save helper and disabled save button even after a valid parse preview, despite the current backend workflow read model allowing `save_candidate`.
 - Updated successful Parse and Preview handling to refresh the selected workflow read model for the same step while preserving the visible workflow panel, selected step, loaded bundle, and parsed preview.
