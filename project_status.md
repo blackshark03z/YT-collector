@@ -12,13 +12,64 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 8A - Production Handoff MVP
+Phase 9 - Maximum Analytics Collector and Export MVP
 
 ## Phase Status
 COMPLETE_PENDING_TECH_LEAD_REVIEW
 
 ## Approval
 IMPLEMENTED_LOCAL_VERIFICATION_COMPLETE
+
+## Phase 9 Scope
+- Added `scripts/channel_analytics_collector.py` as a focused analytics collection, normalization, status, and export module for canonical channel workspaces.
+- Kept Phase 9 strictly out of workflow-authoring scope: no approved workflow project artifact, revision, decision, transaction, or workflow state mutation is performed by the collector.
+- Added supported collector routes in `scripts/ui_server.py` for the selected canonical channel:
+  - `GET /api/v2/channels/<channel_slug>/analytics`
+  - `POST /api/v2/channels/<channel_slug>/analytics/discover`
+  - `POST /api/v2/channels/<channel_slug>/analytics/sync`
+  - `GET /api/v2/channels/<channel_slug>/analytics/export`
+- Implemented Reporting API capability discovery with sanitized `capability_snapshot.json`, preserved existing job/runtime state, incremental report download, separate report-type availability versus generated-report readiness tracking, and no Phase 9 job creation.
+- Repaired capability snapshot consistency so discovered report-type `status = AVAILABLE` remains separate from generated-report readiness, and zero-generated-report jobs now persist as `generated_report_status = PENDING` instead of appearing ready.
+- Implemented Data API full upload-catalog collection for the authorized channel and persisted a deterministic `video_catalog.csv`.
+- Repaired targeted Analytics API query compatibility to use canonical filtered video-daily paging, country summary instead of unsupported `day,country`, per-video retention, per-playlist day queries, subscriber-status retry, cards-only targeted handling, and bulk-pending handling for reach/end screens.
+- Implemented source-level aggregation with `SUCCESS`, `PARTIAL`, and `ERROR`, plus separate `last_completed_sync_at` versus `last_successful_sync_at`.
+- Implemented deterministic normalized CSV outputs under `channels/<slug>/analytics/normalized/` with stable column ordering, natural-key deduplication, and preservation of already successful CSV outputs when later groups fail or remain bulk-pending.
+- Implemented collector state and diagnostics under `channels/<slug>/analytics/state/` with sanitized source-level results, query-group results, report jobs, ingested report identities, row counts, and timestamps.
+- Implemented a read-only in-memory Analytics ZIP export containing `manifest.json`, `capabilities.json`, `collector_status.json`, `unavailable_metrics.json`, and every normalized CSV currently present.
+- Added a focused embedded UI Analytics Collector section with capability discovery, analytics sync, `SUCCESS/PARTIAL/ERROR` source visibility, separate discovered-report-type counts versus generated-report readiness counts, normalized table row counts, and `Download Analytics ZIP`.
+- The collector state, capability snapshot, UI summary, and exported `capabilities.json` now share the same report-type and generated-report count model.
+
+## Phase 9 Normalized Outputs
+- Required minimum normalized files now written deterministically:
+  - `video_catalog.csv`
+  - `channel_daily.csv`
+  - `video_daily.csv`
+  - `traffic_source_daily.csv`
+  - `country_daily.csv`
+  - `country_summary.csv`
+  - `device_daily.csv`
+  - `subscriber_status_daily.csv`
+  - `reach_daily.csv`
+  - `retention.csv`
+  - `playlists_daily.csv`
+- Additional focused tables are also supported when query groups run:
+  - `playback_location_daily.csv`
+  - `engagement_daily.csv`
+  - `cards_daily.csv`
+  - `end_screens_daily.csv`
+  - `monetary_daily.csv`
+
+## Phase 9 Verification
+- Focused compile verification passed: `python -m py_compile scripts/channel_analytics_collector.py scripts/ui_server.py tests/test_channel_analytics_collector.py tests/test_ui_frontend_contract.py`.
+- Focused collector regression passed: `python -m unittest tests.test_channel_analytics_collector` (`13` run, `13` passed, `0` failures, `0` errors).
+- Focused UI runtime analytics-panel verification passed: `python -m unittest tests.test_ui_frontend_contract.UiFrontendRuntimeTests.test_analytics_collector_panel_renders_actions_counts_and_export_link`.
+- Full embedded UI contract rerun passed after the focused Analytics Collector additions: `python -m unittest tests.test_ui_frontend_contract` (`51` run, `51` passed, `0` failures, `0` errors).
+- Added focused coverage for dynamic capability discovery, no duplicate Reporting jobs, canonical video-filter paging, country summary fallback, subscriber retry, persistent subscriber error with honest `PARTIAL`, per-video retention isolation, per-playlist daily queries, reach/end-screen bulk pending behavior, unauthorized monetary metrics, generated-report pending/ready/error semantics, snapshot/state/export count consistency, `last_completed_sync_at` versus `last_successful_sync_at`, successful CSV preservation, ZIP contents/hashes, no secret or absolute-path leakage, no workflow-project mutation, and UI rendering/action wiring for separated availability/readiness semantics.
+
+## Phase 9 Repository State
+- The Phase 9 implementation is local only and has not been committed or pushed.
+- `implement.docx` remains unrelated and untracked.
+- Protected runtime files, OAuth token contents, approved workflow outputs, and canonical production pilot artifacts remain outside this implementation scope.
 
 ## Phase 8A Scope
 - Added a focused read-only production handoff/export module in `scripts/channel_production_export.py` for canonical channel projects whose supported workflow read model reports `PRODUCTION_READY`.

@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Phase 9 - Maximum Analytics Collector and Export MVP
+- Added `scripts/channel_analytics_collector.py` as a focused analytics collection, normalization, status, and export module for canonical channel workspaces.
+- Added collector routes in `scripts/ui_server.py` for analytics status, capability discovery, analytics sync, and in-memory Analytics ZIP export.
+- Repaired Reporting API handling so Phase 9 no longer creates jobs, preserves existing analytics runtime, tracks discovered report types separately from generated-report readiness, and keeps missing generated reports in pending/unavailable states instead of promoting them to collector errors.
+- Repaired capability snapshot consistency so `capabilities.json`, `capability_snapshot.json`, collector status, and the UI all distinguish discovered report-type availability from generated-report readiness and keep zero-generated-report jobs in `PENDING`.
+- Implemented authorized-channel Data API catalog collection and deterministic `video_catalog.csv` generation.
+- Repaired targeted Analytics API compatibility for canonical filtered/paginated video-daily queries, country summary collection, subscriber-status bounded retry, cards-only targeted handling, per-playlist day queries, and per-video retention with isolated failures.
+- Added bulk-pending handling for `country_daily.csv`, `reach_daily.csv`, and `end_screens_daily.csv` so successful normalized data is preserved while generated Reporting API reports are still absent.
+- Added source-level `SUCCESS` / `PARTIAL` / `ERROR` aggregation plus separate `last_completed_sync_at` and `last_successful_sync_at` semantics.
+- Implemented deterministic normalized CSV outputs, stable natural-key deduplication, successful-CSV preservation on later partial failures, collector state, row counts, and sanitized diagnostics under `channels/<slug>/analytics/`.
+- Added an in-memory Analytics ZIP export containing `manifest.json`, `capabilities.json`, `collector_status.json`, `unavailable_metrics.json`, and every normalized CSV currently present.
+- Added an embedded UI Analytics Collector section with capability discovery, analytics sync, source/query counts, separated report-type availability versus generated-report readiness counts, normalized table row counts, and `Download Analytics ZIP`.
+- Added focused collector regression coverage in `tests/test_channel_analytics_collector.py` plus focused UI contract/runtime coverage in `tests/test_ui_frontend_contract.py`.
+- Re-ran focused compile verification successfully, re-ran the collector test module successfully (`13` pass), re-ran the focused Analytics Collector UI runtime test successfully, and re-ran the full embedded UI contract suite successfully (`51` pass).
+- No commit or push occurred, and no approved workflow project file, revision, decision, stable production artifact, or token content was modified or exposed during this phase.
+
 ### Phase 8A - Production Handoff MVP
 - Added `scripts/channel_production_export.py` as a focused read-only production handoff/export module for canonical projects whose supported workflow read model reports `PRODUCTION_READY`.
 - Added supported production-package summary and ZIP download endpoints in `scripts/ui_server.py`.

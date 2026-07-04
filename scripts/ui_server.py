@@ -17,7 +17,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from scripts import channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_production_export, channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace
+from scripts import channel_analytics_collector, channel_metrics, channel_oauth, channel_oauth_browser, channel_output_parser, channel_production_export, channel_projects, channel_prompt_bundle, channel_workflow, channel_workflow_write, channel_workspace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -708,6 +708,74 @@ def default_token_provider(root: Path | str, channel_slug: str) -> str:
     return channel_oauth.get_access_token_for_channel(root, channel_slug, transport=default_transport)
 
 
+def default_data_api_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    path: str,
+    params: dict[str, str],
+) -> dict:
+    return request_json(
+        f"{DATA_API}/{path}?{urllib.parse.urlencode(params)}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+
+def default_analytics_query_api_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    params: dict[str, str],
+) -> dict:
+    return request_json(
+        f"{ANALYTICS_API}?{urllib.parse.urlencode(params)}",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+
+def default_reporting_api_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    method: str,
+    path: str,
+    params: dict[str, str] | None,
+    payload: dict | None,
+) -> dict:
+    headers = {"Authorization": f"Bearer {access_token}"}
+    body = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        body = json.dumps(payload).encode("utf-8")
+    suffix = f"?{urllib.parse.urlencode(params)}" if params else ""
+    return request_json(
+        f"{REPORTING_API}/{path}{suffix}",
+        headers=headers,
+        data=body,
+    )
+
+
+def default_report_download_fetcher(
+    *,
+    root: Path | str,
+    channel_slug: str,
+    access_token: str,
+    url: str,
+) -> bytes:
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {access_token}"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise AppError(detail or str(exc), exc.code) from exc
+    except urllib.error.URLError as exc:
+        raise AppError(f"Network error: {exc.reason}") from exc
+
+
 def default_recent_videos_fetcher(
     *,
     root: Path | str,
@@ -847,6 +915,10 @@ def build_app_context(
         "thumbnail_fetcher": thumbnail_fetcher or fetch_competitor_thumbnail,
         "metrics_syncer": metrics_syncer or channel_metrics.sync_channel_metrics,
         "token_provider": token_provider or default_token_provider,
+        "data_api_fetcher": default_data_api_fetcher,
+        "analytics_query_api_fetcher": default_analytics_query_api_fetcher,
+        "reporting_api_fetcher": default_reporting_api_fetcher,
+        "report_download_fetcher": default_report_download_fetcher,
         "recent_videos_fetcher": recent_videos_fetcher or default_recent_videos_fetcher,
         "analytics_fetcher": analytics_fetcher or default_analytics_fetcher,
         "reporting_fetcher": reporting_fetcher or default_reporting_fetcher,
@@ -914,6 +986,10 @@ def _map_output_parser_error(exc: channel_output_parser.ChannelOutputParserError
 
 
 def _map_production_export_error(exc: channel_production_export.ProductionExportError) -> V2Error:
+    return _v2_error(exc.code, exc.message, exc.status)
+
+
+def _map_channel_analytics_error(exc: channel_analytics_collector.ChannelAnalyticsCollectorError) -> V2Error:
     return _v2_error(exc.code, exc.message, exc.status)
 
 
@@ -1025,6 +1101,53 @@ def dispatch_v2_request(method: str, path: str, payload: dict | None = None, *, 
             channel_slug = parts[3]
             if method == "GET" and len(parts) == 4:
                 return 200, _channel_status_payload(root, channel_slug)
+            if method == "GET" and len(parts) == 5 and parts[4] == "analytics":
+                _load_channel_or_error(root, channel_slug)
+                try:
+                    analytics_status = channel_analytics_collector.load_channel_analytics_status(root, channel_slug)
+                except channel_analytics_collector.ChannelAnalyticsCollectorError as exc:
+                    raise _map_channel_analytics_error(exc) from exc
+                return 200, {"analytics": analytics_status}
+            if method == "POST" and len(parts) == 6 and parts[4] == "analytics" and parts[5] == "discover":
+                _load_channel_or_error(root, channel_slug)
+                try:
+                    snapshot = channel_analytics_collector.discover_channel_analytics_capabilities(
+                        root,
+                        channel_slug,
+                        token_provider=ctx["token_provider"],
+                        reporting_api_fetcher=ctx["reporting_api_fetcher"],
+                    )
+                except channel_analytics_collector.ChannelAnalyticsCollectorError as exc:
+                    raise _map_channel_analytics_error(exc) from exc
+                return 200, {"capabilities": snapshot}
+            if method == "POST" and len(parts) == 6 and parts[4] == "analytics" and parts[5] == "sync":
+                _load_channel_or_error(root, channel_slug)
+                window_days = int(payload.get("window_days", 365))
+                try:
+                    analytics_status = channel_analytics_collector.sync_channel_analytics(
+                        root,
+                        channel_slug,
+                        token_provider=ctx["token_provider"],
+                        data_api_fetcher=ctx["data_api_fetcher"],
+                        analytics_query_fetcher=ctx["analytics_query_api_fetcher"],
+                        reporting_api_fetcher=ctx["reporting_api_fetcher"],
+                        report_download_fetcher=ctx["report_download_fetcher"],
+                        window_days=window_days,
+                    )
+                except channel_analytics_collector.ChannelAnalyticsCollectorError as exc:
+                    raise _map_channel_analytics_error(exc) from exc
+                return 200, {"analytics": analytics_status}
+            if method == "GET" and len(parts) == 6 and parts[4] == "analytics" and parts[5] == "export":
+                _load_channel_or_error(root, channel_slug)
+                try:
+                    download = channel_analytics_collector.build_channel_analytics_export(root, channel_slug)
+                except channel_analytics_collector.ChannelAnalyticsCollectorError as exc:
+                    raise _map_channel_analytics_error(exc) from exc
+                return 200, {
+                    "__binary__": download["body_bytes"],
+                    "content_type": download["content_type"],
+                    "filename": download["filename"],
+                }
             if method == "GET" and len(parts) == 5 and parts[4] == "projects":
                 _load_channel_or_error(root, channel_slug)
                 return 200, {"projects": channel_projects.list_channel_projects(root, channel_slug)}
@@ -1392,7 +1515,7 @@ HTML_PAGE = r"""<!doctype html>
         <button id="syncMetricsBtn" class="secondary" disabled>Sync Metrics</button>
         <button class="ghost" id="openLearningsBtn" disabled data-cutover-state="disabled">Open Learnings</button>
       </div>
-      <p class="meta">OAuth and metrics actions now use selected-channel `/api/v2/` routes. Learnings and project/collector actions stay disabled until later phases.</p>
+      <p class="meta">OAuth and legacy metrics actions use selected-channel `/api/v2/` routes. The focused Analytics Collector appears in the selected channel summary.</p>
     </aside>
 
     <section>
@@ -1475,6 +1598,7 @@ const state = {
   channels: [],
   selectedChannelSlug: null,
   selectedChannelSummary: null,
+  selectedChannelAnalytics: null,
   projects: [],
   selectedProjectSlug: null,
   selectedProjectDetail: null,
@@ -1490,11 +1614,13 @@ const state = {
   transcriptDraft: "",
   isLoadingChannels: false,
   isLoadingSummary: false,
+  isLoadingChannelAnalytics: false,
   isLoadingProjects: false,
   isLoadingProjectDetail: false,
   isLoadingProductionPackage: false,
   isLoadingWorkflow: false,
   errorMessage: "",
+  channelAnalyticsError: "",
   projectListError: "",
   projectDetailError: "",
   productionPackageError: "",
@@ -1502,6 +1628,7 @@ const state = {
   bundleError: "",
   summaryRequestId: 0,
   summaryAbortController: null,
+  channelAnalyticsRequestId: 0,
   projectListRequestId: 0,
   projectDetailRequestId: 0,
   productionPackageRequestId: 0,
@@ -1512,7 +1639,10 @@ const state = {
   candidateDecisionAction: { busy: false, channelSlug: null, projectSlug: null, workflowId: null, workflowVersion: null, stepId: null, candidateGroupId: null, expectedStateRevision: null, action: null, requestId: 0 },
   oauthAction: { busy: false, slug: null, requestId: 0 },
   metricsAction: { busy: false, slug: null, requestId: 0 },
+  analyticsDiscoveryAction: { busy: false, slug: null, requestId: 0 },
+  analyticsSyncAction: { busy: false, slug: null, requestId: 0 },
   actionFeedback: { kind: "", slug: null, text: "" },
+  analyticsFeedback: { kind: "", slug: null, text: "" },
   createProjectAction: { busy: false, slug: null, requestId: 0 },
   transcriptSaveAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
   validationAction: { busy: false, slug: null, projectSlug: null, requestId: 0 },
@@ -1713,6 +1843,14 @@ function setActionFeedback(kind, slug, text) {
   state.actionFeedback = { kind, slug, text };
 }
 
+function clearAnalyticsFeedback() {
+  state.analyticsFeedback = { kind: "", slug: null, text: "" };
+}
+
+function setAnalyticsFeedback(kind, slug, text) {
+  state.analyticsFeedback = { kind, slug, text };
+}
+
 function clearProjectFeedback() {
   state.projectFeedback = { kind: "", channelSlug: null, projectSlug: null, text: "" };
 }
@@ -1751,6 +1889,13 @@ function clearProjectSelectionState() {
   state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
   state.candidateSaveFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
   state.lastSaveCandidateResult = null;
+}
+
+function clearSelectedChannelAnalyticsState() {
+  state.selectedChannelAnalytics = null;
+  state.isLoadingChannelAnalytics = false;
+  state.channelAnalyticsError = "";
+  clearAnalyticsFeedback();
 }
 
 function clearProjectState() {
@@ -2198,6 +2343,44 @@ function metricsButtonModel() {
   };
 }
 
+function analyticsDiscoveryModel() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Discover Capabilities", helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
+    return { disabled: true, label: "Discover Capabilities", helper: "Load the selected channel summary before discovering analytics capabilities." };
+  }
+  if (channel.status !== "CONNECTED") {
+    return { disabled: true, label: "Discover Capabilities", helper: "Capability discovery is available only when the selected channel is connected." };
+  }
+  const busy = state.analyticsDiscoveryAction.busy && state.analyticsDiscoveryAction.slug === state.selectedChannelSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Discovering..." : "Discover Capabilities",
+    helper: "Call the Reporting API capability discovery route for the selected channel."
+  };
+}
+
+function analyticsSyncModel() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return { disabled: true, label: "Sync Analytics", helper: "Select a channel first." };
+  }
+  if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
+    return { disabled: true, label: "Sync Analytics", helper: "Load the selected channel summary before syncing analytics." };
+  }
+  if (channel.status !== "CONNECTED") {
+    return { disabled: true, label: "Sync Analytics", helper: "Analytics sync is available only when the selected channel is connected." };
+  }
+  const busy = state.analyticsSyncAction.busy && state.analyticsSyncAction.slug === state.selectedChannelSlug;
+  return {
+    disabled: busy,
+    label: busy ? "Syncing Analytics..." : "Sync Analytics",
+    helper: "Collect canonical data, reporting, and targeted analytics for the selected channel only."
+  };
+}
+
 function projectsRefreshModel() {
   if (!state.selectedChannelSlug) {
     return { disabled: true, label: "Refresh Projects", helper: "Select a channel first." };
@@ -2289,6 +2472,7 @@ function setSelectedChannelSlug(nextSlug) {
     state.selectedChannelSlug = nextSlug;
   }
   state.selectedChannelSummary = null;
+  clearSelectedChannelAnalyticsState();
   state.errorMessage = "";
   clearActionFeedback();
   clearProjectState();
@@ -2377,7 +2561,7 @@ function renderActionState() {
   const feedback = state.actionFeedback.slug === state.selectedChannelSlug ? state.actionFeedback : { kind: "", text: "" };
   const feedbackHtml = feedback.text
     ? `<div class="check"><strong>${feedback.kind === "error" ? "Action Error" : "Action Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(feedback.text)}</div>`
-    : `<div class="meta">Use the selected canonical channel for OAuth and metrics actions. Project and collector actions remain disabled.</div>`;
+    : `<div class="meta">Use the selected canonical channel for OAuth and the legacy metrics sync action. The focused Analytics Collector section appears in the selected channel summary.</div>`;
 
   target.innerHTML = `
     <div class="check"><strong>OAuth</strong>${pill(oauth.disabled ? "WAITING" : "READY")}</div>
@@ -2964,9 +3148,40 @@ function renderSelectedChannelSummary() {
   const summary = state.selectedChannelSummary;
   const channel = summary.channel || {};
   const reporting = summary.reporting || {};
+  const analytics = state.selectedChannelAnalytics;
+  const analyticsFeedback = state.analyticsFeedback.slug === state.selectedChannelSlug ? state.analyticsFeedback : { kind: "", text: "" };
+  const discoverModel = analyticsDiscoveryModel();
+  const syncModel = analyticsSyncModel();
   const availableMetrics = Array.isArray(reporting.available_metrics) && reporting.available_metrics.length ? reporting.available_metrics.join(", ") : "None reported";
   const pendingMetrics = Array.isArray(reporting.pending_metrics) && reporting.pending_metrics.length ? reporting.pending_metrics.join(", ") : "None";
   const disconnected = channel.status && channel.status !== "CONNECTED";
+  const analyticsCounts = analytics && analytics.query_group_counts ? analytics.query_group_counts : {};
+  const capabilityCounts = analytics && analytics.capability_counts ? analytics.capability_counts : {};
+  const reportReadinessCounts = analytics && analytics.report_readiness_counts ? analytics.report_readiness_counts : {};
+  const normalizedTables = analytics && Array.isArray(analytics.normalized_tables) ? analytics.normalized_tables : [];
+  const sourceResults = analytics && analytics.source_results ? analytics.source_results : {};
+  const analyticsQueryStatus = sourceResults.analytics_queries && sourceResults.analytics_queries.status ? sourceResults.analytics_queries.status : (analytics && analytics.last_successful_sync_at ? "SUCCESS" : "WAITING");
+  const analyticsStatusPill = state.isLoadingChannelAnalytics
+    ? pill("LOADING")
+    : pill(analyticsQueryStatus || (analytics ? "WAITING" : "UNKNOWN"));
+  const analyticsFeedbackHtml = analyticsFeedback.text
+    ? `<div class="notice" style="margin-top:12px"><strong>${analyticsFeedback.kind === "error" ? "Collector Error" : "Collector Status"}</strong><span class="meta">${escapeHtml(analyticsFeedback.text)}</span></div>`
+    : "";
+  const sourceResultHtml = Object.keys(sourceResults).length
+    ? Object.keys(sourceResults).sort().map((key) => {
+        const item = sourceResults[key] || {};
+        return `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(item.status || "UNKNOWN")}</div>`;
+      }).join("")
+    : `<div class="meta">No analytics collector state has been recorded yet.</div>`;
+  const normalizedTableHtml = normalizedTables.length
+    ? normalizedTables.map((table) => `
+      <div class="check">
+        <strong>${escapeHtml(table.filename || "")}</strong>
+        <div>${pill(table.exists ? "READY" : "MISSING")}</div>
+        <div class="meta">${escapeHtml(String(table.row_count ?? 0))} rows</div>
+      </div>
+    `).join("")
+    : `<div class="meta">No normalized analytics files exist yet.</div>`;
 
   panel.innerHTML = `
     <div class="summary-grid">
@@ -2985,6 +3200,42 @@ function renderSelectedChannelSummary() {
       <div class="meta">Available metrics: ${escapeHtml(availableMetrics)}</div>
       <div class="meta">Pending metrics: ${escapeHtml(pendingMetrics)}</div>
       <div class="meta">Last checked: ${escapeHtml(formatTime(reporting.last_checked_at))}</div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+        <div>
+          <strong>Analytics Collector</strong>
+          <div class="meta">Read-only status, focused capability discovery, structured analytics sync, and export for the selected channel.</div>
+        </div>
+        <div>${analyticsStatusPill}</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="discoverAnalyticsBtn" class="secondary"${discoverModel.disabled ? " disabled" : ""}>${escapeHtml(discoverModel.label)}</button>
+        <button id="syncAnalyticsCollectorBtn" class="secondary"${syncModel.disabled ? " disabled" : ""}>${escapeHtml(syncModel.label)}</button>
+        <a id="downloadAnalyticsZipLink" href="${escapeHtml(analytics && analytics.export_url ? analytics.export_url : "#")}"${analytics && analytics.export_url ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(analytics && analytics.export_url ? "Download Analytics ZIP" : "Analytics ZIP unavailable")}</a>
+      </div>
+      <div class="meta" style="margin-top:12px">${escapeHtml(discoverModel.helper)}</div>
+      <div class="meta">${escapeHtml(syncModel.helper)}</div>
+      ${analyticsFeedbackHtml}
+      ${state.channelAnalyticsError ? `<div class="notice" style="margin-top:12px"><strong>Analytics Status Error</strong><span class="meta">${escapeHtml(state.channelAnalyticsError)}</span></div>` : ""}
+      <div class="summary-grid" style="margin-top:12px">
+        <div class="card"><strong>Last Attempt</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_attempt_at))}</div></div>
+        <div class="card"><strong>Last Completed Sync</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_completed_sync_at))}</div></div>
+        <div class="card"><strong>Last Successful Sync</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_successful_sync_at))}</div></div>
+        <div class="card"><strong>Reports Downloaded</strong><div class="meta">${escapeHtml(String(analytics && analytics.ingested_report_count ? analytics.ingested_report_count : 0))}</div></div>
+        <div class="card"><strong>Report Types</strong><div class="meta">${escapeHtml(String(capabilityCounts.AVAILABLE || 0))} available / ${escapeHtml(String(capabilityCounts.ERROR || 0))} errors</div></div>
+        <div class="card"><strong>Generated Reports</strong><div class="meta">${escapeHtml(String(reportReadinessCounts.READY || 0))} ready / ${escapeHtml(String(reportReadinessCounts.PENDING || 0))} pending / ${escapeHtml(String(reportReadinessCounts.ERROR || 0))} errors</div></div>
+        <div class="card"><strong>Query Groups</strong><div class="meta">${escapeHtml(String(analyticsCounts.SUCCESS || 0))} success / ${escapeHtml(String(analyticsCounts.PARTIAL || 0))} partial / ${escapeHtml(String(analyticsCounts.ERROR || 0))} errors</div></div>
+        <div class="card"><strong>Warnings</strong><div class="meta">${escapeHtml(String((analyticsCounts.UNAVAILABLE || 0) + (analyticsCounts.UNAUTHORIZED || 0) + (analyticsCounts.UNSUPPORTED || 0) + (analyticsCounts.ERROR || 0)))}</div></div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <strong>Source Status</strong>
+        <div class="stack" style="margin-top:12px">${sourceResultHtml}</div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <strong>Normalized Tables</strong>
+        <div class="stack" style="margin-top:12px">${normalizedTableHtml}</div>
+      </div>
     </div>
     ${disconnected ? `
       <div class="notice">
@@ -3096,6 +3347,89 @@ async function syncMetricsAction() {
   } finally {
     if (state.metricsAction.requestId === requestId && state.metricsAction.slug === slug) {
       state.metricsAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function discoverAnalyticsAction() {
+  const model = analyticsDiscoveryModel();
+  const slug = state.selectedChannelSlug;
+  if (!slug || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    setAnalyticsFeedback("error", slug, "Select a channel and wait for its summary before discovering analytics capabilities.");
+    render();
+    return;
+  }
+  if (model.disabled) {
+    if (!(state.analyticsDiscoveryAction.busy && state.analyticsDiscoveryAction.slug === slug)) {
+      setAnalyticsFeedback("error", slug, model.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.analyticsDiscoveryAction.requestId + 1;
+  state.analyticsDiscoveryAction = { busy: true, slug, requestId };
+  clearAnalyticsFeedback();
+  setAnalyticsFeedback("info", slug, "Discovering analytics capabilities for the selected channel...");
+  render();
+
+  try {
+    await v2Api(`channels/${encodeURIComponent(slug)}/analytics/discover`, {
+      method: "POST",
+      body: JSON.stringify({})
+    });
+    if (state.analyticsDiscoveryAction.requestId !== requestId || state.analyticsDiscoveryAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    await loadSelectedChannelAnalytics(slug);
+    setAnalyticsFeedback("success", slug, "Capability discovery completed for the selected channel.");
+  } catch (error) {
+    if (state.analyticsDiscoveryAction.requestId !== requestId || state.analyticsDiscoveryAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    setAnalyticsFeedback("error", slug, describeError(error, "Could not discover analytics capabilities for the selected channel."));
+  } finally {
+    if (state.analyticsDiscoveryAction.requestId === requestId && state.analyticsDiscoveryAction.slug === slug) {
+      state.analyticsDiscoveryAction.busy = false;
+      render();
+    }
+  }
+}
+
+async function syncAnalyticsCollectorAction() {
+  const model = analyticsSyncModel();
+  const slug = state.selectedChannelSlug;
+  if (!slug || !state.selectedChannelSummary || !selectedChannelRecord()) {
+    setAnalyticsFeedback("error", slug, "Select a channel and wait for its summary before syncing analytics.");
+    render();
+    return;
+  }
+  if (model.disabled) {
+    if (!(state.analyticsSyncAction.busy && state.analyticsSyncAction.slug === slug)) {
+      setAnalyticsFeedback("error", slug, model.helper);
+      render();
+    }
+    return;
+  }
+
+  const requestId = state.analyticsSyncAction.requestId + 1;
+  state.analyticsSyncAction = { busy: true, slug, requestId };
+  clearAnalyticsFeedback();
+  setAnalyticsFeedback("info", slug, "Starting analytics collector sync for the selected channel...");
+  render();
+
+  try {
+    await v2Api(`channels/${encodeURIComponent(slug)}/analytics/sync`, {
+      method: "POST",
+      body: JSON.stringify({ window_days: 365 })
+    });
+    if (state.analyticsSyncAction.requestId !== requestId || state.analyticsSyncAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    await loadSelectedChannelAnalytics(slug);
+    await refreshSelectedSummaryForAction(slug);
+    setAnalyticsFeedback("success", slug, "Analytics collector sync completed for the selected channel.");
+  } catch (error) {
+    if (state.analyticsSyncAction.requestId !== requestId || state.analyticsSyncAction.slug !== slug || state.selectedChannelSlug !== slug) return;
+    setAnalyticsFeedback("error", slug, describeError(error, "Could not sync analytics for the selected channel."));
+  } finally {
+    if (state.analyticsSyncAction.requestId === requestId && state.analyticsSyncAction.slug === slug) {
+      state.analyticsSyncAction.busy = false;
       render();
     }
   }
@@ -3996,6 +4330,7 @@ async function loadSelectedChannelSummary() {
     const data = await v2Api(`channels/${encodeURIComponent(slug)}`, { signal: controller.signal });
     if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
     state.selectedChannelSummary = data;
+    await loadSelectedChannelAnalytics(slug);
     await loadProjectsForChannel(slug);
   } catch (error) {
     if (error && error.name === "AbortError") return;
@@ -4004,6 +4339,7 @@ async function loadSelectedChannelSummary() {
     if (error && error.code === "CHANNEL_NOT_FOUND") {
       localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);
       state.selectedChannelSlug = null;
+      clearSelectedChannelAnalyticsState();
       clearProjectState();
       state.errorMessage = "The previously selected channel is no longer available. Please select another channel.";
     } else {
@@ -4013,6 +4349,30 @@ async function loadSelectedChannelSummary() {
     if (requestId === state.summaryRequestId) {
       state.isLoadingSummary = false;
       if (state.summaryAbortController === controller) state.summaryAbortController = null;
+      render();
+    }
+  }
+}
+
+async function loadSelectedChannelAnalytics(slugArg) {
+  const slug = slugArg || state.selectedChannelSlug;
+  if (!slug || slug !== state.selectedChannelSlug) return;
+  const requestId = ++state.channelAnalyticsRequestId;
+  state.isLoadingChannelAnalytics = true;
+  state.channelAnalyticsError = "";
+  state.selectedChannelAnalytics = null;
+  render();
+  try {
+    const data = await v2Api(`channels/${encodeURIComponent(slug)}/analytics`);
+    if (requestId !== state.channelAnalyticsRequestId || slug !== state.selectedChannelSlug) return;
+    state.selectedChannelAnalytics = data && data.analytics ? data.analytics : null;
+  } catch (error) {
+    if (requestId !== state.channelAnalyticsRequestId || slug !== state.selectedChannelSlug) return;
+    state.selectedChannelAnalytics = null;
+    state.channelAnalyticsError = describeError(error, "Could not load analytics collector status.");
+  } finally {
+    if (requestId === state.channelAnalyticsRequestId) {
+      state.isLoadingChannelAnalytics = false;
       render();
     }
   }
@@ -4031,6 +4391,7 @@ async function loadChannels() {
     if (!state.channels.some((item) => item.channel_slug === state.selectedChannelSlug)) {
       state.selectedChannelSlug = validSavedSlug;
       state.selectedChannelSummary = null;
+      clearSelectedChannelAnalyticsState();
       clearProjectState();
     }
     render();
@@ -4041,6 +4402,7 @@ async function loadChannels() {
     state.channels = [];
     state.selectedChannelSlug = null;
     state.selectedChannelSummary = null;
+    clearSelectedChannelAnalyticsState();
     state.errorMessage = describeError(error, "Could not load the channel list.");
     render();
   } finally {
@@ -4067,6 +4429,17 @@ document.getElementById("saveTranscriptBtn").addEventListener("click", saveTrans
 document.getElementById("validateProjectBtn").addEventListener("click", validateProjectAction);
 document.getElementById("transcript").addEventListener("input", (event) => {
   state.transcriptDraft = event.target.value;
+});
+document.getElementById("summaryPanel").addEventListener("click", (event) => {
+  const discoverButton = event.target.closest("#discoverAnalyticsBtn");
+  if (discoverButton) {
+    discoverAnalyticsAction();
+    return;
+  }
+  const syncButton = event.target.closest("#syncAnalyticsCollectorBtn");
+  if (syncButton) {
+    syncAnalyticsCollectorAction();
+  }
 });
 document.getElementById("projectListPanel").addEventListener("click", (event) => {
   const button = event.target.closest("[data-project-slug]");

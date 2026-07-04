@@ -271,9 +271,13 @@ class UiFrontendContractTests(unittest.TestCase):
                 "channels",
                 "oauth/start?channel_slug=${encodeURIComponent(slug)}&mode=${encodeURIComponent(mode)}",
                 "channels/${encodeURIComponent(slug)}",
+                "channels/${encodeURIComponent(slug)}/analytics",
+                "channels/${encodeURIComponent(slug)}/analytics/discover",
+                "channels/${encodeURIComponent(slug)}/analytics/sync",
                 "channels/${encodeURIComponent(slug)}/sync_metrics",
                 "channels/${encodeURIComponent(slug)}/projects",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}",
+                "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/production-package",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow",
                 "channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle",
@@ -380,6 +384,11 @@ class UiFrontendContractTests(unittest.TestCase):
 
     def test_metrics_ui_uses_selected_slug_and_canonical_post_route(self):
         self.assertIn('channels/${encodeURIComponent(slug)}/sync_metrics', self.html)
+
+    def test_analytics_collector_ui_uses_selected_slug_routes(self):
+        self.assertIn('channels/${encodeURIComponent(slug)}/analytics', self.html)
+        self.assertIn('channels/${encodeURIComponent(slug)}/analytics/discover', self.html)
+        self.assertIn('channels/${encodeURIComponent(slug)}/analytics/sync', self.html)
         self.assertIn('method: "POST"', self.html)
         self.assertIn("window_days", self.html)
         self.assertIn("recent_count", self.html)
@@ -2148,6 +2157,68 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertTrue(result["hasDownloadHref"])
         self.assertTrue(result["hasContentLink"])
         self.assertTrue(result["hasPackageLink"])
+
+    def test_analytics_collector_panel_renders_actions_counts_and_export_link(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: {
+                channel_slug: "channel-a",
+                display_name: "Channel A",
+                youtube_channel_id: "UC123",
+                youtube_handle: "@channela",
+                status: "CONNECTED",
+                last_metrics_sync_at: "2026-07-04T00:00:00Z",
+              },
+              project_count: 1,
+              reporting: {},
+              metrics: { exists: true },
+              learnings: { exists: true },
+            };
+            state.selectedChannelAnalytics = {
+              last_attempt_at: "2026-07-04T00:00:00Z",
+              last_completed_sync_at: "2026-07-04T00:30:00Z",
+              last_successful_sync_at: "2026-07-04T01:00:00Z",
+              ingested_report_count: 0,
+              export_url: "/api/v2/channels/channel-a/analytics/export",
+              capability_counts: { AVAILABLE: 20, ERROR: 0 },
+              report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 },
+              query_group_counts: { SUCCESS: 4, PARTIAL: 0, EMPTY: 1, UNAVAILABLE: 2, UNAUTHORIZED: 1, UNSUPPORTED: 1, ERROR: 1 },
+              source_results: {
+                capability_discovery: { status: "SUCCESS" },
+                data_api_catalog: { status: "SUCCESS" },
+                reporting_api: { status: "SUCCESS" },
+                analytics_queries: { status: "PARTIAL" },
+              },
+              normalized_tables: [
+                { filename: "video_catalog.csv", exists: true, row_count: 12 },
+                { filename: "channel_daily.csv", exists: true, row_count: 30 },
+              ],
+            };
+            render();
+            const html = document.getElementById("summaryPanel").innerHTML;
+            return {
+              hasSection: html.includes("Analytics Collector"),
+              hasDiscoverButton: html.includes("discoverAnalyticsBtn"),
+              hasSyncButton: html.includes("syncAnalyticsCollectorBtn"),
+              hasExportLink: html.includes("/api/v2/channels/channel-a/analytics/export"),
+              hasRowCount: html.includes("12 rows"),
+              hasReportTypeCount: html.includes("20 available / 0 errors"),
+              hasReadinessCount: html.includes("0 ready / 20 pending / 0 errors"),
+              hasPartialPill: html.includes("PARTIAL"),
+            };
+            """
+        );
+        self.assertTrue(result["hasSection"])
+        self.assertTrue(result["hasDiscoverButton"])
+        self.assertTrue(result["hasSyncButton"])
+        self.assertTrue(result["hasExportLink"])
+        self.assertTrue(result["hasRowCount"])
+        self.assertTrue(result["hasReportTypeCount"])
+        self.assertTrue(result["hasReadinessCount"])
+        self.assertTrue(result["hasPartialPill"])
 
     def test_stale_reason_strings_render_inert_html(self):
         result = run_ui_runtime_scenario(
