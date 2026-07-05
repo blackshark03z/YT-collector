@@ -12,13 +12,42 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 9 - Maximum Analytics Collector and Export MVP
+Phase 10A.4 - Final Content Workflow Compression And Status Repair
 
 ## Phase Status
-COMPLETE_PENDING_TECH_LEAD_REVIEW
+IMPLEMENTED_LOCAL_VERIFICATION_COMPLETE
 
 ## Approval
-IMPLEMENTED_LOCAL_VERIFICATION_COMPLETE
+PENDING_TECH_LEAD_REVIEW
+
+## Phase 10A Scope
+- Redesigned the embedded UI in `scripts/ui_server.py` around three operator-first work areas: `Overview`, `Content Workflow`, and `Analytics`, while keeping the existing single-server architecture and `/api/v2/` backend contract unchanged.
+- Added a compact application header that surfaces the application name, selected channel, selected project, and a context-aware status badge derived from existing frontend state only.
+- Reworked the primary layout into a stable sidebar plus main workspace, with navigation switching handled entirely in the browser without duplicating backend fetches.
+- Simplified `Overview` into a deterministic operational summary: channel connection, selected project, workflow lifecycle, production package readiness, analytics readiness, bulk-report readiness, and one deterministic `Recommended Next Action` block.
+- Reworked the selected-project workflow area into a compact Prompt 1-7 step rail, preserved explicit project creation and project selection, and kept only the selected workflow step expanded.
+- Preserved all supported workflow operations and route behavior for bundle build/copy, parse-preview, save candidate, approve candidate, reject candidate, transcript save, and validation.
+- Simplified the default information hierarchy further for operators: the header now hides raw project slugs and status codes, the sidebar collapses maintenance actions into `Channel Settings`, the workflow workspace collapses project management into `Change Project` / `Create New Project`, and analytics now leads with friendly status, sync freshness, table readiness, and bulk-report state.
+- Completed a final operator-context repair so selected projects persist safely per channel across workspace changes, summary refreshes, project refreshes, and practical browser reloads using only local browser state for channel slug plus project slug.
+- Repaired the header-state semantics so the default badge now shows `Workflow Status` when a project is selected and `Analytics Status` when no project is selected, while raw workflow and analytics codes remain inside collapsed `Technical Details` only.
+- Preserved automatic operator flow for single-project channels by restoring the sole valid project without any write action and keeping production-ready projects pointed at `Download Production Package` as the recommended action.
+- Completed a final live UX micro repair so the shared workspace introduction now matches the selected workspace, the orphan visible create-state panel is removed from the default workflow view, and completed `PRODUCTION_READY` workflow/handoff content now appears before project-management controls.
+- Completed a final content-workflow compression and status repair so `PRODUCTION_READY` projects now show one handoff/download area only, the Prompt 1-7 rail is rendered in a genuinely compact two-row-friendly format, selected styling no longer overrides actual step status, and the redundant project-summary grid is removed from the default completed-project view.
+- Renamed collapsed diagnostic sections from `Advanced Details` to `Technical Details` and kept raw IDs, slugs, hashes, state revisions, workflow binding, query-group breakdowns, report readiness, and API status detail there only.
+- Promoted production-handoff status for `PRODUCTION_READY` projects with visible completion messaging, `Download Production ZIP`, and read-only artifact links.
+- Reworked the Analytics workspace into a plain-language operational view with separate counts for discovered report types versus generated-report readiness, friendlier `PARTIAL` messaging, compact normalized-table rendering, and explicit empty-table reasons.
+- Preserved existing backend conflict/error handling, action disabling during busy states, and duplicate-submission protection without adding live API calls, analytics sync, reporting jobs, new framework code, or runtime mutation.
+
+## Phase 10A Verification
+- Focused compile verification passed: `python -m py_compile scripts/ui_server.py tests/test_ui_frontend_contract.py`.
+- Focused embedded UI contract/runtime suite passed: `python -m unittest tests.test_ui_frontend_contract` (`91` run, `91` passed, `0` failures, `0` errors).
+- Phase 10A.4 coverage now verifies the three primary navigation areas, deterministic overview action logic, operator-first header wording, hidden raw project slugs in the default header, context-aware `Workflow Status` versus `Analytics Status`, workspace-specific introduction copy, compact workflow rail rendering, single-step expansion, collapsed `Technical Details`, production handoff visibility, one production download action only for completed projects, one completion message only, selected approved-step semantics, selected-project persistence across workspace switching, channel-summary refresh, project-list refresh, sole-project auto-selection, stale saved-project clearing, read-only project restoration, orphan create-state removal from the default workflow view, completion-first ordering for `PRODUCTION_READY` projects, redundant project-summary removal, disabled/busy action presentation, project-management collapse by default, channel/project selection, workflow loading and step switching, prompt bundle behavior, parse/preview behavior, candidate save/approve/reject controls, stale/conflict handling, OAuth/connect wiring, safe rendering, and duplicate-submission blocking.
+- No live API calls, analytics sync, reporting job creation, runtime workflow mutation, runtime analytics mutation, server restart, commit, or push occurred during the implementation pass.
+
+## Phase 10A Repository State
+- Changed files are limited to `scripts/ui_server.py`, `tests/test_ui_frontend_contract.py`, `project_status.md`, `changelog.md`, and `next_task.md`.
+- `implement.docx` remains unrelated and untracked.
+- Approved workflow runtime, analytics runtime, production artifacts, revisions, decisions, workflow state, token files, and protected channel data remain outside this implementation scope and were not modified.
 
 ## Phase 9 Scope
 - Added `scripts/channel_analytics_collector.py` as a focused analytics collection, normalization, status, and export module for canonical channel workspaces.

@@ -52,6 +52,7 @@ class Element {{
     this.dataset = {{}};
     this.selectionStart = 0;
     this.selectionEnd = 0;
+    this.className = "";
   }}
   set innerHTML(value) {{
     this._innerHTML = String(value);
@@ -75,7 +76,11 @@ class Element {{
     this.selectionStart = 0;
     this.selectionEnd = this.value.length;
   }}
-  closest() {{
+  closest(selector) {{
+    if (selector === `#${{this.id}}`) return this;
+    if (selector === "[data-workspace]" && this.dataset.workspace) return this;
+    if (selector === "[data-project-slug]" && this.dataset.projectSlug) return this;
+    if (selector === "[data-workflow-step-id]" && this.dataset.workflowStepId) return this;
     return null;
   }}
   appendChild(child) {{
@@ -214,10 +219,24 @@ globalThis.window = window;
   "openLearningsBtn",
   "openProjectBtn",
   "openTranscriptBtn",
+  "appSelectedChannel",
+  "appSelectedProject",
+  "appOverallState",
+  "workspaceNav",
+  "navOverviewBtn",
+  "navWorkflowBtn",
+  "navAnalyticsBtn",
+  "overviewWorkspace",
+  "workflowWorkspace",
+  "analyticsWorkspace",
+  "analyticsPanel",
 ].forEach(getElement);
 
 getElement("window").value = "28";
 getElement("recent").value = "10";
+getElement("navOverviewBtn").dataset.workspace = "overview";
+getElement("navWorkflowBtn").dataset.workspace = "workflow";
+getElement("navAnalyticsBtn").dataset.workspace = "analytics";
 document.activeElement = getElement("channelSelect");
 
 async function flush() {{
@@ -288,6 +307,65 @@ class UiFrontendContractTests(unittest.TestCase):
             },
         )
 
+    def test_ui_shell_contains_primary_navigation_and_workspace_regions(self):
+        for token in [
+            "YT Input Collector",
+            "Workspace",
+            'data-workspace="overview"',
+            'data-workspace="workflow"',
+            'data-workspace="analytics"',
+            'id="overviewWorkspace"',
+            'id="workflowWorkspace"',
+            'id="analyticsWorkspace"',
+            'id="appSelectedChannel"',
+            'id="appSelectedProject"',
+            'id="appOverallState"',
+        ]:
+            self.assertIn(token, self.html)
+
+    def test_workflow_and_analytics_actions_keep_supported_ids_and_routes(self):
+        for token in [
+            'id="workflowStepSelect"',
+            'data-workflow-step-id="${escapeHtml(step.step_id)}"',
+            'id="buildBundleBtn"',
+            'id="copyBundleBtn"',
+            'id="parseOutputBtn"',
+            'id="saveCandidateBtn"',
+            'id="approveCandidateBtn"',
+            'id="rejectCandidateBtn"',
+            'id="discoverAnalyticsBtn"',
+            'id="syncAnalyticsCollectorBtn"',
+            'id="downloadProductionZipLink"',
+            'id="downloadAnalyticsZipLink"',
+        ]:
+            self.assertIn(token, self.html)
+
+    def test_ui_uses_collapsed_technical_details_and_compact_table_markup(self):
+        self.assertIn("<details>", self.html)
+        self.assertIn("<summary>Technical Details</summary>", self.html)
+        self.assertIn('class="compact-table"', self.html)
+        self.assertIn("Recommended Next Action", self.html)
+        self.assertIn('class="primary"', self.html)
+        self.assertIn('class="success"', self.html)
+
+    def test_operator_header_hides_project_slug_and_uses_friendly_status_mapping(self):
+        self.assertIn('id="appSelectedChannel"', self.html)
+        self.assertIn('id="appSelectedProject"', self.html)
+        self.assertIn('id="appOverallState"', self.html)
+        self.assertIn("function friendlyStatusLabel(value)", self.html)
+        self.assertIn('PRODUCTION_READY: "Production ready"', self.html)
+        self.assertIn('APPROVED: "Approved"', self.html)
+        self.assertIn('PARTIAL: "Completed with missing data"', self.html)
+        self.assertIn('PENDING: "Waiting for YouTube"', self.html)
+
+    def test_sidebar_uses_compact_navigation_and_collapsed_channel_settings(self):
+        self.assertIn("Channel Settings", self.html)
+        self.assertIn('workspace-tab active', self.html)
+        self.assertIn('button.primary', self.html)
+        self.assertIn('button.secondary', self.html)
+        self.assertIn('button.success', self.html)
+        self.assertIn('button.danger', self.html)
+
     def test_selected_channel_state_contract_is_present(self):
         for token in [
             "SELECTED_CHANNEL_STORAGE_KEY",
@@ -332,6 +410,13 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("if (savedSlug && !validSavedSlug) localStorage.removeItem(SELECTED_CHANNEL_STORAGE_KEY);", self.html)
         self.assertIn('state.errorMessage = "The previously selected channel is no longer available. Please select another channel.";', self.html)
 
+    def test_project_selection_storage_is_channel_scoped_and_safe(self):
+        self.assertIn('const SELECTED_PROJECTS_STORAGE_KEY = "yt_input_collector.selectedProjectsByChannel";', self.html)
+        self.assertIn("function loadSavedProjectSelections()", self.html)
+        self.assertIn("function rememberProjectSlugForChannel(channelSlug, projectSlug)", self.html)
+        self.assertIn("JSON.stringify(normalized)", self.html)
+        self.assertNotIn("selectedProjectsByChannelContent", self.html)
+
     def test_no_hard_coded_mist_of_ages_selection_fallback_exists(self):
         forbidden_patterns = [
             r'selectedChannelSlug\s*=\s*"mist_of_ages"',
@@ -372,9 +457,8 @@ class UiFrontendContractTests(unittest.TestCase):
 
     def test_no_channel_and_disconnected_states_are_rendered(self):
         self.assertIn("Selection required", self.html)
-        self.assertIn("No channel is selected.", self.html)
-        self.assertIn("Channel disconnected", self.html)
-        self.assertIn("This selected channel is not currently connected.", self.html)
+        self.assertIn("Choose a channel to load its canonical summary. The UI will not guess a fallback channel.", self.html)
+        self.assertIn("This channel is disconnected. Read-only summary is available, but workflow actions stay unavailable.", self.html)
 
     def test_oauth_ui_uses_selected_slug_and_canonical_v2_route(self):
         self.assertIn("oauth/start?channel_slug=${encodeURIComponent(slug)}&mode=${encodeURIComponent(mode)}", self.html)
@@ -400,15 +484,17 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn('Select a channel to load its canonical project list.', self.html)
         self.assertIn("No canonical projects yet", self.html)
         self.assertIn("setSelectedProjectSlug(", self.html)
+        self.assertIn("Change Project", self.html)
+        self.assertIn("Create New Project", self.html)
 
     def test_workflow_panel_uses_selected_project_workflow_and_bundle_routes(self):
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow`)', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/bundle`)', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/parse-output`, {', self.html)
         self.assertIn('v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/workflow/steps/${encodeURIComponent(step.step_id)}/revisions`, {', self.html)
-        self.assertIn("Workflow Panel", self.html)
+        self.assertIn("Content Workflow", self.html)
         self.assertIn("Workflow Steps", self.html)
-        self.assertIn("Selected Workflow Step", self.html)
+        self.assertIn("Selected Step Detail", self.html)
         self.assertIn("Build Complete Bundle", self.html)
         self.assertIn("Copy Complete Bundle", self.html)
         self.assertIn("Parse and Preview", self.html)
@@ -430,7 +516,7 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("await fallbackCopyBundleText(bundle.bundle);", self.html)
         self.assertIn("bundle.bundle_character_count", self.html)
         self.assertIn("bundle.bundle_sha256", self.html)
-        self.assertIn("bundle.prompt_file_sha256", self.html)
+        self.assertIn("Copy Complete Bundle uses the exact full stored bundle.", self.html)
         self.assertIn('role="status" aria-live="polite"', self.html)
 
     def test_output_preview_contract_and_safe_error_mapping_exist(self):
@@ -453,7 +539,7 @@ class UiFrontendContractTests(unittest.TestCase):
             self.assertIn(token, self.html)
 
     def test_workflow_panel_renders_generic_step_and_constraint_data(self):
-        self.assertIn("Generated from the workflow definition in step order.", self.html)
+        self.assertIn("Compact workflow rail", self.html)
         self.assertIn("workflowSteps.length", self.html)
         self.assertIn("describeConversationConstraint(step)", self.html)
         self.assertIn("Continue in the same ${step.required_model || \"selected\"} conversation: ${constraint.group_id}", self.html)
@@ -494,7 +580,7 @@ class UiFrontendContractTests(unittest.TestCase):
     def test_workflow_selector_uses_server_owned_options_without_hidden_default(self):
         for token in [
             '<label for="workflowBinding">Workflow Version</label>',
-            '<select id="workflowBinding" disabled>',
+            'workflowBinding',
             'available_workflows',
             'function channelWorkflowOptions()',
             'function selectedCreateWorkflowOption()',
@@ -502,7 +588,7 @@ class UiFrontendContractTests(unittest.TestCase):
             'workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;',
             "return `${option.workflow_id}@@${option.workflow_version}`;",
             'const label = `${option.display_name || option.workflow_id} v${option.workflow_version}`;',
-            'document.getElementById("workflowBinding").addEventListener("change", () => {',
+            'document.getElementById("projectListPanel").addEventListener("change", (event) => {',
         ]:
             self.assertIn(token, self.html)
         self.assertNotIn('workflowSelect.value = workflowOptions[0]', self.html)
@@ -544,8 +630,9 @@ class UiFrontendContractTests(unittest.TestCase):
             "/api/open_path",
         ]:
             self.assertNotIn(path, self.html)
-        self.assertIn("Raw-path opening and later collector actions remain disabled.", self.html)
-        self.assertIn("Project workflow cutover is partially active.", self.html)
+        self.assertIn("Open Learnings", self.html)
+        self.assertIn("Open Project Folder", self.html)
+        self.assertIn("Open Transcript File", self.html)
 
     def test_frontend_contains_no_live_credential_material(self):
         forbidden = [
@@ -570,16 +657,1002 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertNotIn("localStorage.setItem(\"yt_input_collector.pastedOutput", self.html)
 
     def test_visible_ui_still_signals_embedded_collector_context(self):
-        self.assertIn("Mist of Ages Research", self.html)
+        self.assertIn("YT Input Collector", self.html)
         self.assertIn("Refresh Channels", self.html)
-        self.assertIn("Selected Channel Summary", self.html)
-        self.assertIn("Selected Channel Actions", self.html)
-        self.assertIn("Research Projects", self.html)
+        self.assertIn("Operational Workspace", self.html)
+        self.assertIn("Overview", self.html)
+        self.assertIn("Content Workflow", self.html)
+        self.assertIn("Analytics", self.html)
+        self.assertIn("Channel Settings", self.html)
+        self.assertIn("Change Project", self.html)
+        self.assertIn("Create New Project", self.html)
         self.assertIn("Project Detail", self.html)
-        self.assertIn("Read-only workflow detail for the selected canonical project.", self.html)
+        self.assertIn("Selected project workflow, candidate controls, and production handoff.", self.html)
 
 
 class UiFrontendRuntimeTests(unittest.TestCase):
+    def test_three_primary_navigation_areas_render_without_duplicate_fetch(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = { channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" } };
+            const before = fetchCalls.length;
+            setActiveWorkspace("workflow");
+            setActiveWorkspace("analytics");
+            setActiveWorkspace("overview");
+            return {
+              fetchDelta: fetchCalls.length - before,
+              overviewDisplay: document.getElementById("overviewWorkspace").style.display,
+              workflowDisplay: document.getElementById("workflowWorkspace").style.display,
+              analyticsDisplay: document.getElementById("analyticsWorkspace").style.display,
+              navHtml: document.getElementById("navOverviewBtn").className + "|" + document.getElementById("navWorkflowBtn").className + "|" + document.getElementById("navAnalyticsBtn").className,
+            };
+            """
+        )
+        self.assertEqual(result["fetchDelta"], 0)
+        self.assertEqual(result["overviewDisplay"], "grid")
+        self.assertEqual(result["workflowDisplay"], "none")
+        self.assertEqual(result["analyticsDisplay"], "none")
+        self.assertIn("workspace-tab active", result["navHtml"])
+
+    def test_selected_navigation_has_strong_active_styling(self):
+        self.assertIn(".workspace-tab.active { background:#102a43; color:#fff; border-color:#102a43;", ui_server.HTML_PAGE)
+
+    def test_each_workspace_exposes_one_dominant_primary_action(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.selectedChannelAnalytics = { export_url: "/zip", source_results: { analytics_queries: { status: "PARTIAL" } }, report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 }, capability_counts: { AVAILABLE: 20, ERROR: 0 }, normalized_tables: [] };
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_1", order: 1, display_name: "Prompt One", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "READY", constraints: [] }] },
+              state: { current_step_id: "prompt_1", current_step_status: "READY", current_lifecycle_state: "INPUT_READY" },
+              available_actions: { prompt_1: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1";
+            render();
+            return {
+              overviewPrimaryCount: (document.getElementById("summaryPanel").innerHTML.match(/class="primary"/g) || []).length,
+              analyticsPrimaryCount: (document.getElementById("analyticsPanel").innerHTML.match(/class="primary"/g) || []).length,
+              workflowPrimaryCount: (document.getElementById("projectDetailPanel").innerHTML.match(/class="primary"|class="action-link success"/g) || []).length,
+            };
+            """
+        )
+        self.assertEqual(result["overviewPrimaryCount"], 1)
+        self.assertEqual(result["analyticsPrimaryCount"], 1)
+        self.assertGreaterEqual(result["workflowPrimaryCount"], 1)
+
+    def test_overview_recommended_next_action_logic_prefers_candidate_review(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+            };
+            state.selectedProjectDetail = {
+              project: {
+                project_slug: "project-a",
+                status: "READY",
+                workflow_input_status: "READY",
+                runnable: true,
+                updated_at: "2026-07-05T00:00:00Z",
+              },
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf", workflow_version: "2", display_name: "Workflow", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [] },
+              state: {
+                current_step_id: "prompt_3_creative_package",
+                current_step_status: "CANDIDATE",
+                current_lifecycle_state: "IN_PROGRESS",
+                step_states: {
+                  prompt_3_creative_package: { status: "CANDIDATE", candidate_group_id: "grp_000003" },
+                },
+              },
+            };
+            render();
+            return {
+              summaryHtml: document.getElementById("summaryPanel").innerHTML,
+              headerProject: document.getElementById("appSelectedProject").textContent,
+              overallState: document.getElementById("appOverallState").textContent,
+            };
+            """
+        )
+        self.assertIn("Recommended Next Action: Review Candidate", result["summaryHtml"])
+        self.assertIn("Project A", result["headerProject"])
+        self.assertEqual(result["overallState"], "Candidate review needed")
+
+    def test_workflow_workspace_renders_compact_step_rail_and_single_selected_step(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = {
+              project: {
+                project_slug: "project-a",
+                status: "READY",
+                workflow_input_status: "READY",
+                runnable: true,
+                source_video_url: "https://example.com",
+                updated_at: "2026-07-05T00:00:00Z",
+              },
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [
+                  { step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "READY", constraints: [] },
+                  { step_id: "prompt_2_historical_research", order: 2, display_name: "Historical Research", required_model: "Gemini", input_artifact_ids: ["transcript_analysis"], optional_input_artifact_ids: [], output_artifact_ids: ["research_pack"], resulting_lifecycle_state: "READY", constraints: [] },
+                ],
+              },
+              state: {
+                current_step_id: "prompt_2_historical_research",
+                current_step_status: "READY",
+                next_step_id: "prompt_2_historical_research",
+                current_lifecycle_state: "INPUT_READY",
+                step_states: {
+                  prompt_1_transcript_analysis: { status: "APPROVED", approved_group_id: "grp_000001" },
+                },
+              },
+              available_actions: {
+                prompt_2_historical_research: { save_candidate: false, approve_candidate: false, reject_candidate: false },
+              },
+              artifacts: [
+                { artifact_id: "transcript_analysis", display_name: "Transcript Analysis", relative_path: "workflow/transcript_analysis.md", exists: true },
+                { artifact_id: "research_pack", display_name: "Research Pack", relative_path: "workflow/research_pack.md", exists: false },
+              ],
+            };
+            state.selectedWorkflowStepId = "prompt_2_historical_research";
+            render();
+            return {
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("Transcript Analysis", result["detailHtml"])
+        self.assertIn("Historical Research", result["detailHtml"])
+        self.assertIn("Prompt 1", result["detailHtml"])
+        self.assertIn("Prompt 2", result["detailHtml"])
+        self.assertIn("Compact workflow rail", result["detailHtml"])
+        self.assertEqual(result["detailHtml"].count("Selected Step Detail"), 1)
+
+    def test_advanced_details_are_collapsed_by_default(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_url: "https://example.com", updated_at: "2026-07-05T00:00:00Z" } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf", workflow_version: "2", display_name: "Workflow", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_1", order: 1, display_name: "Prompt One", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "READY", constraints: [] }] },
+              state: { current_step_id: "prompt_1", current_step_status: "READY", current_lifecycle_state: "INPUT_READY" },
+              available_actions: { prompt_1: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1";
+            state.selectedProjectValidation = { checks: { transcript_present: true } };
+            render();
+            return {
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+              validationHtml: document.getElementById("validationPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("<details", result["detailHtml"])
+        self.assertNotIn("<details open", result["detailHtml"])
+        self.assertIn("<details", result["validationHtml"])
+        self.assertNotIn("<details open", result["validationHtml"])
+
+    def test_overview_hides_raw_codes_in_default_view_but_keeps_them_in_technical_details(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.selectedProjectSlug = "20260702_ancient-rome-in-20-minutes";
+            state.selectedProjectDetail = { project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", ready_for_export: true, approved_group_id: "grp_000007", state_revision: 14 };
+            state.selectedChannelAnalytics = { source_results: { analytics_queries: { status: "PARTIAL" } }, report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 } };
+            state.selectedProjectWorkflow = { state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", state_revision: 14 } };
+            render();
+            const html = document.getElementById("summaryPanel").innerHTML;
+            const defaultView = html.split("<details")[0];
+            return { html, defaultView };
+            """
+        )
+        self.assertNotIn("PRODUCTION_READY", result["defaultView"])
+        self.assertNotIn("PARTIAL", result["defaultView"])
+        self.assertNotIn("prompt_7_final_content", result["defaultView"])
+        self.assertIn("Production ready", result["defaultView"])
+        self.assertIn("Most analytics data is ready. One YouTube query failed temporarily, and bulk reports are still being prepared.", result["defaultView"])
+        self.assertIn("Current Step ID", result["html"])
+
+    def test_project_slug_absent_from_default_header(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.projects = [{ project_slug: "20260702_ancient-rome-in-20-minutes", status: "READY" }];
+            state.selectedProjectSlug = "20260702_ancient-rome-in-20-minutes";
+            state.selectedProjectDetail = { project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } };
+            render();
+            return {
+              projectHeader: document.getElementById("appSelectedProject").textContent,
+            };
+            """
+        )
+        self.assertEqual(result["projectHeader"], "Ancient Rome in 20 Minutes")
+        self.assertNotIn("20260702_ancient-rome-in-20-minutes", result["projectHeader"])
+
+    def test_selected_project_survives_workspace_switching(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = { channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" } };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY" }];
+            setSelectedProjectSlug("project-a");
+            await flush();
+            setActiveWorkspace("analytics");
+            render();
+            setActiveWorkspace("workflow");
+            render();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              selectedProjectText: document.getElementById("appSelectedProject").textContent,
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-a")
+        self.assertEqual(result["selectedProjectText"], "Project A")
+
+    def test_selected_project_survives_channel_summary_and_project_refresh(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            fetchHandler = async (path, config) => {
+              if (path === "/api/v2/channels/channel-a") {
+                return jsonResponse({
+                  channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+                  available_workflows: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/analytics") {
+                return jsonResponse({ channel_slug: "channel-a", source_results: { analytics_queries: { status: "SUCCESS" } }, normalized_tables: [] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects") {
+                return jsonResponse({
+                  projects: [
+                    { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" },
+                    { project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "READY" },
+                  ],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a") {
+                return jsonResponse({ project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/workflow") {
+                return jsonResponse({
+                  binding: { workflow_id: "wf", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" },
+                  definition: { workflow_id: "wf", workflow_version: "2", display_name: "Workflow", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [] },
+                  state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", current_lifecycle_state: "PRODUCTION_READY", state_revision: 14 },
+                  available_actions: {},
+                  artifacts: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/production-package") {
+                return jsonResponse({
+                  production_package: {
+                    lifecycle: "PRODUCTION_READY",
+                    ready_for_export: true,
+                    approved_group_id: "grp_000007",
+                    state_revision: 14,
+                    download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+                    artifacts: [],
+                  },
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/transcript") {
+                return jsonResponse({ transcript: "saved transcript" });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = { channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" } };
+            state.projects = [
+              { project_slug: "project-a", project_name: "Project A", status: "READY" },
+              { project_slug: "project-b", project_name: "Project B", status: "READY" },
+            ];
+            setSelectedProjectSlug("project-a");
+            await flush();
+            const beforeWrites = fetchCalls.filter((call) => call.method !== "GET").length;
+            await loadSelectedChannelSummary();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              selectedProjectText: document.getElementById("appSelectedProject").textContent,
+              nonGetCalls: fetchCalls.filter((call) => call.method !== "GET").length - beforeWrites,
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-a")
+        self.assertEqual(result["selectedProjectText"], "Project A")
+        self.assertEqual(result["nonGetCalls"], 0)
+
+    def test_sole_project_is_auto_selected(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels/mist_of_ages/projects") {
+                return jsonResponse({
+                  projects: [
+                    { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY" },
+                  ],
+                });
+              }
+              if (path === "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes") {
+                return jsonResponse({ project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } });
+              }
+              if (path === "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/workflow") {
+                return jsonResponse({
+                  binding: { workflow_id: "mist_of_ages_assisted_content", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" },
+                  definition: { workflow_id: "mist_of_ages_assisted_content", workflow_version: "2", display_name: "Mist of Ages Assisted Content", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [] },
+                  state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", current_lifecycle_state: "PRODUCTION_READY", state_revision: 14 },
+                  available_actions: {},
+                  artifacts: [],
+                });
+              }
+              if (path === "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/production-package") {
+                return jsonResponse({
+                  production_package: {
+                    lifecycle: "PRODUCTION_READY",
+                    ready_for_export: true,
+                    approved_group_id: "grp_000007",
+                    state_revision: 14,
+                    download_url: "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/production-package/download",
+                    artifacts: [],
+                  },
+                });
+              }
+              if (path === "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/transcript") {
+                return jsonResponse({ transcript: "saved transcript" });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" },
+              available_workflows: [],
+            };
+            await loadProjectsForChannel("mist_of_ages");
+            await flush();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              selectedProjectText: document.getElementById("appSelectedProject").textContent,
+              savedProjects: localStorage.getItem("yt_input_collector.selectedProjectsByChannel"),
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "20260702_ancient-rome-in-20-minutes")
+        self.assertEqual(result["selectedProjectText"], "Ancient Rome in 20 Minutes")
+        self.assertIn('"mist_of_ages":"20260702_ancient-rome-in-20-minutes"', result["savedProjects"])
+
+    def test_saved_project_is_restored_only_for_its_own_channel(self):
+        result = run_ui_runtime_scenario(
+            """
+            state.channels = [
+              { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              { channel_slug: "channel-b", display_name: "Channel B", status: "CONNECTED" },
+            ];
+            localStorage.setItem("yt_input_collector.selectedProjectsByChannel", JSON.stringify({
+              "channel-a": "project-a",
+              "channel-b": "project-b"
+            }));
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels/channel-b") {
+                return jsonResponse({
+                  channel: { channel_slug: "channel-b", display_name: "Channel B", status: "CONNECTED" },
+                  available_workflows: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-b/analytics") {
+                return jsonResponse({ channel_slug: "channel-b", source_results: { analytics_queries: { status: "SUCCESS" } }, normalized_tables: [] });
+              }
+              if (path === "/api/v2/channels/channel-b/projects") {
+                return jsonResponse({ projects: [{ project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "READY" }] });
+              }
+              if (path === "/api/v2/channels/channel-b/projects/project-b") {
+                return jsonResponse({ project: { project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "READY", runnable: true } });
+              }
+              if (path === "/api/v2/channels/channel-b/projects/project-b/workflow") {
+                return jsonResponse({ binding: { workflow_id: "wf", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" }, definition: { workflow_id: "wf", workflow_version: "2", display_name: "Workflow", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [] }, state: { current_step_id: "prompt_1", current_step_status: "READY", current_lifecycle_state: "INPUT_READY" }, available_actions: {}, artifacts: [] });
+              }
+              if (path === "/api/v2/channels/channel-b/projects/project-b/production-package") {
+                return jsonResponse({ production_package: null });
+              }
+              if (path === "/api/v2/channels/channel-b/projects/project-b/transcript") {
+                return jsonResponse({ transcript: "" });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            refreshStatus();
+            await flush();
+            setSelectedChannelSlug("channel-b");
+            await flush();
+            await flush();
+            return {
+              selectedChannelSlug: state.selectedChannelSlug,
+              selectedProjectSlug: state.selectedProjectSlug,
+              selectedProjectText: document.getElementById("appSelectedProject").textContent,
+            };
+            """
+        )
+        self.assertEqual(result["selectedChannelSlug"], "channel-b")
+        self.assertEqual(result["selectedProjectSlug"], "project-b")
+        self.assertEqual(result["selectedProjectText"], "Project B")
+
+    def test_stale_saved_project_is_cleared_safely(self):
+        result = run_ui_runtime_scenario(
+            """
+            state.channels = [{ channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" }];
+            localStorage.setItem("yt_input_collector.selectedProjectsByChannel", JSON.stringify({ "channel-a": "missing-project" }));
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels/channel-a") {
+                return jsonResponse({
+                  channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+                  available_workflows: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/analytics") {
+                return jsonResponse({ channel_slug: "channel-a", source_results: { analytics_queries: { status: "SUCCESS" } }, normalized_tables: [] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects") {
+                return jsonResponse({
+                  projects: [
+                    { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" },
+                    { project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "READY" },
+                  ],
+                });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            refreshStatus();
+            await flush();
+            setSelectedChannelSlug("channel-a");
+            await flush();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              savedProjects: localStorage.getItem("yt_input_collector.selectedProjectsByChannel"),
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIsNone(result["selectedProjectSlug"])
+        self.assertEqual(result["savedProjects"], None)
+        self.assertIn("Change Project", result["helperHtml"])
+
+    def test_project_restore_performs_no_write_request(self):
+        result = run_ui_runtime_scenario(
+            """
+            localStorage.setItem("yt_input_collector.selectedChannelSlug", "channel-a");
+            localStorage.setItem("yt_input_collector.selectedProjectsByChannel", JSON.stringify({ "channel-a": "project-a" }));
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels") {
+                return jsonResponse({ channels: [{ channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" }] });
+              }
+              if (path === "/api/v2/channels/channel-a") {
+                return jsonResponse({
+                  channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+                  available_workflows: [],
+                });
+              }
+              if (path === "/api/v2/channels/channel-a/analytics") {
+                return jsonResponse({ channel_slug: "channel-a", source_results: { analytics_queries: { status: "SUCCESS" } }, normalized_tables: [] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects") {
+                return jsonResponse({ projects: [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a") {
+                return jsonResponse({ project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/workflow") {
+                return jsonResponse({ binding: { workflow_id: "wf", workflow_version: "2", workflow_definition_sha256: "sha", binding_source: "PROJECT_JSON" }, definition: { workflow_id: "wf", workflow_version: "2", display_name: "Workflow", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [] }, state: { current_step_id: "prompt_1", current_step_status: "READY", current_lifecycle_state: "INPUT_READY" }, available_actions: {}, artifacts: [] });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/production-package") {
+                return jsonResponse({ production_package: null });
+              }
+              if (path === "/api/v2/channels/channel-a/projects/project-a/transcript") {
+                return jsonResponse({ transcript: "" });
+              }
+              return jsonResponse({ channels: [] });
+            };
+            await flush();
+            await flush();
+            return {
+              methods: fetchCalls.map((call) => call.method),
+              paths: fetchCalls.map((call) => call.path),
+            };
+            """
+        )
+        self.assertTrue(result["paths"])
+        self.assertEqual(set(result["methods"]), {"GET"})
+
+    def test_header_shows_workflow_status_when_project_is_selected(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.selectedProjectSlug = "20260702_ancient-rome-in-20-minutes";
+            state.selectedProjectDetail = { project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", ready_for_export: true, approved_group_id: "grp_000007", state_revision: 14 };
+            state.selectedProjectWorkflow = { state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", current_lifecycle_state: "PRODUCTION_READY", state_revision: 14 } };
+            render();
+            return {
+              label: document.getElementById("appOverallStateLabel").textContent,
+              value: document.getElementById("appOverallState").textContent,
+            };
+            """
+        )
+        self.assertEqual(result["label"], "Workflow Status")
+        self.assertEqual(result["value"], "Production ready")
+
+    def test_header_shows_analytics_status_when_no_project_is_selected(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.selectedChannelAnalytics = { source_results: { analytics_queries: { status: "PARTIAL" } }, report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 }, normalized_tables: [] };
+            render();
+            return {
+              label: document.getElementById("appOverallStateLabel").textContent,
+              value: document.getElementById("appOverallState").textContent,
+            };
+            """
+        )
+        self.assertEqual(result["label"], "Analytics Status")
+        self.assertEqual(result["value"], "Completed with missing data")
+
+    def test_production_ready_restored_project_recommends_download_production_package(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = { channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" } };
+            state.selectedProjectSlug = "20260702_ancient-rome-in-20-minutes";
+            state.selectedProjectDetail = { project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = {
+              lifecycle: "PRODUCTION_READY",
+              ready_for_export: true,
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              download_url: "/api/v2/channels/mist_of_ages/projects/20260702_ancient-rome-in-20-minutes/production-package/download",
+            };
+            state.selectedProjectWorkflow = { state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", current_lifecycle_state: "PRODUCTION_READY", state_revision: 14 } };
+            render();
+            return {
+              summaryHtml: document.getElementById("summaryPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("Recommended Next Action: Download Production Package", result["summaryHtml"])
+        self.assertIn('id="recommendedActionBtn"', result["summaryHtml"])
+        self.assertIn(">Download Production Package<", result["summaryHtml"])
+
+    def test_workspace_intro_matches_selected_navigation(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = { channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" } };
+            setActiveWorkspace("overview");
+            render();
+            const overviewMessage = document.getElementById("message").textContent;
+            setActiveWorkspace("workflow");
+            render();
+            const workflowMessage = document.getElementById("message").textContent;
+            setActiveWorkspace("analytics");
+            render();
+            const analyticsMessage = document.getElementById("message").textContent;
+            return { overviewMessage, workflowMessage, analyticsMessage };
+            """
+        )
+        self.assertIn("Overview focuses on current status and the next supported action.", result["overviewMessage"])
+        self.assertIn("Content Workflow covers creating, continuing, reviewing, and exporting content", result["workflowMessage"])
+        self.assertIn("Analytics focuses on syncing, checking, and exporting channel data.", result["analyticsMessage"])
+
+    def test_overview_copy_absent_from_content_workflow_and_analytics(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = { channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" } };
+            setActiveWorkspace("workflow");
+            render();
+            const workflowMessage = document.getElementById("message").textContent;
+            setActiveWorkspace("analytics");
+            render();
+            const analyticsMessage = document.getElementById("message").textContent;
+            return { workflowMessage, analyticsMessage };
+            """
+        )
+        self.assertNotIn("Overview shows the current channel state", result["workflowMessage"])
+        self.assertNotIn("Overview shows the current channel state", result["analyticsMessage"])
+
+    def test_orphan_create_waiting_panel_absent_by_default(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            render();
+            return {
+              workflowHtml: document.getElementById("workflowWorkspace").innerHTML,
+              stateHtml: document.getElementById("projectListState").textContent,
+            };
+            """
+        )
+        self.assertNotIn("Create Status", result["workflowHtml"])
+        self.assertNotIn("<strong>Create</strong>", result["workflowHtml"].split("<summary>Create New Project</summary>")[0])
+        self.assertNotIn("Waiting", result["stateHtml"])
+
+    def test_create_status_appears_only_inside_expanded_create_new_project(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            render();
+            const html = document.getElementById("projectListPanel").innerHTML;
+            return {
+              beforeCreateSummary: html.split("<summary>Create New Project</summary>")[0],
+              fullHtml: html,
+            };
+            """
+        )
+        self.assertNotIn("Create Status", result["beforeCreateSummary"])
+        self.assertNotIn("<strong>Create</strong>", result["beforeCreateSummary"])
+        self.assertIn('id="projectCreateState"', result["fullHtml"])
+
+    def test_production_ready_completion_and_handoff_render_before_project_management_controls(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = {
+              lifecycle: "PRODUCTION_READY",
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              ready_for_export: true,
+              download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+              artifacts: [{ filename: "content.md", character_count: 100, file_url: "/content", exists: true, matches_approved_revision_metadata: true }],
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7_final_content", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7_final_content": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: { "prompt_7_final_content": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7_final_content";
+            render();
+            return {
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+              listHtml: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["listHtml"], "")
+        self.assertLess(result["detailHtml"].index("Workflow completed"), result["detailHtml"].index("Project Management"))
+        self.assertLess(result["detailHtml"].index("Download Production Package"), result["detailHtml"].index("Change Project"))
+        self.assertIn("content.md", result["detailHtml"])
+
+    def test_project_management_is_collapsed_by_default(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            render();
+            return {
+              html: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("<summary>Change Project</summary>", result["html"])
+        self.assertIn("<summary>Create New Project</summary>", result["html"])
+        self.assertNotIn("<details open", result["html"])
+
+    def test_completed_workflow_defaults_to_completion_and_download_view(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = {
+              lifecycle: "PRODUCTION_READY",
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              ready_for_export: true,
+              download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+              artifacts: [{ filename: "content.md", character_count: 100, file_url: "/content", exists: true, matches_approved_revision_metadata: true }],
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7_final_content", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7_final_content": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: { "prompt_7_final_content": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7_final_content";
+            render();
+            return { html: document.getElementById("projectDetailPanel").innerHTML };
+            """
+        )
+        self.assertIn("Workflow completed", result["html"])
+        self.assertIn("Download Production Package", result["html"])
+        self.assertNotIn('id="parseOutputBtn"', result["html"])
+
+    def test_completed_workflow_has_only_one_primary_production_download_action(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = {
+              lifecycle: "PRODUCTION_READY",
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              ready_for_export: true,
+              download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+              artifacts: [
+                { filename: "content.md", character_count: 100, file_url: "/content", exists: true, matches_approved_revision_metadata: true },
+                { filename: "publishing_package.md", character_count: 50, file_url: "/publishing", exists: true, matches_approved_revision_metadata: true }
+              ],
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7_final_content", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7_final_content": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: { "prompt_7_final_content": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7_final_content";
+            render();
+            const html = document.getElementById("projectDetailPanel").innerHTML;
+            return {
+              html,
+              downloadCount: (html.match(/Download Production Package/g) || []).length,
+              zipCount: (html.match(/Download Production ZIP/g) || []).length,
+            };
+            """
+        )
+        self.assertEqual(result["downloadCount"], 1)
+        self.assertEqual(result["zipCount"], 0)
+
+    def test_completed_workflow_has_only_one_completed_message(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = {
+              lifecycle: "PRODUCTION_READY",
+              approved_group_id: "grp_000007",
+              state_revision: 14,
+              ready_for_export: true,
+              download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
+              artifacts: [{ filename: "content.md", character_count: 100, file_url: "/content", exists: true, matches_approved_revision_metadata: true }],
+            };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7_final_content", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7_final_content", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7_final_content": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: { "prompt_7_final_content": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7_final_content";
+            render();
+            const html = document.getElementById("projectDetailPanel").innerHTML;
+            return { completedCount: (html.match(/Workflow completed/g) || []).length };
+            """
+        )
+        self.assertEqual(result["completedCount"], 1)
+
+    def test_completed_workflow_uses_compact_rail_markup_instead_of_large_cards(self):
+        self.assertIn(".step-rail-top", ui_server.HTML_PAGE)
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            const steps = [];
+            const stepStates = {};
+            for (let index = 1; index <= 7; index += 1) {
+              steps.push({ step_id: "prompt_" + index, order: index, display_name: "Prompt " + index + " Title", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] });
+              stepStates["prompt_" + index] = { status: "APPROVED", approved_group_id: "grp_" + index, candidate_group_id: null };
+            }
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: stepStates },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return {
+              html: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["html"].count('data-workflow-step-id='), 7)
+        self.assertEqual(result["html"].count('class="step-rail-top"'), 7)
+
+    def test_all_seven_approved_steps_display_completed_semantics(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedProjectSlug = "20260702_ancient-rome-in-20-minutes";
+            state.selectedProjectDetail = { project: { project_slug: "20260702_ancient-rome-in-20-minutes", project_name: "Ancient Rome in 20 Minutes", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            const steps = [];
+            const stepStates = {};
+            for (let index = 1; index <= 7; index += 1) {
+              steps.push({ step_id: "prompt_" + index, order: index, display_name: "Prompt " + index, required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] });
+              stepStates["prompt_" + index] = { status: "APPROVED", approved_group_id: "grp_" + index, candidate_group_id: null };
+            }
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: stepStates },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return {
+              html: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertGreaterEqual(result["html"].count("Approved"), 7)
+
+    def test_selected_approved_prompt_seven_remains_approved_not_ready(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            const steps = [];
+            const stepStates = {};
+            for (let index = 1; index <= 7; index += 1) {
+              steps.push({ step_id: "prompt_" + index, order: index, display_name: "Prompt " + index, required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] });
+              stepStates["prompt_" + index] = { status: "APPROVED", approved_group_id: "grp_" + index, candidate_group_id: null };
+            }
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: stepStates },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return {
+              html: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn('class="active"', result["html"])
+        self.assertIn("Prompt 7", result["html"])
+        active_match = re.search(r'class="active"[^>]*>(.*?)</button>', result["html"], re.DOTALL)
+        self.assertIsNotNone(active_match)
+        self.assertIn("Approved", active_match.group(1))
+        self.assertNotIn("Ready", active_match.group(1))
+
+    def test_completed_workflow_removes_redundant_project_summary_grid(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return { html: document.getElementById("projectDetailPanel").innerHTML };
+            """
+        )
+        self.assertNotIn("<strong>Ready state</strong>", result["html"])
+        self.assertNotIn("<strong>Workflow progress</strong>", result["html"])
+        self.assertNotIn("<strong>Production handoff</strong>", result["html"])
+
+    def test_completed_workflow_details_are_collapsed_by_default(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-demo", workflow_version: "2", display_name: "Workflow Demo", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7", order: 7, display_name: "Final Content", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content"], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "prompt_7": { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return { html: document.getElementById("projectDetailPanel").innerHTML };
+            """
+        )
+        self.assertIn("<summary>Workflow Details</summary>", result["html"])
+        self.assertIn("<summary>Technical Details</summary>", result["html"])
+        self.assertNotIn("<details open", result["html"])
     def test_workflow_selector_loads_from_server_summary_and_create_stays_disabled_without_selection(self):
         result = run_ui_runtime_scenario(
             """
@@ -701,13 +1774,18 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             render();
             await createProjectAction();
             await flush();
+            await flush();
+            if (state.selectedProjectSlug === "project-a" && !state.selectedProjectWorkflow) {
+              await loadSelectedProjectDetail("project-a", "channel-a");
+              await flush();
+            }
             const createCall = fetchCalls.find((call) => call.path === "/api/v2/channels/channel-a/projects" && call.method === "POST");
             return {
               createDisabledAfterSelection: document.getElementById("createBtn").disabled,
               createBody: JSON.parse(createCall.body),
               feedback: state.projectFeedback.text,
-              workflowVersionCardVisible: document.getElementById("projectDetailPanel").innerHTML.includes("Workflow Version"),
-              workflowVersionVisible: document.getElementById("projectDetailPanel").innerHTML.includes(">2<"),
+              workflowSummaryVisible: document.getElementById("projectDetailPanel").innerHTML.includes("Workflow Alpha"),
+              workflowVersionState: state.selectedProjectWorkflow && state.selectedProjectWorkflow.binding ? state.selectedProjectWorkflow.binding.workflow_version : null,
             };
             """
         )
@@ -724,8 +1802,8 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertNotIn("workflow_definition_path", result["createBody"])
         self.assertNotIn("prompt_manifest_path", result["createBody"])
         self.assertEqual(result["feedback"], "Canonical project created for the selected channel.")
-        self.assertTrue(result["workflowVersionCardVisible"])
-        self.assertTrue(result["workflowVersionVisible"])
+        self.assertTrue(result["workflowSummaryVisible"])
+        self.assertEqual(result["workflowVersionState"], "2")
 
     def test_channel_change_invalidates_stale_workflow_options(self):
         result = run_ui_runtime_scenario(
@@ -2073,7 +3151,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             render();
             const html = document.getElementById("projectDetailPanel").innerHTML;
             return {
-              hasStaleBadge: html.includes(">STALE<"),
+              hasStaleNotice: html.includes("Stale Output"),
               hasInvalidatedNotice: html.includes("Invalidated Candidate"),
               approveDisabled: html.includes('id="approveCandidateBtn" disabled'),
               rejectDisabled: html.includes('id="rejectCandidateBtn" disabled'),
@@ -2083,7 +3161,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             };
             """
         )
-        self.assertTrue(result["hasStaleBadge"])
+        self.assertTrue(result["hasStaleNotice"])
         self.assertTrue(result["hasInvalidatedNotice"])
         self.assertTrue(result["approveDisabled"])
         self.assertTrue(result["rejectDisabled"])
@@ -2095,130 +3173,145 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         result = run_ui_runtime_scenario(
             """
             await flush();
+            state.activeWorkspace = "workflow";
             state.selectedChannelSlug = "channel-a";
             state.selectedProjectSlug = "project-a";
-            state.selectedProjectDetail = {
-              project: {
-                project_slug: "project-a",
-                status: "READY",
-                workflow_input_status: "READY",
-                runnable: true,
-                source_video_id: "VID1",
-                source_video_url: "https://example.com",
-                updated_at: "2026-07-04T00:00:00Z",
-                has_content: true,
-                has_publishing_package: true,
-              }
-            };
-            state.selectedProjectWorkflow = {
-              channel_slug: "channel-a",
-              project_slug: "project-a",
-              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
-              definition: {
-                workflow_id: "wf-demo",
-                workflow_version: "2",
-                display_name: "Workflow Demo",
-                execution_mode: "ASSISTED",
-                prompt_set: { status: "AVAILABLE", bundle_available: true },
-                steps: [{ step_id: "step-7", order: 7, display_name: "Step 7", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["content", "publishing_package"], resulting_lifecycle_state: "DONE", constraints: [] }],
-              },
-              state: { current_step_id: "step-7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, state_persisted: true, step_states: { "step-7": { step_id: "step-7", status: "APPROVED", candidate_group_id: null, approved_group_id: "grp_000007" } } },
-              available_actions: { "step-7": { save_candidate: false, approve_candidate: false, reject_candidate: false } },
-              artifacts: [
-                { artifact_id: "content", display_name: "Content", relative_path: "content.md", exists: true },
-                { artifact_id: "publishing_package", display_name: "Publishing Package", relative_path: "publishing_package.md", exists: true },
-              ],
-            };
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_url: "https://example.com", updated_at: "2026-07-05T00:00:00Z" } };
             state.selectedProjectProductionPackage = {
-              ready_for_export: true,
               lifecycle: "PRODUCTION_READY",
               approved_group_id: "grp_000007",
               state_revision: 14,
+              ready_for_export: true,
               download_url: "/api/v2/channels/channel-a/projects/project-a/production-package/download",
               artifacts: [
-                { artifact_id: "content", filename: "content.md", relative_path: "channels/channel-a/projects/project-a/content.md", file_url: "/channels/channel-a/projects/project-a/content.md", exists: true, matches_approved_revision_metadata: true, sha256: "sha-content", character_count: 1200 },
-                { artifact_id: "publishing_package", filename: "publishing_package.md", relative_path: "channels/channel-a/projects/project-a/publishing_package.md", file_url: "/channels/channel-a/projects/project-a/publishing_package.md", exists: true, matches_approved_revision_metadata: true, sha256: "sha-package", character_count: 800 },
+                { filename: "content.md", relative_path: "workflow/content.md", sha256: "AAA", character_count: 100, file_url: "/content", exists: true, matches_approved_revision_metadata: true },
+                { filename: "publishing_package.md", relative_path: "workflow/publishing_package.md", sha256: "BBB", character_count: 50, file_url: "/publishing", exists: true, matches_approved_revision_metadata: true },
               ],
-              errors: [],
             };
             render();
-            const html = document.getElementById("projectDetailPanel").innerHTML;
             return {
-              hasSection: html.includes("Production Handoff"),
-              hasDownloadLabel: html.includes("Download Production ZIP"),
-              hasDownloadHref: html.includes("/api/v2/channels/channel-a/projects/project-a/production-package/download"),
-              hasContentLink: html.includes("/channels/channel-a/projects/project-a/content.md"),
-              hasPackageLink: html.includes("/channels/channel-a/projects/project-a/publishing_package.md"),
+              html: document.getElementById("projectDetailPanel").innerHTML,
             };
             """
         )
-        self.assertTrue(result["hasSection"])
-        self.assertTrue(result["hasDownloadLabel"])
-        self.assertTrue(result["hasDownloadHref"])
-        self.assertTrue(result["hasContentLink"])
-        self.assertTrue(result["hasPackageLink"])
+        self.assertIn("Workflow completed", result["html"])
+        self.assertIn("Download Production Package", result["html"])
+        self.assertIn("content.md", result["html"])
+        self.assertIn("publishing_package.md", result["html"])
 
     def test_analytics_collector_panel_renders_actions_counts_and_export_link(self):
         result = run_ui_runtime_scenario(
             """
             await flush();
-            state.selectedChannelSlug = "channel-a";
+            state.activeWorkspace = "analytics";
+            state.selectedChannelSlug = "mist_of_ages";
             state.selectedChannelSummary = {
-              channel: {
-                channel_slug: "channel-a",
-                display_name: "Channel A",
-                youtube_channel_id: "UC123",
-                youtube_handle: "@channela",
-                status: "CONNECTED",
-                last_metrics_sync_at: "2026-07-04T00:00:00Z",
-              },
-              project_count: 1,
-              reporting: {},
-              metrics: { exists: true },
-              learnings: { exists: true },
+              channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" },
+              reporting: { status: "SUCCESS" },
             };
             state.selectedChannelAnalytics = {
-              last_attempt_at: "2026-07-04T00:00:00Z",
-              last_completed_sync_at: "2026-07-04T00:30:00Z",
-              last_successful_sync_at: "2026-07-04T01:00:00Z",
-              ingested_report_count: 0,
-              export_url: "/api/v2/channels/channel-a/analytics/export",
+              export_url: "/api/v2/channels/mist_of_ages/analytics/export",
+              last_completed_sync_at: "2026-07-05T12:00:00Z",
+              last_successful_sync_at: "2026-07-05T11:00:00Z",
               capability_counts: { AVAILABLE: 20, ERROR: 0 },
               report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 },
-              query_group_counts: { SUCCESS: 4, PARTIAL: 0, EMPTY: 1, UNAVAILABLE: 2, UNAUTHORIZED: 1, UNSUPPORTED: 1, ERROR: 1 },
-              source_results: {
-                capability_discovery: { status: "SUCCESS" },
-                data_api_catalog: { status: "SUCCESS" },
-                reporting_api: { status: "SUCCESS" },
-                analytics_queries: { status: "PARTIAL" },
-              },
+              query_group_counts: { SUCCESS: 8, EMPTY: 1, UNAVAILABLE: 0, UNAUTHORIZED: 0, ERROR: 1 },
               normalized_tables: [
-                { filename: "video_catalog.csv", exists: true, row_count: 12 },
-                { filename: "channel_daily.csv", exists: true, row_count: 30 },
+                { filename: "video_daily.csv", row_count: 200, status: "SUCCESS", technical_status: "SUCCESS" },
+                { filename: "subscriber_status_daily.csv", row_count: 0, status: "ERROR", technical_status: "ERROR", availability_reason: "temporary YouTube error" },
               ],
+              source_results: {
+                analytics_queries: { status: "PARTIAL" },
+                subscriber_status_daily: { status: "ERROR" },
+              },
             };
             render();
-            const html = document.getElementById("summaryPanel").innerHTML;
             return {
-              hasSection: html.includes("Analytics Collector"),
-              hasDiscoverButton: html.includes("discoverAnalyticsBtn"),
-              hasSyncButton: html.includes("syncAnalyticsCollectorBtn"),
-              hasExportLink: html.includes("/api/v2/channels/channel-a/analytics/export"),
-              hasRowCount: html.includes("12 rows"),
-              hasReportTypeCount: html.includes("20 available / 0 errors"),
-              hasReadinessCount: html.includes("0 ready / 20 pending / 0 errors"),
-              hasPartialPill: html.includes("PARTIAL"),
+              html: document.getElementById("analyticsPanel").innerHTML,
             };
             """
-        );
-        self.assertTrue(result["hasSection"])
-        self.assertTrue(result["hasDiscoverButton"])
-        self.assertTrue(result["hasSyncButton"])
-        self.assertTrue(result["hasExportLink"])
-        self.assertTrue(result["hasRowCount"])
-        self.assertTrue(result["hasReportTypeCount"])
-        self.assertTrue(result["hasReadinessCount"])
-        self.assertTrue(result["hasPartialPill"])
+        )
+        self.assertIn("Download Analytics ZIP", result["html"])
+        self.assertIn("Completed with some unavailable data", result["html"])
+        self.assertIn("Tables with data", result["html"])
+        self.assertIn("20 bulk reports still pending", result["html"])
+        self.assertNotIn("Query Groups", result["html"].split("<details")[0])
+
+    def test_analytics_workspace_keeps_report_types_separate_from_generated_report_readiness(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "analytics";
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" },
+              reporting: { status: "SUCCESS" },
+            };
+            state.selectedChannelAnalytics = {
+              capability_counts: { AVAILABLE: 20, ERROR: 0 },
+              report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 },
+              query_group_counts: { SUCCESS: 8, EMPTY: 1, UNAVAILABLE: 0, UNAUTHORIZED: 0, ERROR: 1 },
+              normalized_tables: [
+                { filename: "reach_end_screens.csv", row_count: 0, status: "PENDING", technical_status: "PENDING", availability_reason: "waiting for bulk report" },
+                { filename: "subscriber_status_daily.csv", row_count: 0, status: "ERROR", technical_status: "ERROR", availability_reason: "temporary YouTube error" },
+              ],
+              source_results: { analytics_queries: { status: "PARTIAL" } },
+            };
+            render();
+            return {
+              html: document.getElementById("analyticsPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("Report Type Availability", result["html"])
+        self.assertIn("Generated Report Readiness", result["html"])
+        self.assertIn("Waiting for YouTube bulk report", result["html"])
+        self.assertIn("Temporary YouTube error", result["html"])
+        self.assertIn("Technical Details", result["html"])
+
+    def test_discover_capabilities_is_secondary_in_technical_details(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "analytics";
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" },
+              reporting: { status: "SUCCESS" },
+            };
+            state.selectedChannelAnalytics = {
+              export_url: "/api/v2/channels/mist_of_ages/analytics/export",
+              source_results: { analytics_queries: { status: "PARTIAL" } },
+              report_readiness_counts: { READY: 0, PENDING: 20, ERROR: 0 },
+              capability_counts: { AVAILABLE: 20, ERROR: 0 },
+              normalized_tables: [],
+            };
+            render();
+            return { html: document.getElementById("analyticsPanel").innerHTML };
+            """
+        )
+        self.assertIn('id="discoverAnalyticsBtn" class="secondary"', result["html"])
+        self.assertIn("<summary>Technical Details</summary>", result["html"])
+
+    def test_busy_action_state_disables_repeat_submission(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "analytics";
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "mist_of_ages", display_name: "Mist of Ages", status: "CONNECTED" },
+              reporting: { status: "SUCCESS" },
+            };
+            state.analyticsSyncAction = { busy: true, slug: "mist_of_ages", requestId: 1 };
+            render();
+            return {
+              html: document.getElementById("analyticsPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn("Syncing Analytics...", result["html"])
+        self.assertIn('id="syncAnalyticsCollectorBtn" class="primary" disabled', result["html"])
 
     def test_stale_reason_strings_render_inert_html(self):
         result = run_ui_runtime_scenario(

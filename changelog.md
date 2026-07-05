@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Phase 10A - UI Simplification and Operational UX
+- Redesigned the embedded `scripts/ui_server.py` interface around three primary work areas: `Overview`, `Content Workflow`, and `Analytics`.
+- Added an operator-first header with selected channel, selected project, and a context-aware status badge driven by current frontend state only.
+- Reworked the page layout into a stable sidebar plus main workspace and kept workspace switches client-side so navigation does not trigger duplicate backend reads.
+- Simplified the overview into deterministic operational summaries and a single `Recommended Next Action` block with no AI-generated recommendation logic.
+- Reworked the workflow workspace into a compact Prompt 1-7 rail that keeps only the selected step expanded while preserving bundle, parse, candidate, approval, rejection, transcript, validation, and production-handoff behavior.
+- Followed up with an operator-first simplification pass: the header now hides raw project slugs and raw state codes, the sidebar keeps only channel selection plus workspace navigation by default, project management is collapsed into `Change Project` and `Create New Project`, and default workspace views now surface one clearer next action.
+- Renamed collapsed diagnostic sections from `Advanced Details` to `Technical Details` and kept hashes, IDs, workflow binding data, state revisions, response metadata, query-group counts, raw source statuses, and validation detail there by default.
+- Promoted `PRODUCTION_READY` handoff visibility with clearer completion messaging, `Download Production ZIP`, and read-only stable artifact links.
+- Reworked the analytics workspace into plain-language operational status, explicit collector actions, separated discovered-report-type versus generated-report-readiness counts, compact normalized-table rendering, and explicit empty-table reasons.
+- Added a focused final operator-context repair so the selected project is safely remembered per channel across workspace switching, summary refreshes, project-list refreshes, and practical browser reloads using only local browser state for channel slug and project slug.
+- Repaired the header semantics so the default badge now shows `Workflow Status` for a selected project and `Analytics Status` when no project is selected, while raw workflow and analytics codes remain hidden in collapsed `Technical Details`.
+- Kept production-ready restored projects operator-first by recommending `Download Production Package` instead of falling back to an ambiguous workflow or analytics status cue.
+- Added a final live UX micro repair so the shared workspace introduction now matches the selected workspace, the stray visible create-state panel is removed from the default workflow view, and completed `PRODUCTION_READY` workflow/handoff content appears before project-management controls.
+- Added a final content-workflow compression and status repair so completed projects now show one handoff/download area only, the Prompt 1-7 rail is genuinely compact, selected styling no longer rewrites actual step status, and the redundant completed-project summary grid is removed.
+- Restored and preserved the broader embedded frontend regression suite in `tests/test_ui_frontend_contract.py` so Phase 10A keeps the preexisting UI/API safety coverage while adding the new navigation, overview, workflow rail, collapsed details, production handoff, analytics `PARTIAL` explanation, separated readiness counts, operator-first hiding rules, collapsed project-management sections, and button hierarchy checks.
+- Re-ran focused compile verification successfully and re-ran `python -m unittest tests.test_ui_frontend_contract` successfully (`91` pass).
+- No live API call, analytics sync, reporting job creation, runtime mutation, commit, or push occurred in this phase.
+
 ### Phase 9 - Maximum Analytics Collector and Export MVP
 - Added `scripts/channel_analytics_collector.py` as a focused analytics collection, normalization, status, and export module for canonical channel workspaces.
 - Added collector routes in `scripts/ui_server.py` for analytics status, capability discovery, analytics sync, and in-memory Analytics ZIP export.

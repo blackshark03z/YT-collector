@@ -1456,23 +1456,41 @@ HTML_PAGE = r"""<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mist of Ages Research</title>
   <style>
-    :root { color-scheme: light; --ink:#1f2933; --muted:#667085; --line:#d6dde6; --bg:#f6f8fb; --panel:#ffffff; --accent:#0f766e; --warn:#b45309; --bad:#b42318; }
+    :root { color-scheme: light; --ink:#1f2933; --muted:#667085; --line:#d6dde6; --soft-line:#e7edf3; --bg:#f3f6fa; --panel:#ffffff; --accent:#0f766e; --accent-2:#155eef; --warn:#b45309; --bad:#b42318; --good:#027a48; --shadow:0 1px 2px rgba(16,24,40,.04); }
     * { box-sizing:border-box; }
     body { margin:0; font-family: Arial, Helvetica, sans-serif; background:var(--bg); color:var(--ink); }
-    header { padding:18px 28px; background:#102a43; color:#fff; display:flex; justify-content:space-between; gap:16px; align-items:center; }
-    header h1 { margin:0; font-size:22px; letter-spacing:0; }
-    header span { color:#bcccdc; font-size:14px; }
-    main { max-width:1180px; margin:0 auto; padding:22px; display:grid; grid-template-columns: 360px 1fr; gap:18px; }
-    section, aside { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; }
-    h2 { margin:0 0 12px; font-size:17px; }
+    a { color:var(--accent-2); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    button, a, select, input, textarea, summary { outline-offset:2px; }
+    .app-header { padding:18px 24px; background:#102a43; color:#fff; display:flex; justify-content:space-between; gap:18px; align-items:flex-start; }
+    .app-header h1 { margin:0; font-size:24px; letter-spacing:0; }
+    .app-header p { margin:6px 0 0; color:#d9e2ec; font-size:14px; }
+    .app-header-tools { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; align-items:stretch; }
+    .header-chip { min-width:160px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.12); border-radius:8px; padding:10px 12px; }
+    .header-chip span { display:block; color:#bcccdc; font-size:12px; margin-bottom:4px; }
+    .header-chip strong { display:block; font-size:14px; line-height:1.35; }
+    .header-chip .pill { margin-top:2px; }
+    .app-shell { max-width:1320px; margin:0 auto; padding:20px; display:grid; grid-template-columns: 300px minmax(0, 1fr); gap:18px; align-items:start; }
+    .sidebar { display:grid; gap:16px; position:sticky; top:16px; }
+    .workspace { min-width:0; display:grid; gap:16px; }
+    .panel { background:var(--panel); border:1px solid var(--soft-line); border-radius:8px; padding:16px; box-shadow:var(--shadow); }
+    .panel-muted { background:#f8fafc; }
+    h2 { margin:0 0 12px; font-size:18px; }
     h3 { margin:0 0 8px; font-size:15px; }
     label { display:block; margin:12px 0 6px; font-weight:700; font-size:13px; }
     input, select, textarea { width:100%; border:1px solid #c7d1dd; border-radius:6px; padding:10px; font:inherit; background:#fff; }
     textarea { min-height:190px; resize:vertical; }
     button { border:0; border-radius:6px; padding:10px 12px; background:var(--accent); color:#fff; font-weight:700; cursor:pointer; }
-    button.secondary { background:#334e68; }
+    button.primary { background:var(--accent); color:#fff; }
+    button.secondary { background:#334e68; color:#fff; }
+    button.success { background:var(--good); color:#fff; }
     button.ghost { background:#eef2f6; color:#243b53; border:1px solid #c7d1dd; }
+    button.danger { background:#b42318; }
     button:disabled { opacity:.5; cursor:not-allowed; }
+    .action-link { display:inline-flex; align-items:center; justify-content:center; border-radius:6px; padding:10px 12px; font-weight:700; border:1px solid transparent; text-decoration:none; }
+    .action-link.primary { background:var(--accent); color:#fff; }
+    .action-link.secondary { background:#eef2f6; color:#243b53; border-color:#c7d1dd; }
+    .action-link.success { background:#ecfdf3; color:#027a48; border-color:#abefc6; }
     .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
     .status { display:grid; gap:8px; }
     .pill { display:inline-flex; align-items:center; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; background:#eef2f6; color:#334e68; }
@@ -1482,99 +1500,150 @@ HTML_PAGE = r"""<!doctype html>
     .result { display:grid; gap:14px; }
     .meta { color:var(--muted); font-size:14px; line-height:1.5; overflow-wrap:anywhere; }
     .checks { display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:8px; }
-    .check { border:1px solid var(--line); border-radius:6px; padding:10px; display:flex; justify-content:space-between; gap:8px; }
+    .check { border:1px solid var(--soft-line); border-radius:6px; padding:10px; display:flex; justify-content:space-between; gap:8px; background:#fff; }
     .path { font-family: Consolas, monospace; font-size:13px; background:#f8fafc; border:1px solid var(--line); border-radius:6px; padding:10px; overflow-wrap:anywhere; }
-    .card { border:1px solid var(--line); border-radius:6px; padding:12px; background:#fbfcfe; }
+    .card { border:1px solid var(--soft-line); border-radius:6px; padding:12px; background:#fbfcfe; }
     .stack { display:grid; gap:12px; }
     .summary-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
     .notice { border:1px solid #c7d1dd; background:#f8fafc; border-radius:6px; padding:12px; }
     .notice strong { display:block; margin-bottom:6px; }
     .mono { font-family: Consolas, monospace; font-size:13px; }
     .hidden { display:none; }
-    @media (max-width: 860px) { main { grid-template-columns:1fr; padding:14px; } header { align-items:flex-start; flex-direction:column; } }
+    .compact-label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+    .workspace-tabs { display:grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap:8px; }
+    .workspace-tab { width:100%; background:#eef2f6; color:#243b53; border:1px solid #d6dde6; text-align:left; }
+    .workspace-tab.active { background:#102a43; color:#fff; border-color:#102a43; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+    .workspace-view { display:grid; gap:16px; }
+    .overview-hero { display:grid; gap:12px; }
+    .next-action { border:1px solid #c7d1dd; background:#f8fafc; border-radius:8px; padding:14px; }
+    .next-action strong { display:block; margin-bottom:6px; font-size:15px; }
+    .mini-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; }
+    .summary-item { padding:12px 0; border-top:1px solid var(--soft-line); }
+    .summary-item:first-child { border-top:0; padding-top:0; }
+    .summary-item strong { display:block; margin-bottom:4px; }
+    .workspace-block { display:grid; gap:12px; }
+    .workspace-block-header { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .step-rail { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:8px; align-items:stretch; }
+    .step-rail button { width:100%; text-align:left; background:#f8fafc; color:#243b53; border:1px solid #d6dde6; padding:10px; min-height:76px; display:grid; gap:6px; }
+    .step-rail button.active { background:#102a43; color:#fff; border-color:#102a43; }
+    .step-rail button.completed { background:#ecfdf3; color:#054f31; border-color:#abefc6; }
+    .step-rail button.current { background:#eff8ff; color:#1849a9; border-color:#b2ddff; }
+    .step-heading { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .step-rail-top { display:flex; justify-content:space-between; gap:8px; align-items:center; }
+    .step-token { font-weight:700; font-size:13px; }
+    .step-title { font-size:13px; line-height:1.35; }
+    .compact-table { width:100%; border-collapse:collapse; font-size:14px; }
+    .compact-table th, .compact-table td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--soft-line); vertical-align:top; }
+    .compact-table th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+    details { border:1px solid var(--soft-line); border-radius:6px; padding:10px 12px; background:#fff; }
+    summary { cursor:pointer; font-weight:700; }
+    .empty-state { padding:18px; border:1px dashed #c7d1dd; border-radius:8px; background:#f8fafc; }
+    .empty-state strong { display:block; margin-bottom:6px; }
+    .maintenance-actions { display:grid; gap:10px; }
+    @media (max-width: 980px) {
+      .app-shell { grid-template-columns:1fr; padding:14px; }
+      .sidebar { position:static; }
+    }
+    @media (max-width: 860px) {
+      .app-header { align-items:flex-start; flex-direction:column; }
+      .app-header-tools { justify-content:flex-start; width:100%; }
+      .workspace-tabs { grid-template-columns:1fr; }
+    }
   </style>
 </head>
 <body>
-  <header>
+  <header class="app-header">
     <div>
-      <h1>Mist of Ages Research</h1>
-      <span>Selected-channel reader for the multi-channel collector</span>
+      <h1>YT Input Collector</h1>
+      <p>Operational workspace for the selected channel, workflow handoff, and analytics exports.</p>
     </div>
-    <button class="ghost" id="refreshBtn" onclick="refreshStatus()">Refresh Channels</button>
+    <div class="app-header-tools">
+      <div class="header-chip">
+        <span>Selected Channel</span>
+        <strong id="appSelectedChannel">No channel selected</strong>
+      </div>
+      <div class="header-chip">
+        <span>Selected Project</span>
+        <strong id="appSelectedProject">No project selected</strong>
+      </div>
+      <div class="header-chip">
+        <span id="appOverallStateLabel">Workflow Status</span>
+        <div id="appOverallState" class="pill pending">WAITING</div>
+      </div>
+      <button class="secondary" id="refreshBtn" onclick="refreshStatus()">Refresh Channels</button>
+    </div>
   </header>
-  <main>
-    <aside>
-      <h2>Channel Context</h2>
+  <main class="app-shell">
+    <aside class="sidebar">
+      <section class="panel">
+      <h2>Channel</h2>
       <label for="channelSelect">Selected Channel</label>
       <select id="channelSelect">
         <option value="">Loading channels...</option>
       </select>
       <div class="status" id="channelState" style="margin-top:12px"></div>
-      <div class="row" style="margin-top:12px">
-        <button id="connectChannelBtn" disabled>Connect Channel</button>
-        <button id="syncMetricsBtn" class="secondary" disabled>Sync Metrics</button>
-        <button class="ghost" id="openLearningsBtn" disabled data-cutover-state="disabled">Open Learnings</button>
-      </div>
-      <p class="meta">OAuth and legacy metrics actions use selected-channel `/api/v2/` routes. The focused Analytics Collector appears in the selected channel summary.</p>
+      </section>
+      <section class="panel panel-muted">
+        <h2>Workspace</h2>
+        <div id="workspaceNav" class="workspace-tabs" role="tablist" aria-label="Collector work areas">
+          <button type="button" class="workspace-tab" id="navOverviewBtn" data-workspace="overview">Overview</button>
+          <button type="button" class="workspace-tab" id="navWorkflowBtn" data-workspace="workflow">Content Workflow</button>
+          <button type="button" class="workspace-tab" id="navAnalyticsBtn" data-workspace="analytics">Analytics</button>
+        </div>
+      </section>
+      <section class="panel">
+        <details>
+          <summary>Channel Settings</summary>
+          <div id="actionState" class="status" style="margin-top:12px"></div>
+          <div class="maintenance-actions" style="margin-top:12px">
+            <div class="row">
+              <button class="secondary" id="connectChannelBtn" disabled>Connect Channel</button>
+              <button class="secondary" id="syncMetricsBtn" disabled>Sync Metrics</button>
+              <button class="ghost" id="openLearningsBtn" disabled data-cutover-state="disabled">Open Learnings</button>
+            </div>
+            <div class="row">
+              <div style="flex:1">
+                <label for="recent">Recent Channel Videos</label>
+                <input id="recent" type="number" min="1" max="50" value="10">
+              </div>
+              <div style="flex:1">
+                <label for="window">Performance Window</label>
+                <select id="window">
+                  <option value="7">7 days</option>
+                  <option value="28" selected>28 days</option>
+                  <option value="90">90 days</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </details>
+      </section>
     </aside>
 
-    <section>
-      <h2>Selected Channel Summary</h2>
-      <p class="meta" id="message">Loading channels...</p>
-      <div id="summaryPanel" class="result"></div>
+    <section class="workspace">
+      <section class="panel">
+        <h2>Operational Workspace</h2>
+        <p class="meta" id="message">Loading channels...</p>
+      </section>
 
-      <div class="stack" style="margin-top:18px">
-        <div class="card">
-          <h3>Selected Channel Actions</h3>
-          <div id="actionState" class="status"></div>
-          <div class="row" style="margin-top:12px">
-            <div style="flex:1">
-              <label for="recent">Recent Channel Videos</label>
-              <input id="recent" type="number" min="1" max="50" value="10">
-            </div>
-            <div style="flex:1">
-              <label for="window">Performance Window</label>
-              <select id="window">
-                <option value="7">7 days</option>
-                <option value="28" selected>28 days</option>
-                <option value="90">90 days</option>
-              </select>
-            </div>
-          </div>
-        </div>
-        <div class="notice">
-          <strong>Project workflow cutover is partially active.</strong>
-          <span class="meta">Canonical project listing, creation, transcript save, and validation are enabled for the selected channel. Raw-path opening and later collector actions remain disabled.</span>
-        </div>
-        <div class="card">
-          <div class="row" style="justify-content:space-between;align-items:center;gap:12px">
-            <div>
-              <h3 style="margin:0">Research Projects</h3>
-              <div class="meta">List and select canonical projects for the current channel only.</div>
-            </div>
-            <button id="refreshProjectsBtn" class="secondary" disabled>Refresh Projects</button>
-          </div>
+      <section id="overviewWorkspace" class="workspace-view">
+        <div id="summaryPanel" class="result"></div>
+      </section>
+
+      <section id="workflowWorkspace" class="workspace-view hidden">
+        <div class="panel">
+          <h3 style="margin:0">Content Workflow</h3>
           <div id="projectListState" class="status" style="margin-top:12px"></div>
           <div id="projectListPanel" class="stack" style="margin-top:12px"></div>
         </div>
-        <div class="card">
-          <h3>Create Research Project</h3>
-          <label for="url">Competitor YouTube URL</label>
-          <input id="url" placeholder="https://www.youtube.com/watch?v=...">
-          <label for="name">Project Name (optional)</label>
-          <input id="name" placeholder="Optional project title override">
-          <label for="workflowBinding">Workflow Version</label>
-          <select id="workflowBinding" disabled>
-            <option value="">Select a workflow</option>
-          </select>
-          <div id="projectCreateState" class="status" style="margin-top:12px"></div>
-          <div class="row" style="margin-top:14px">
-            <button id="createBtn" disabled>Create Research Project</button>
+        <div class="panel">
+          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+            <div>
+              <h3 style="margin:0">Project Detail</h3>
+              <div class="meta">Selected project workflow, candidate controls, and production handoff.</div>
+            </div>
           </div>
-        </div>
-        <div class="card">
-          <h3>Project Detail</h3>
-          <div id="projectDetailState" class="status"></div>
+          <div id="projectDetailState" class="status" style="margin-top:12px"></div>
           <div id="projectDetailPanel" class="result" style="margin-top:12px"></div>
           <div id="validationPanel" class="result" style="margin-top:12px"></div>
           <div class="row">
@@ -1588,13 +1657,19 @@ HTML_PAGE = r"""<!doctype html>
             <button id="saveTranscriptBtn" disabled>Save Transcript</button>
           </div>
         </div>
-      </div>
+      </section>
+
+      <section id="analyticsWorkspace" class="workspace-view hidden">
+        <div id="analyticsPanel" class="result"></div>
+      </section>
     </section>
   </main>
 
 <script>
 const SELECTED_CHANNEL_STORAGE_KEY = "yt_input_collector.selectedChannelSlug";
+const SELECTED_PROJECTS_STORAGE_KEY = "yt_input_collector.selectedProjectsByChannel";
 const state = {
+  activeWorkspace: "overview",
   channels: [],
   selectedChannelSlug: null,
   selectedChannelSummary: null,
@@ -1671,10 +1746,10 @@ function formatTime(value) {
 function pill(value) {
   const normalized = String(value ?? "UNKNOWN");
   const upper = normalized.toUpperCase();
-  const ok = ["CONNECTED", "FOUND", "PASS", "READY_FOR_WORKFLOW"].includes(upper);
+  const ok = ["CONNECTED", "FOUND", "PASS", "READY_FOR_WORKFLOW", "READY", "SUCCESS", "APPROVED", "PRODUCTION_READY", "AVAILABLE"].includes(upper);
   const missing = ["MISSING", "DISCONNECTED", "FAILED", "ERROR"].includes(upper);
   const cls = ok ? "pass" : missing ? "missing" : "pending";
-  return `<span class="pill ${cls}">${escapeHtml(normalized)}</span>`;
+  return `<span class="pill ${cls}">${escapeHtml(friendlyStatusLabel(normalized))}</span>`;
 }
 
 function describeError(error, fallback) {
@@ -1802,6 +1877,347 @@ function selectedChannelRecord() {
     return state.selectedChannelSummary.channel;
   }
   return state.channels.find((item) => item.channel_slug === state.selectedChannelSlug) || null;
+}
+
+function activeWorkspaceList() {
+  return ["overview", "workflow", "analytics"];
+}
+
+function currentWorkflowState() {
+  return state.selectedProjectWorkflow && state.selectedProjectWorkflow.state ? state.selectedProjectWorkflow.state : {};
+}
+
+function currentWorkflowLifecycle() {
+  const productionPackage = state.selectedProjectProductionPackage;
+  const workflowState = currentWorkflowState();
+  return (
+    (productionPackage && productionPackage.lifecycle)
+    || workflowState.current_lifecycle_state
+    || (state.selectedProjectDetail && state.selectedProjectDetail.project && state.selectedProjectDetail.project.status)
+    || "WAITING"
+  );
+}
+
+function humanizeIdentifier(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  return text
+    .replace(/^[0-9]{8}_/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function selectedProjectDisplayName() {
+  const detail = state.selectedProjectDetail && state.selectedProjectDetail.project ? state.selectedProjectDetail.project : {};
+  const summary = selectedProjectSummaryRecord() || {};
+  return (
+    detail.project_name
+    || detail.display_name
+    || summary.project_name
+    || summary.display_name
+    || humanizeIdentifier(detail.project_slug || summary.project_slug || "")
+    || "No project selected"
+  );
+}
+
+function loadSavedProjectSelections() {
+  try {
+    const raw = localStorage.getItem(SELECTED_PROJECTS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const normalized = {};
+    Object.entries(parsed).forEach(([channelSlug, projectSlug]) => {
+      if (typeof channelSlug === "string" && typeof projectSlug === "string" && channelSlug.trim() && projectSlug.trim()) {
+        normalized[channelSlug] = projectSlug;
+      }
+    });
+    return normalized;
+  } catch (error) {
+    return {};
+  }
+}
+
+function saveProjectSelections(map) {
+  const normalized = {};
+  Object.entries(map || {}).forEach(([channelSlug, projectSlug]) => {
+    if (typeof channelSlug === "string" && typeof projectSlug === "string" && channelSlug.trim() && projectSlug.trim()) {
+      normalized[channelSlug] = projectSlug;
+    }
+  });
+  if (Object.keys(normalized).length === 0) {
+    localStorage.removeItem(SELECTED_PROJECTS_STORAGE_KEY);
+    return;
+  }
+  localStorage.setItem(SELECTED_PROJECTS_STORAGE_KEY, JSON.stringify(normalized));
+}
+
+function savedProjectSlugForChannel(channelSlug) {
+  if (!channelSlug) return null;
+  const selections = loadSavedProjectSelections();
+  return typeof selections[channelSlug] === "string" && selections[channelSlug] ? selections[channelSlug] : null;
+}
+
+function rememberProjectSlugForChannel(channelSlug, projectSlug) {
+  if (!channelSlug) return;
+  const selections = loadSavedProjectSelections();
+  if (projectSlug) {
+    selections[channelSlug] = projectSlug;
+  } else {
+    delete selections[channelSlug];
+  }
+  saveProjectSelections(selections);
+}
+
+function friendlyStatusLabel(value) {
+  const raw = String(value || "").trim();
+  const upper = raw.toUpperCase();
+  const known = {
+    PRODUCTION_READY: "Production ready",
+    APPROVED: "Approved",
+    PARTIAL: "Completed with missing data",
+    PENDING: "Waiting for YouTube",
+    CONNECTED: "Connected",
+    DISCONNECTED: "Disconnected",
+    READY: "Ready",
+    WAITING: "Waiting",
+    LOADING: "Loading",
+    ERROR: "Needs attention",
+    SUCCESS: "Ready",
+    CANDIDATE: "Candidate review needed",
+    INPUT_READY: "Ready for workflow",
+    READY_FOR_WORKFLOW: "Ready for workflow",
+  };
+  if (known[upper]) return known[upper];
+  return raw ? humanizeIdentifier(raw) : "Waiting";
+}
+
+function productionStatusSentence(productionPackage) {
+  if (!productionPackage) return "Not ready yet";
+  if (productionPackage.ready_for_export || productionPackage.lifecycle === "PRODUCTION_READY") return "Ready to download";
+  return "Still in progress";
+}
+
+function generatedReportsSummary(analytics) {
+  const readiness = analytics && analytics.report_readiness_counts ? analytics.report_readiness_counts : {};
+  const ready = Number(readiness.READY || 0);
+  const pending = Number(readiness.PENDING || 0);
+  const error = Number(readiness.ERROR || 0);
+  if (ready > 0 && pending === 0 && error === 0) return "Reports ready";
+  if (pending > 0 && error === 0) return `${pending} bulk reports still pending`;
+  if (error > 0) return `${error} bulk reports need attention`;
+  return "No generated reports yet";
+}
+
+function defaultPrimaryActionForWorkspace(workspaceId) {
+  if (workspaceId === "overview") return "recommendedActionBtn";
+  if (workspaceId === "workflow") return "workflowPrimaryAction";
+  if (workspaceId === "analytics") return "syncAnalyticsCollectorBtn";
+  return "";
+}
+
+function normalizeWorkspace(value) {
+  return activeWorkspaceList().includes(value) ? value : "overview";
+}
+
+function setActiveWorkspace(nextWorkspace) {
+  const normalized = normalizeWorkspace(nextWorkspace);
+  if (normalized === state.activeWorkspace) return;
+  state.activeWorkspace = normalized;
+  render();
+}
+
+function currentWorkflowStepCandidate() {
+  const workflowState = currentWorkflowState();
+  if (workflowState && workflowState.current_step_id) {
+    return stepCandidateSummary(workflowState.current_step_id);
+  }
+  return null;
+}
+
+function headerStateModel() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return { label: "Analytics Status", value: "WAITING" };
+  }
+  if (!channel) {
+    return { label: "Analytics Status", value: "LOADING" };
+  }
+  if (channel.status && channel.status !== "CONNECTED") {
+    return { label: "Analytics Status", value: channel.status };
+  }
+  if (state.selectedProjectSlug) {
+    const productionPackage = state.selectedProjectProductionPackage;
+    if (productionPackage && productionPackage.ready_for_export) {
+      return { label: "Workflow Status", value: "PRODUCTION_READY" };
+    }
+    const workflowState = currentWorkflowState();
+    if (workflowState.current_step_status) {
+      return { label: "Workflow Status", value: workflowState.current_step_status };
+    }
+    const detailProject = state.selectedProjectDetail && state.selectedProjectDetail.project ? state.selectedProjectDetail.project : {};
+    return { label: "Workflow Status", value: detailProject.status || "WAITING" };
+  }
+  const analytics = state.selectedChannelAnalytics;
+  const sourceResults = analytics && analytics.source_results ? analytics.source_results : {};
+  if (sourceResults.analytics_queries && sourceResults.analytics_queries.status) {
+    return { label: "Analytics Status", value: sourceResults.analytics_queries.status };
+  }
+  return { label: "Analytics Status", value: channel.status || "READY" };
+}
+
+function analyticsPlainLanguageSummary(analytics) {
+  if (!analytics) {
+    return {
+      label: "Needs attention",
+      detail: "Analytics capability discovery has not been recorded for this channel yet.",
+    };
+  }
+  const readiness = analytics.report_readiness_counts || {};
+  const sourceResults = analytics.source_results || {};
+  const queryStatus = sourceResults.analytics_queries && sourceResults.analytics_queries.status ? sourceResults.analytics_queries.status : "";
+  const pendingCount = Number(readiness.PENDING || 0);
+  const errorCount = Number(readiness.ERROR || 0);
+  if (queryStatus === "PARTIAL") {
+    return {
+      label: "Completed with some unavailable data",
+      detail: "Most analytics data is ready. One YouTube query failed temporarily, and bulk reports are still being prepared.",
+    };
+  }
+  if (pendingCount > 0 && !errorCount) {
+    return {
+      label: "Waiting for YouTube",
+      detail: "Bulk reporting jobs exist, but generated reports are still being prepared by YouTube.",
+    };
+  }
+  if (queryStatus === "SUCCESS") {
+    return {
+      label: "Ready",
+      detail: "Analytics collection has completed with the currently available data for this channel.",
+    };
+  }
+  return {
+    label: "Needs attention",
+    detail: "Analytics data has not completed successfully yet for this channel.",
+  };
+}
+
+function analyticsStatusTone(value) {
+  if (value === "Ready") return "PASS";
+  if (value === "Completed with some unavailable data" || value === "Waiting for YouTube") return "PENDING";
+  return "ERROR";
+}
+
+function normalizedTableReason(table) {
+  const raw = String((table && (table.availability_reason || table.reason || table.status_detail || table.technical_status || "")) || "").trim();
+  const normalized = raw.toLowerCase();
+  if (normalized.includes("bulk") || normalized.includes("generated report") || normalized.includes("pending")) return "Waiting for YouTube bulk report";
+  if (normalized.includes("unauthor")) return "Unauthorized";
+  if (normalized.includes("temporary") || normalized.includes("internal api error") || normalized.includes("error")) return "Temporary YouTube error";
+  if (normalized.includes("no channel data")) return "No channel data";
+  if (normalized.includes("empty")) return "Empty successful result";
+  return raw || "No data available yet";
+}
+
+function normalizedTableAvailabilityLabel(table) {
+  if (table && Number(table.row_count || 0) > 0) return "Ready";
+  const reason = normalizedTableReason(table);
+  if (reason === "Waiting for YouTube bulk report") return "Waiting for YouTube";
+  if (reason === "Unauthorized") return "Unauthorized";
+  if (reason === "Temporary YouTube error") return "Needs attention";
+  if (reason === "No channel data") return "No channel data";
+  return "Empty";
+}
+
+function recommendedNextAction() {
+  const channel = selectedChannelRecord();
+  if (!state.selectedChannelSlug) {
+    return {
+      title: "Select Channel",
+      detail: "Choose a channel to load its current workflow and analytics state.",
+      workspace: "overview",
+      status: "WAITING",
+      button_label: "Open Overview",
+    };
+  }
+  if (channel && channel.status && channel.status !== "CONNECTED") {
+    return {
+      title: "Connect Channel",
+      detail: "Reconnect the selected channel before running workflow or analytics operations.",
+      workspace: "overview",
+      status: "WAITING",
+      button_label: "Open Overview",
+    };
+  }
+  const productionPackage = state.selectedProjectProductionPackage;
+  if (productionPackage && productionPackage.ready_for_export) {
+    return {
+      title: "Download Production Package",
+      detail: "The workflow is complete and the production ZIP is ready for handoff.",
+      workspace: "workflow",
+      status: "READY",
+      button_label: "Download Production Package",
+      download_url: productionPackage.download_url || "",
+    };
+  }
+  const workflowState = currentWorkflowState();
+  const currentCandidate = currentWorkflowStepCandidate();
+  if (currentCandidate && currentCandidate.candidate_group_id) {
+    return {
+      title: "Review Candidate",
+      detail: "A saved candidate is waiting for approval or rejection.",
+      workspace: "workflow",
+      status: "READY",
+      button_label: "Open Content Workflow",
+    };
+  }
+  if (workflowState.current_step_id && workflowState.current_step_status === "READY") {
+    return {
+      title: "Continue Workflow",
+      detail: "Build the next bundle and continue the selected project's workflow.",
+      workspace: "workflow",
+      status: "READY",
+      button_label: "Open Content Workflow",
+    };
+  }
+  const analytics = state.selectedChannelAnalytics;
+  const analyticsSummary = analyticsPlainLanguageSummary(analytics);
+  if (!analytics || !analytics.last_completed_sync_at) {
+    return {
+      title: "Sync Analytics",
+      detail: "Run the supported analytics collector for this selected channel.",
+      workspace: "analytics",
+      status: "WAITING",
+      button_label: "Open Analytics",
+    };
+  }
+  if (analytics && analytics.export_url && analyticsSummary.label === "Completed with some unavailable data") {
+    return {
+      title: "Download Analytics Package",
+      detail: "Export the current normalized analytics package while YouTube finishes the remaining bulk reports.",
+      workspace: "analytics",
+      status: "READY",
+      button_label: "Open Analytics",
+    };
+  }
+  if (analytics && Number((analytics.report_readiness_counts || {}).PENDING || 0) > 0) {
+    return {
+      title: "Waiting for YouTube bulk reports",
+      detail: "Collector jobs are in place. The remaining bulk reports are still pending from YouTube.",
+      workspace: "analytics",
+      status: "PENDING",
+      button_label: "Open Analytics",
+    };
+  }
+  return {
+    title: "No action required",
+    detail: "The current selected channel has no immediate supported operation waiting in this UI.",
+    workspace: "overview",
+    status: "PASS",
+    button_label: "Open Overview",
+  };
 }
 
 function channelWorkflowOptions() {
@@ -2133,6 +2549,8 @@ function stepCandidateSummary(stepId) {
 function stepStatusLabel(step) {
   const candidate = step && stepCandidateSummary(step.step_id);
   if (candidate && candidate.status) return candidate.status;
+  if (candidate && candidate.approved_group_id) return "APPROVED";
+  if (candidate && candidate.candidate_group_id) return "CANDIDATE";
   const workflow = state.selectedProjectWorkflow;
   if (workflow && workflow.state && workflow.state.current_step_id === step.step_id) {
     return workflow.state.current_step_status || "UNKNOWN";
@@ -2486,6 +2904,7 @@ function setSelectedChannelSlug(nextSlug) {
 function setSelectedProjectSlug(nextSlug) {
   const normalized = nextSlug && state.projects.some((item) => item.project_slug === nextSlug) ? nextSlug : null;
   if (normalized === state.selectedProjectSlug && state.selectedProjectDetail) return;
+  rememberProjectSlugForChannel(state.selectedChannelSlug, normalized);
   state.selectedProjectSlug = normalized;
   state.selectedProjectDetail = null;
   state.selectedProjectTranscript = null;
@@ -2509,6 +2928,127 @@ function syncChannelSelector() {
   }
   select.innerHTML = options.join("");
   select.disabled = state.isLoadingChannels || state.channels.length === 0;
+}
+
+function renderWorkspaceNavigation() {
+  activeWorkspaceList().forEach((workspaceId) => {
+    const button = document.getElementById(`nav${workspaceId.charAt(0).toUpperCase()}${workspaceId.slice(1)}Btn`);
+    if (!button) return;
+    const active = state.activeWorkspace === workspaceId;
+    button.className = active ? "workspace-tab active" : "workspace-tab";
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  const overview = document.getElementById("overviewWorkspace");
+  const workflow = document.getElementById("workflowWorkspace");
+  const analytics = document.getElementById("analyticsWorkspace");
+  if (overview) overview.style.display = state.activeWorkspace === "overview" ? "grid" : "none";
+  if (workflow) workflow.style.display = state.activeWorkspace === "workflow" ? "grid" : "none";
+  if (analytics) analytics.style.display = state.activeWorkspace === "analytics" ? "grid" : "none";
+}
+
+function renderAppHeaderState() {
+  const channelTarget = document.getElementById("appSelectedChannel");
+  const projectTarget = document.getElementById("appSelectedProject");
+  const overallLabelTarget = document.getElementById("appOverallStateLabel");
+  const overallTarget = document.getElementById("appOverallState");
+  const channel = selectedChannelRecord();
+  const headerState = headerStateModel();
+  const overall = headerState.value;
+  if (channelTarget) {
+    channelTarget.textContent = channel ? (channel.display_name || channel.channel_slug || "Selected channel") : "No channel selected";
+  }
+  if (projectTarget) {
+    projectTarget.textContent = state.selectedProjectSlug ? selectedProjectDisplayName() : "No project selected";
+  }
+  if (overallLabelTarget) {
+    overallLabelTarget.textContent = headerState.label;
+  }
+  if (overallTarget) {
+    overallTarget.className = `pill ${["CONNECTED", "READY", "PRODUCTION_READY", "PASS", "APPROVED"].includes(String(overall).toUpperCase()) ? "pass" : (["ERROR", "FAILED", "DISCONNECTED"].includes(String(overall).toUpperCase()) ? "missing" : "pending")}`;
+    overallTarget.textContent = friendlyStatusLabel(overall);
+  }
+}
+
+function renderWorkspaceIntro() {
+  const message = document.getElementById("message");
+  if (!message) return;
+  if (state.errorMessage) {
+    message.textContent = state.errorMessage;
+    return;
+  }
+  if (state.isLoadingSummary) {
+    message.textContent = "Loading selected channel summary...";
+    return;
+  }
+  if (!state.selectedChannelSlug) {
+    message.textContent = "Select a channel to load the current workspace.";
+    return;
+  }
+  if (state.activeWorkspace === "workflow") {
+    message.textContent = "Content Workflow covers creating, continuing, reviewing, and exporting content for the selected project.";
+    return;
+  }
+  if (state.activeWorkspace === "analytics") {
+    message.textContent = "Analytics focuses on syncing, checking, and exporting channel data.";
+    return;
+  }
+  message.textContent = "Overview focuses on current status and the next supported action.";
+}
+
+function renderOverviewWorkspace() {
+  const panel = document.getElementById("summaryPanel");
+  const action = recommendedNextAction();
+  const channel = selectedChannelRecord();
+  const project = selectedProjectSummaryRecord();
+  const analytics = state.selectedChannelAnalytics;
+  const analyticsSummary = analyticsPlainLanguageSummary(analytics);
+  const productionPackage = state.selectedProjectProductionPackage;
+  const workflowState = currentWorkflowState();
+  if (!state.selectedChannelSlug) {
+    panel.innerHTML = `
+      <div class="empty-state">
+        <strong>Selection required</strong>
+        <div class="meta">Choose a channel to load its operational overview.</div>
+      </div>
+    `;
+    return;
+  }
+
+  panel.innerHTML = `
+    <section class="panel overview-hero">
+      <div class="workspace-block-header">
+        <div>
+          <h3 style="margin:0">Overview</h3>
+          <div class="meta">Where you are, what is ready, and what to do next.</div>
+        </div>
+        <div>${pill(action.status)}</div>
+      </div>
+      <div class="mini-grid">
+        <div class="card summary-item"><strong>Channel</strong><div class="meta">${escapeHtml(channel ? (channel.display_name || friendlyStatusLabel(channel.status)) : "Loading selected channel")}</div><div>${pill(channel ? (channel.status || "LOADING") : "LOADING")}</div></div>
+        <div class="card summary-item"><strong>Content workflow</strong><div class="meta">${escapeHtml(state.selectedProjectSlug ? selectedProjectDisplayName() : "Choose a project to continue")}</div><div>${pill(workflowState.current_step_status || currentWorkflowLifecycle())}</div></div>
+        <div class="card summary-item"><strong>Production package</strong><div class="meta">${escapeHtml(productionStatusSentence(productionPackage))}</div><div>${pill(productionPackage && productionPackage.ready_for_export ? "PRODUCTION_READY" : "WAITING")}</div></div>
+        <div class="card summary-item"><strong>Analytics</strong><div class="meta">${escapeHtml(analyticsSummary.detail)}</div><div>${pill(analyticsSummary.label)}</div></div>
+      </div>
+      <div class="next-action">
+        <strong>Recommended Next Action: ${escapeHtml(action.title)}</strong>
+        <div class="meta">${escapeHtml(action.detail)}</div>
+        <div class="row" style="margin-top:12px">
+          <button type="button" class="primary" id="recommendedActionBtn">${escapeHtml(action.button_label || (action.workspace === "workflow" ? "Open Content Workflow" : (action.workspace === "analytics" ? "Open Analytics" : "Open Overview")))}</button>
+        </div>
+      </div>
+      <details>
+        <summary>Technical Details</summary>
+        <div class="stack" style="margin-top:12px">
+          <div class="check"><strong>Channel Slug</strong><div class="meta mono">${escapeHtml(state.selectedChannelSlug || "")}</div></div>
+          <div class="check"><strong>Workflow State Revision</strong><div class="meta">${escapeHtml(String(workflowState.state_revision ?? ""))}</div></div>
+          <div class="check"><strong>Production Approved Group</strong><div class="meta mono">${escapeHtml((productionPackage && productionPackage.approved_group_id) || "")}</div></div>
+          <div class="check"><strong>Current Step ID</strong><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
+          <div class="check"><strong>Current Lifecycle Code</strong><div class="meta mono">${escapeHtml(currentWorkflowLifecycle())}</div></div>
+          <div class="check"><strong>Analytics Export</strong><div class="meta">${escapeHtml(analytics && analytics.export_url ? "Available" : "Unavailable")}</div></div>
+        </div>
+      </details>
+    </section>
+  `;
 }
 
 function renderChannelState() {
@@ -2535,9 +3075,8 @@ function renderChannelState() {
   const summary = state.selectedChannelSummary ? state.selectedChannelSummary.channel : selected;
   const disconnected = summary && summary.status && summary.status !== "CONNECTED";
   target.innerHTML = `
-    <div class="check"><strong>Selected</strong>${pill(summary ? summary.status : "LOADING")}</div>
+    <div class="check"><strong>Status</strong>${pill(summary ? summary.status : "LOADING")}</div>
     <div class="meta">${escapeHtml(summary ? summary.display_name : state.selectedChannelSlug)}</div>
-    <div class="meta mono">${escapeHtml(summary ? summary.channel_slug : state.selectedChannelSlug)}</div>
     ${disconnected ? '<div class="meta">This channel is disconnected. Read-only summary is available, but workflow actions stay unavailable.</div>' : ""}
   `;
 }
@@ -2561,34 +3100,80 @@ function renderActionState() {
   const feedback = state.actionFeedback.slug === state.selectedChannelSlug ? state.actionFeedback : { kind: "", text: "" };
   const feedbackHtml = feedback.text
     ? `<div class="check"><strong>${feedback.kind === "error" ? "Action Error" : "Action Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(feedback.text)}</div>`
-    : `<div class="meta">Use the selected canonical channel for OAuth and the legacy metrics sync action. The focused Analytics Collector section appears in the selected channel summary.</div>`;
+    : `<div class="meta">Channel maintenance actions are available here when needed.</div>`;
 
   target.innerHTML = `
-    <div class="check"><strong>OAuth</strong>${pill(oauth.disabled ? "WAITING" : "READY")}</div>
+    <div class="check"><strong>Connection</strong>${pill(oauth.disabled ? "WAITING" : "READY")}</div>
     <div class="meta">${escapeHtml(oauth.helper)}</div>
-    <div class="check"><strong>Metrics</strong>${pill(metrics.disabled ? "WAITING" : "READY")}</div>
+    <div class="check"><strong>Maintenance</strong>${pill(metrics.disabled ? "WAITING" : "READY")}</div>
     <div class="meta">${escapeHtml(metrics.helper)}</div>
     ${feedbackHtml}
   `;
 }
 
-function renderProjectListState() {
-  const refreshButton = document.getElementById("refreshProjectsBtn");
+function projectManagementSectionHtml() {
+  const refresh = projectsRefreshModel();
+  const create = createProjectModel();
+  const items = state.projects.map((project) => {
+    const selected = project.project_slug === state.selectedProjectSlug;
+    return `
+      <button
+        class="${selected ? "primary" : "secondary"}"
+        data-project-slug="${escapeHtml(project.project_slug)}"
+        style="width:100%;text-align:left"
+      >
+        <div class="check"><strong>${escapeHtml(project.project_name || project.display_name || humanizeIdentifier(project.project_slug || ""))}</strong>${pill(project.status || "UNKNOWN")}</div>
+        <div class="meta">${escapeHtml(project.workflow_input_status ? friendlyStatusLabel(project.workflow_input_status) : "Ready for workflow review")}</div>
+      </button>
+    `;
+  });
+  const selectedLabel = state.selectedProjectSlug ? selectedProjectDisplayName() : "No project selected";
+  return `
+    <div class="card">
+      <div class="compact-label">Current project</div>
+      <strong>${escapeHtml(selectedLabel)}</strong>
+      <div class="meta">${escapeHtml(state.selectedProjectSlug ? "Workflow progress and the current step are shown below." : "Open Change Project to choose a project.")}</div>
+    </div>
+    <details>
+      <summary>Change Project</summary>
+      <div class="row" style="margin-top:12px">
+        <button class="secondary" id="refreshProjectsBtn" disabled>Refresh Projects</button>
+      </div>
+      <div class="meta" style="margin-top:12px">${escapeHtml(refresh.helper)}</div>
+      ${state.projects.length ? `<div class="stack" style="margin-top:12px">${items.join("")}</div>` : `<div class="notice" style="margin-top:12px"><strong>No canonical projects yet</strong><span class="meta">Create one to begin the workflow.</span></div>`}
+    </details>
+    <details>
+      <summary>Create New Project</summary>
+      <div id="projectCreateForm" class="stack" style="margin-top:12px">
+        <label for="url">Competitor YouTube URL</label>
+        <input id="url" placeholder="https://www.youtube.com/watch?v=...">
+        <label for="name">Project Name (optional)</label>
+        <input id="name" placeholder="Optional project title override">
+        <label for="workflowBinding">Workflow Version</label>
+        <select id="workflowBinding" disabled>
+          <option value="">Select a workflow</option>
+        </select>
+        <div id="projectCreateState" class="status"></div>
+        <div class="row">
+          <button class="secondary" id="createBtn" disabled>Create Research Project</button>
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function syncProjectManagementControls() {
+  const refresh = projectsRefreshModel();
+  const create = createProjectModel();
+  const newRefreshButton = document.getElementById("refreshProjectsBtn");
+  if (newRefreshButton) {
+    newRefreshButton.disabled = refresh.disabled;
+    newRefreshButton.textContent = refresh.label;
+  }
   const createButton = document.getElementById("createBtn");
   const urlInput = document.getElementById("url");
   const nameInput = document.getElementById("name");
   const workflowSelect = document.getElementById("workflowBinding");
-  const stateTarget = document.getElementById("projectListState");
-  const listTarget = document.getElementById("projectListPanel");
-  const refresh = projectsRefreshModel();
-  const create = createProjectModel();
-
-  refreshButton.disabled = refresh.disabled;
-  refreshButton.textContent = refresh.label;
-  createButton.disabled = create.disabled;
-  createButton.textContent = create.label;
-  urlInput.disabled = create.disabled;
-  nameInput.disabled = create.disabled;
   const workflowOptions = channelWorkflowOptions();
   const currentWorkflow = selectedCreateWorkflowOption();
   const optionRows = ['<option value="">Select a workflow</option>'].concat(
@@ -2599,12 +3184,26 @@ function renderProjectListState() {
       return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
     })
   );
-  workflowSelect.innerHTML = optionRows.join("");
-  workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;
+  if (workflowSelect) {
+    workflowSelect.innerHTML = optionRows.join("");
+    workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;
+  }
+  if (createButton) {
+    createButton.disabled = create.disabled;
+    createButton.textContent = create.label;
+  }
+  if (urlInput) urlInput.disabled = create.disabled;
+  if (nameInput) nameInput.disabled = create.disabled;
+}
+
+function renderProjectListState() {
+  const stateTarget = document.getElementById("projectListState");
+  const listTarget = document.getElementById("projectListPanel");
+  const workflowCompleted = !!(state.selectedProjectProductionPackage && (state.selectedProjectProductionPackage.lifecycle === "PRODUCTION_READY" || state.selectedProjectProductionPackage.ready_for_export));
 
   if (!state.selectedChannelSlug) {
     stateTarget.innerHTML = `
-      <div class="check"><strong>Projects</strong>${pill("WAITING")}</div>
+      <div class="check"><strong>Project</strong>${pill("WAITING")}</div>
       <div class="meta">Select a channel to load its canonical project list.</div>
     `;
     listTarget.innerHTML = "";
@@ -2613,7 +3212,7 @@ function renderProjectListState() {
 
   if (state.isLoadingProjects && state.projects.length === 0) {
     stateTarget.innerHTML = `
-      <div class="check"><strong>Projects</strong>${pill("LOADING")}</div>
+      <div class="check"><strong>Project</strong>${pill("LOADING")}</div>
       <div class="meta">Loading canonical projects for the selected channel...</div>
     `;
     listTarget.innerHTML = "";
@@ -2622,45 +3221,25 @@ function renderProjectListState() {
 
   if (state.projectListError) {
     stateTarget.innerHTML = `
-      <div class="check"><strong>Projects</strong>${pill("ERROR")}</div>
+      <div class="check"><strong>Project</strong>${pill("ERROR")}</div>
       <div class="meta">${escapeHtml(state.projectListError)}</div>
     `;
-  } else {
+  } else if (!workflowCompleted) {
     stateTarget.innerHTML = `
-      <div class="check"><strong>Projects</strong>${pill(state.isLoadingProjects ? "LOADING" : "READY")}</div>
-      <div class="meta">${escapeHtml(refresh.helper)}</div>
+      <div class="check"><strong>Selected Project</strong>${pill(state.selectedProjectSlug ? "READY" : "WAITING")}</div>
+      <div class="meta">${escapeHtml(state.selectedProjectSlug ? selectedProjectDisplayName() : "Choose a project to continue the workflow.")}</div>
     `;
+  } else {
+    stateTarget.innerHTML = "";
   }
 
-  if (!state.projects.length) {
-    listTarget.innerHTML = `
-      <div class="notice">
-        <strong>No canonical projects yet</strong>
-        <span class="meta">The selected channel does not have any canonical projects yet. Create one to begin the workflow.</span>
-      </div>
-    `;
-    return;
-  }
-
-  const items = state.projects.map((project) => {
-    const selected = project.project_slug === state.selectedProjectSlug;
-    return `
-      <button
-        class="${selected ? "" : "secondary"}"
-        data-project-slug="${escapeHtml(project.project_slug)}"
-        style="width:100%;text-align:left"
-      >
-        <div class="check"><strong>${escapeHtml(project.project_slug)}</strong>${pill(project.status || "UNKNOWN")}</div>
-        <div class="meta">Video ID: ${escapeHtml(project.source_video_id || "")}</div>
-        <div class="meta">Updated: ${escapeHtml(formatTime(project.updated_at))}</div>
-      </button>
-    `;
-  });
-  listTarget.innerHTML = items.join("");
+  listTarget.innerHTML = workflowCompleted ? "" : projectManagementSectionHtml();
+  syncProjectManagementControls();
 }
 
 function renderProjectCreateState() {
   const target = document.getElementById("projectCreateState");
+  if (!target) return;
   const create = createProjectModel();
   const feedback = state.projectFeedback.channelSlug === state.selectedChannelSlug && !state.projectFeedback.projectSlug
     ? state.projectFeedback
@@ -2712,21 +3291,17 @@ function renderProjectDetailState() {
   if (!state.selectedProjectSlug) {
     target.innerHTML = `
       <div class="check"><strong>Project Detail</strong>${pill("WAITING")}</div>
-      <div class="meta">Select a canonical project to load its detail, transcript, and validation state.</div>
+      <div class="meta">Select a canonical project to load its detail, transcript, and workflow controls.</div>
     `;
     panel.innerHTML = "";
     validationPanel.innerHTML = "";
     return;
   }
 
-  const helperHtml = feedback.text
-    ? `<div class="check"><strong>${feedback.kind === "error" ? "Project Error" : "Project Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(feedback.text)}</div>`
-    : `<div class="meta">${escapeHtml(state.projectDetailError || validate.helper || save.helper)}</div>`;
-
   target.innerHTML = `
-    <div class="check"><strong>Selected Project</strong>${pill(state.isLoadingProjectDetail ? "LOADING" : (project && project.workflow_input_status) || "READY")}</div>
-    <div class="meta mono">${escapeHtml(state.selectedProjectSlug)}</div>
-    ${helperHtml}
+    <div class="check"><strong>Project</strong>${pill(state.isLoadingProjectDetail ? "LOADING" : "READY")}</div>
+    <div class="meta">${escapeHtml(selectedProjectDisplayName())}</div>
+    <div class="meta">${escapeHtml(feedback.text || state.projectDetailError || validate.helper || save.helper)}</div>
   `;
 
   if (state.isLoadingProjectDetail && !state.selectedProjectDetail) {
@@ -2747,27 +3322,6 @@ function renderProjectDetailState() {
   }
 
   const detail = state.selectedProjectDetail.project || {};
-  const productionPackage = state.selectedProjectProductionPackage;
-  const productionArtifacts = productionPackage && Array.isArray(productionPackage.artifacts) ? productionPackage.artifacts : [];
-  const productionStatus = state.isLoadingProductionPackage
-    ? "LOADING"
-    : (productionPackage && productionPackage.ready_for_export ? "READY" : (productionPackage ? "WAITING" : "UNKNOWN"));
-  const productionErrorHtml = state.productionPackageError
-    ? `<div class="notice" style="margin-top:12px"><strong>Production Handoff Error</strong><span class="meta">${escapeHtml(state.productionPackageError)}</span></div>`
-    : "";
-  const productionArtifactHtml = productionArtifacts.length
-    ? productionArtifacts.map((artifact) => `
-      <div class="check">
-        <div>
-          <strong>${escapeHtml(artifact.filename || artifact.artifact_id || "Artifact")}</strong>
-          <div class="meta mono">${escapeHtml(artifact.sha256 || "")}</div>
-          <div class="meta">${escapeHtml(String(artifact.character_count ?? artifact.approved_character_count ?? ""))} characters</div>
-          <div class="meta"><a href="${escapeHtml(artifact.file_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(artifact.relative_path || artifact.filename || "")}</a></div>
-        </div>
-        <div>${pill(artifact.exists && artifact.matches_approved_revision_metadata ? "READY" : (artifact.exists ? "CHECK" : "MISSING"))}</div>
-      </div>
-    `).join("")
-    : `<div class="notice"><strong>No production artifacts</strong><span class="meta">The selected project has not reached a supported production handoff state yet.</span></div>`;
   const workflow = state.selectedProjectWorkflow;
   const workflowState = workflow && workflow.state ? workflow.state : {};
   const binding = workflow && workflow.binding ? workflow.binding : {};
@@ -2787,28 +3341,19 @@ function renderProjectDetailState() {
   const parsedOutput = parsedOutputMatchesSelection(state.parsedOutputResult) ? state.parsedOutputResult : null;
   const currentStepLabel = workflowSteps.find((step) => step.step_id === workflowState.current_step_id);
   const nextStepLabel = workflowSteps.find((step) => step.step_id === workflowState.next_step_id);
-  const workflowErrorHtml = state.workflowError
-    ? `<div class="notice"><strong>Workflow unavailable</strong><span class="meta">${escapeHtml(state.workflowError)}</span></div>`
-    : "";
-  const bundleFeedbackHtml = bundleFeedback.text
-    ? `<div class="check"><strong>${bundleFeedback.kind === "error" ? "Bundle Error" : "Bundle Status"}</strong>${pill(bundleFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(bundleFeedback.text)}</div>`
-    : `<div class="meta">${escapeHtml(state.bundleError || bundleButton.helper || copyButton.helper)}</div>`;
-  const workflowRows = workflowSteps.map((step) => {
-    const selected = step.step_id === state.selectedWorkflowStepId;
-    return `
-      <button
-        type="button"
-        class="${selected ? "" : "secondary"}"
-        data-workflow-step-id="${escapeHtml(step.step_id)}"
-        style="width:100%;text-align:left"
-      >
-        <div class="check"><strong>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</strong><span>${pill(selected ? "SELECTED" : stepStatusLabel(step))}${stepCandidateSummary(step.step_id) && stepCandidateSummary(step.step_id).stale_reason ? pill("STALE") : ""}</span></div>
-        <div class="meta">Required model: ${escapeHtml(step.required_model || "Unspecified")}</div>
-        <div class="meta">Resulting state: ${escapeHtml(step.resulting_lifecycle_state || "Unknown")}</div>
-        <div class="meta">Availability: ${escapeHtml(stepAvailabilitySummary(step))}</div>
-      </button>
-    `;
-  }).join("");
+  const productionPackage = state.selectedProjectProductionPackage;
+  const productionArtifacts = productionPackage && Array.isArray(productionPackage.artifacts) ? productionPackage.artifacts : [];
+  const productionStatus = state.isLoadingProductionPackage ? "LOADING" : (productionPackage && productionPackage.ready_for_export ? "READY" : (productionPackage ? "WAITING" : "UNKNOWN"));
+  const selectedCandidate = selectedStep ? stepCandidateSummary(selectedStep.step_id) : null;
+  const lastSavedCandidate = state.lastSaveCandidateResult
+    && state.lastSaveCandidateResult.identity
+    && state.lastSaveCandidateResult.identity.channel_slug === state.selectedChannelSlug
+    && state.lastSaveCandidateResult.identity.project_slug === state.selectedProjectSlug
+    && state.lastSaveCandidateResult.identity.step_id === (selectedStep && selectedStep.step_id)
+      ? state.lastSaveCandidateResult
+      : null;
+  const workflowCompleted = !!(productionPackage && (productionPackage.lifecycle === "PRODUCTION_READY" || productionPackage.ready_for_export));
+
   const renderArtifacts = (items, requiredLabel) => {
     if (!items.length) {
       return `<div class="notice"><strong>No ${requiredLabel.toLowerCase()} artifacts</strong><span class="meta">This step does not declare any ${requiredLabel.toLowerCase()} artifacts.</span></div>`;
@@ -2818,30 +3363,75 @@ function renderProjectDetailState() {
         <div>
           <strong>${escapeHtml(artifact.display_name || artifact.artifact_id || "Artifact")}</strong>
           <div class="meta mono">${escapeHtml(artifact.relative_path || "")}</div>
-          <div class="meta">${escapeHtml(requiredLabel)} input</div>
         </div>
         <div>${pill(artifact.exists ? "FOUND" : "MISSING")}</div>
       </div>
     `).join("");
   };
+
+  const workflowRows = workflowSteps.map((step) => {
+    const selected = step.step_id === state.selectedWorkflowStepId;
+    const candidate = stepCandidateSummary(step.step_id);
+    const isCurrent = workflowState.current_step_id === step.step_id;
+    const isApproved = !!(candidate && candidate.approved_group_id);
+    const statusLabel = isApproved ? "APPROVED" : (candidate && candidate.candidate_group_id ? "CANDIDATE" : (isCurrent ? (workflowState.current_step_status || "READY") : "READY"));
+    const icon = isApproved ? "✓" : (candidate && candidate.candidate_group_id ? "●" : (isCurrent ? "→" : "•"));
+    const buttonClass = selected ? "active" : (isApproved ? "completed" : (isCurrent ? "current" : ""));
+    return `
+      <button
+        type="button"
+        class="${buttonClass}"
+        data-workflow-step-id="${escapeHtml(step.step_id)}"
+      >
+        <div class="step-heading">
+          <div>
+            <strong>${escapeHtml(`${icon} Prompt ${step.order}`)}</strong>
+            <div class="meta">${escapeHtml(step.display_name)}</div>
+          </div>
+          <div>${pill(selected ? "READY" : statusLabel)}</div>
+        </div>
+      </button>
+    `;
+  }).join("");
+  const compactWorkflowRows = workflowSteps.map((step) => {
+    const selected = step.step_id === state.selectedWorkflowStepId;
+    const statusLabel = stepStatusLabel(step);
+    const isCurrent = workflowState.current_step_id === step.step_id;
+    const isApproved = statusLabel === "APPROVED";
+    const isCandidate = statusLabel === "CANDIDATE";
+    const icon = isApproved ? "✓" : (isCandidate ? "•" : String(step.order));
+    const buttonClass = selected ? "active" : (isApproved ? "completed" : (isCurrent ? "current" : ""));
+    const conciseStatus = (isApproved || isCandidate || (isCurrent && statusLabel !== "READY")) ? friendlyStatusLabel(statusLabel) : "";
+    return `
+      <button
+        type="button"
+        class="${buttonClass}"
+        data-workflow-step-id="${escapeHtml(step.step_id)}"
+        aria-pressed="${selected ? "true" : "false"}"
+      >
+        <div class="step-rail-top">
+          <span class="step-token">${escapeHtml(icon)}</span>
+          <span class="meta">${escapeHtml(conciseStatus || (selected ? "Selected" : ""))}</span>
+        </div>
+        <strong>${escapeHtml(`Prompt ${step.order}`)}</strong>
+        <div class="step-title">${escapeHtml(step.display_name)}</div>
+      </button>
+    `;
+  }).join("");
+
+  const bundleFeedbackHtml = bundleFeedback.text
+    ? `<div class="check"><strong>${bundleFeedback.kind === "error" ? "Bundle Error" : "Bundle Status"}</strong>${pill(bundleFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(bundleFeedback.text)}</div>`
+    : `<div class="meta">${escapeHtml(state.bundleError || bundleButton.helper || copyButton.helper)}</div>`;
   const parseFeedbackHtml = state.parsedOutputError
     ? `<div class="check"><strong>Output Preview Error</strong>${pill("ERROR")}</div><div class="meta">${escapeHtml(state.parsedOutputError)}</div>`
     : `<div class="meta">${escapeHtml(parseButton.helper)}</div>`;
   const candidateFeedbackHtml = candidateSaveFeedback.text
     ? `<div class="check"><strong>${candidateSaveFeedback.kind === "error" ? "Candidate Save Error" : "Candidate Save Status"}</strong>${pill(candidateSaveFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(candidateSaveFeedback.text)}</div>`
     : `<div class="meta">${escapeHtml(saveCandidateButton.helper)}</div>`;
-  const selectedCandidate = selectedStep ? stepCandidateSummary(selectedStep.step_id) : null;
-  const lastSavedCandidate = state.lastSaveCandidateResult
-    && state.lastSaveCandidateResult.identity
-    && state.lastSaveCandidateResult.identity.channel_slug === state.selectedChannelSlug
-    && state.lastSaveCandidateResult.identity.project_slug === state.selectedProjectSlug
-    && state.lastSaveCandidateResult.identity.step_id === (selectedStep && selectedStep.step_id)
-      ? state.lastSaveCandidateResult
-      : null;
   const parsedArtifactsHtml = parsedOutput && Array.isArray(parsedOutput.artifacts) && parsedOutput.artifacts.length
     ? parsedOutput.artifacts.map((artifact, index) => `
       <div class="card" style="margin-top:12px">
-        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+        <div class="step-heading">
           <div>
             <strong>${escapeHtml(artifact.display_name || artifact.artifact_id || "Artifact")}</strong>
             <div class="meta mono">${escapeHtml(artifact.filename || artifact.artifact_id || "")}</div>
@@ -2862,121 +3452,155 @@ function renderProjectDetailState() {
       </div>
     `).join("")
     : "";
-  panel.innerHTML = `
-    <div class="summary-grid">
-      <div class="card"><strong>Project Slug</strong><div class="meta mono">${escapeHtml(detail.project_slug || "")}</div></div>
-      <div class="card"><strong>Status</strong><div>${pill(detail.status || "UNKNOWN")}</div></div>
-      <div class="card"><strong>Workflow Inputs</strong><div>${pill(detail.workflow_input_status || "UNKNOWN")}</div></div>
-      <div class="card"><strong>Runnable</strong><div>${pill(detail.runnable ? "READY_FOR_WORKFLOW" : "WAITING")}</div></div>
-      <div class="card"><strong>Source Video ID</strong><div class="meta mono">${escapeHtml(detail.source_video_id || "")}</div></div>
-      <div class="card"><strong>Updated</strong><div class="meta">${escapeHtml(formatTime(detail.updated_at))}</div></div>
-      <div class="card"><strong>Content.md</strong><div>${pill(detail.has_content ? "FOUND" : "MISSING")}</div></div>
-      <div class="card"><strong>Publishing Package</strong><div>${pill(detail.has_publishing_package ? "FOUND" : "MISSING")}</div></div>
-    </div>
-    <div class="card">
-      <strong>Source Video URL</strong>
-      <div class="meta"><a href="${escapeHtml(detail.source_video_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(detail.source_video_url || "Unavailable")}</a></div>
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+
+  const productionArtifactsHtml = productionArtifacts.length
+    ? productionArtifacts.map((artifact) => `
+      <div class="check">
         <div>
-          <strong>Production Handoff</strong>
-          <div class="meta">Read-only production export for canonical projects that the supported workflow read model reports as ready.</div>
+          <strong>${escapeHtml(artifact.filename || artifact.artifact_id || "Artifact")}</strong>
+          <div class="meta">${escapeHtml(String(artifact.character_count ?? artifact.approved_character_count ?? ""))} characters</div>
+          <div class="meta"><a href="${escapeHtml(artifact.file_url || "#")}" target="_blank" rel="noreferrer">${escapeHtml(artifact.filename || artifact.artifact_id || "")}</a></div>
         </div>
-        <div>${pill(productionStatus)}</div>
+        <div>${pill(artifact.exists && artifact.matches_approved_revision_metadata ? "READY" : (artifact.exists ? "CHECK" : "MISSING"))}</div>
       </div>
-      ${productionErrorHtml}
-      ${productionPackage ? `
-        <div class="summary-grid" style="margin-top:12px">
-          <div class="card"><strong>Lifecycle</strong><div class="meta">${escapeHtml(productionPackage.lifecycle || "Unknown")}</div></div>
-          <div class="card"><strong>Approved Group</strong><div class="meta mono">${escapeHtml(productionPackage.approved_group_id || "")}</div></div>
-          <div class="card"><strong>State Revision</strong><div class="meta">${escapeHtml(String(productionPackage.state_revision ?? ""))}</div></div>
-          <div class="card"><strong>Download ZIP</strong><div>${pill(productionPackage.ready_for_export ? "AVAILABLE" : "BLOCKED")}</div></div>
-        </div>
-        ${productionPackage.errors && productionPackage.errors.length
-          ? `<div class="notice" style="margin-top:12px"><strong>Export Checks</strong><span class="meta">${escapeHtml(productionPackage.errors.join(" | "))}</span></div>`
-          : ""
-        }
-        <div class="row" style="margin-top:12px;align-items:center">
-          <a id="downloadProductionZipLink" href="${escapeHtml(productionPackage.download_url || "#")}"${productionPackage.ready_for_export ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(productionPackage.ready_for_export ? "Download Production ZIP" : "Production ZIP unavailable")}</a>
-        </div>
-        <div class="card" style="margin-top:12px">
-          <strong>Artifact Identity Summary</strong>
-          <div class="stack" style="margin-top:12px">${productionArtifactHtml}</div>
-        </div>
-      ` : `
-        <div class="meta" style="margin-top:12px">${escapeHtml(state.isLoadingProductionPackage ? "Loading the production handoff summary..." : "Production handoff details will appear here once the project workflow is loaded.")}</div>
-      `}
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
-        <div>
-          <strong>Workflow Panel</strong>
-          <div class="meta">Read-only workflow detail for the selected canonical project.</div>
-        </div>
-        <div>${pill(state.isLoadingWorkflow ? "LOADING" : (workflow ? "READY" : "WAITING"))}</div>
+    `).join("")
+    : `<div class="notice"><strong>No production artifacts</strong><span class="meta">The selected project has not reached a supported production handoff state yet.</span></div>`;
+  const productionSectionHtml = productionPackage
+    ? `
+      <div class="mini-grid" style="margin-top:12px">
+        <div class="card"><strong>Status</strong><div>${pill(productionPackage.ready_for_export ? "PRODUCTION_READY" : (productionPackage.lifecycle || "WAITING"))}</div></div>
+        <div class="card"><strong>Download</strong><div class="meta">${escapeHtml(productionPackage.ready_for_export ? "Ready to hand off" : "Still blocked")}</div></div>
       </div>
-      ${workflowErrorHtml}
-      ${workflow && !state.workflowError ? `
-        <div class="summary-grid" style="margin-top:12px">
-          <div class="card"><strong>Workflow</strong><div class="meta">${escapeHtml(definition.display_name || binding.workflow_id || "")}</div></div>
-          <div class="card"><strong>Workflow ID</strong><div class="meta mono">${escapeHtml(binding.workflow_id || "")}</div></div>
-          <div class="card"><strong>Workflow Version</strong><div class="meta">${escapeHtml(binding.workflow_version || "")}</div></div>
-          <div class="card"><strong>Binding Source</strong><div>${pill(binding.binding_source || "UNKNOWN")}</div></div>
-          <div class="card"><strong>Prompt Set</strong><div>${pill(promptSet.status || "UNKNOWN")}</div><div class="meta">${escapeHtml(promptSet.bundle_available ? "Bundle available" : "Prompt bundle unavailable for this workflow version.")}</div></div>
-          <div class="card"><strong>Execution Mode</strong><div class="meta">${escapeHtml(definition.execution_mode || "Unknown")}</div></div>
-          <div class="card"><strong>State Revision</strong><div class="meta">${escapeHtml(String(workflowState.state_revision ?? 0))}</div></div>
-          <div class="card"><strong>State Persisted</strong><div>${pill(workflowState.state_persisted ? "FOUND" : "MISSING")}</div></div>
-          <div class="card"><strong>Current Lifecycle</strong><div class="meta">${escapeHtml(workflowState.current_lifecycle_state || "Not started")}</div></div>
-          <div class="card"><strong>Current Step</strong><div class="meta">${escapeHtml(currentStepLabel ? currentStepLabel.display_name : (workflowState.current_step_id || "Unknown"))}</div><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
-          <div class="card"><strong>Current Step Status</strong><div>${pill(workflowState.current_step_status || "UNKNOWN")}</div></div>
-          <div class="card"><strong>Next Step</strong><div class="meta">${escapeHtml(nextStepLabel ? nextStepLabel.display_name : (workflowState.next_step_id || "None"))}</div><div class="meta mono">${escapeHtml(workflowState.next_step_id || "")}</div></div>
+      ${(productionPackage.lifecycle === "PRODUCTION_READY" || productionPackage.ready_for_export) ? `<div class="notice" style="margin-top:12px"><strong>Workflow completed</strong><span class="meta">This project is ready for production handoff.</span></div>` : ""}
+      ${productionPackage.errors && productionPackage.errors.length ? `<div class="notice" style="margin-top:12px"><strong>Export Checks</strong><span class="meta">${escapeHtml(productionPackage.errors.join(" | "))}</span></div>` : ""}
+      <div class="row" style="margin-top:12px;align-items:center">
+        <a id="downloadProductionZipLink" class="action-link success" href="${escapeHtml(productionPackage.download_url || "#")}"${productionPackage.ready_for_export ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(productionPackage.ready_for_export ? "Download Production ZIP" : "Production ZIP unavailable")}</a>
+      </div>
+      <div class="stack" style="margin-top:12px">${productionArtifactsHtml}</div>
+      <details style="margin-top:12px">
+        <summary>Technical Details</summary>
+        <div class="stack" style="margin-top:12px">
+          <div class="check"><strong>Lifecycle Code</strong><div class="meta mono">${escapeHtml(productionPackage.lifecycle || "")}</div></div>
+          <div class="check"><strong>Approved Group</strong><div class="meta mono">${escapeHtml(productionPackage.approved_group_id || "")}</div></div>
+          <div class="check"><strong>State Revision</strong><div class="meta">${escapeHtml(String(productionPackage.state_revision ?? ""))}</div></div>
+          ${productionArtifacts.map((artifact) => `<div class="check"><strong>${escapeHtml(artifact.filename || artifact.artifact_id || "Artifact")}</strong><div class="meta mono">${escapeHtml(artifact.sha256 || "")}</div></div>`).join("")}
         </div>
-        ${workflowState.blocking_reason ? `<div class="notice" style="margin-top:12px"><strong>Blocking Reason</strong><span class="meta">${escapeHtml(workflowState.blocking_reason)}</span></div>` : ""}
-        <div class="card" style="margin-top:12px">
-          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
-            <div>
-              <strong>Workflow Steps</strong>
-              <div class="meta">Generated from the workflow definition in step order.</div>
-            </div>
-            <div class="meta">${escapeHtml(String(workflowSteps.length))} step(s)</div>
+      </details>
+    `
+    : `<div class="meta" style="margin-top:12px">${escapeHtml(state.isLoadingProductionPackage ? "Loading the production handoff summary..." : "Production handoff details will appear here once the project workflow is loaded.")}</div>`;
+  const projectManagementSectionHtmlForDetail = workflowCompleted
+    ? `
+      <section class="panel" style="margin-top:12px">
+        <div class="step-heading">
+          <div>
+            <h3 style="margin:0">Project Management</h3>
+            <div class="meta">Change the current project or create a new one after reviewing the completed result.</div>
           </div>
-          <label for="workflowStepSelect">Selected Workflow Step</label>
-          <select id="workflowStepSelect">
-            ${workflowSteps.map((step) => `<option value="${escapeHtml(step.step_id)}"${step.step_id === state.selectedWorkflowStepId ? " selected" : ""}>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</option>`).join("")}
-          </select>
-          <div class="stack" style="margin-top:12px">${workflowRows}</div>
         </div>
-        ${selectedStep ? `
-          <div class="card" style="margin-top:12px">
+        <div class="stack" style="margin-top:12px">${projectManagementSectionHtml()}</div>
+      </section>
+    `
+    : "";
+  const selectedStepHtml = selectedStep && !workflowCompleted ? (() => {
+    const invalidatedNotice = selectedCandidate && selectedCandidate.invalidated_candidate_group_id
+      ? `<div class="notice" style="margin-top:12px"><strong>Invalidated Candidate</strong><span class="meta">${escapeHtml(`Candidate ${selectedCandidate.invalidated_candidate_group_id} is no longer actionable because an upstream approved output changed.`)}</span></div>`
+      : "";
+    const staleNotice = selectedCandidate && selectedCandidate.stale_reason
+      ? `<div class="notice" style="margin-top:12px"><strong>Stale Output</strong><span class="meta">${escapeHtml(staleReasonSummary(selectedStep))}</span></div>`
+      : "";
+    const parsedOutputHtml = parsedOutput ? `
+      <div class="summary-grid" style="margin-top:12px">
+        <div class="card"><strong>Preview Status</strong><div>${pill(parsedOutput.status || "UNKNOWN")}</div></div>
+        <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(parsedOutput.contract && parsedOutput.contract.response_mode ? parsedOutput.contract.response_mode : "Unknown")}</div></div>
+        <div class="card"><strong>Raw Output SHA-256</strong><div class="meta mono">${escapeHtml(parsedOutput.raw_output && parsedOutput.raw_output.sha256 ? parsedOutput.raw_output.sha256 : "")}</div></div>
+        <div class="card"><strong>Raw Character Count</strong><div class="meta">${escapeHtml(String(parsedOutput.raw_output && parsedOutput.raw_output.character_count !== undefined ? parsedOutput.raw_output.character_count : ""))}</div></div>
+        <div class="card"><strong>Artifact Count</strong><div class="meta">${escapeHtml(String((parsedOutput.artifacts || []).length))}</div></div>
+      </div>
+      ${(parsedOutput.validation && Array.isArray(parsedOutput.validation.errors) && parsedOutput.validation.errors.length) ? `<div class="notice" style="margin-top:12px"><strong>Parse Validation Errors</strong><span class="meta">${escapeHtml(parsedOutput.validation.errors.join(" | "))}</span></div>` : ""}
+      ${(selectedCandidate || lastSavedCandidate) ? `
+        <div class="card" style="margin-top:12px">
+          <strong>Candidate Summary</strong>
+          <div class="summary-grid" style="margin-top:12px">
+            <div class="card"><strong>Candidate Group</strong><div class="meta mono">${escapeHtml(selectedCandidate && selectedCandidate.candidate_group_id ? selectedCandidate.candidate_group_id : (lastSavedCandidate && lastSavedCandidate.revision_group && lastSavedCandidate.revision_group.revision_group_id) || "")}</div></div>
+            <div class="card"><strong>Candidate Status</strong><div>${pill(selectedCandidate && selectedCandidate.status ? selectedCandidate.status : "CANDIDATE")}</div></div>
+          </div>
+        </div>
+      ` : ""}
+      ${parsedArtifactsHtml}
+    ` : "";
+    return `
+      <div class="card" style="margin-top:12px">
+        <div class="step-heading">
+          <div>
             <strong>Selected Step Detail</strong>
+            <div class="meta">Prompt ${escapeHtml(String(selectedStep.order))}: ${escapeHtml(selectedStep.display_name)}</div>
+          </div>
+          <div>${pill(stepStatusLabel(selectedStep))}</div>
+        </div>
+        <div class="summary-grid" style="margin-top:12px">
+          <div class="card"><strong>Model</strong><div class="meta">${escapeHtml(selectedStep.required_model || "Unspecified")}</div></div>
+          <div class="card"><strong>Conversation</strong><div class="meta">${escapeHtml(describeConversationConstraint(selectedStep))}</div></div>
+          <div class="card"><strong>Save</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].save_candidate ? "READY" : "WAITING")}</div></div>
+          <div class="card"><strong>Approve</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].approve_candidate ? "READY" : "WAITING")}</div></div>
+        </div>
+        ${staleNotice}
+        ${invalidatedNotice}
+        <div class="row" style="margin-top:12px">
+          <button type="button" class="primary" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
+          <button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>
+        </div>
+        <div class="status" style="margin-top:12px" role="status" aria-live="polite">${bundleFeedbackHtml}</div>
+        <div class="card" style="margin-top:12px">
+          <strong>Bundle Preview</strong>
+          <div class="meta">The preview below is plain text from the API. Copy Complete Bundle uses the exact full stored bundle.</div>
+          ${bundle ? `
             <div class="summary-grid" style="margin-top:12px">
-              <div class="card"><strong>Required Model</strong><div class="meta">${escapeHtml(selectedStep.required_model || "Unspecified")}</div></div>
-              <div class="card"><strong>Conversation Requirement</strong><div class="meta">${escapeHtml(describeConversationConstraint(selectedStep))}</div></div>
-              <div class="card"><strong>Resulting Lifecycle State</strong><div class="meta">${escapeHtml(selectedStep.resulting_lifecycle_state || "Unknown")}</div></div>
-              <div class="card"><strong>Output Artifacts</strong><div class="meta">${escapeHtml(String((selectedStep.output_artifact_ids || []).length))}</div></div>
-              <div class="card"><strong>Save Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].save_candidate ? "READY" : "WAITING")}</div></div>
-              <div class="card"><strong>Approve Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].approve_candidate ? "READY" : "WAITING")}</div></div>
-              <div class="card"><strong>Reject Candidate</strong><div>${pill(workflow.available_actions && workflow.available_actions[selectedStep.step_id] && workflow.available_actions[selectedStep.step_id].reject_candidate ? "READY" : "WAITING")}</div></div>
+              <div class="card"><strong>Bundle SHA-256</strong><div class="meta mono">${escapeHtml(bundle.bundle_sha256 || "")}</div></div>
+              <div class="card"><strong>Character Count</strong><div class="meta">${escapeHtml(String(bundle.bundle_character_count ?? ""))}</div></div>
+              <div class="card"><strong>Required Model</strong><div class="meta">${escapeHtml(bundle.required_model || "")}</div></div>
+              <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(bundle.output_contract && bundle.output_contract.response_mode ? bundle.output_contract.response_mode : "Unknown")}</div></div>
             </div>
-            <div class="row" style="margin-top:12px">
-              <button type="button" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
-              <button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>
+            <label for="bundlePreviewText" style="margin-top:12px">Complete Prompt Bundle Preview</label>
+            <textarea id="bundlePreviewText" readonly spellcheck="false"></textarea>
+          ` : `<div class="notice" style="margin-top:12px"><strong>No bundle loaded</strong><span class="meta">Select a step, then click Build Complete Bundle to preview and copy the exact full response.</span></div>`}
+        </div>
+        <div class="card" style="margin-top:12px">
+          <strong>Paste AI Output</strong>
+          <div class="meta">Paste the model response for the loaded bundle. Parse and Preview checks it in memory only and does not write any artifact files.</div>
+          <label for="pastedOutputText" style="margin-top:12px">AI Output</label>
+          <textarea id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." ${bundle ? "" : "disabled"} spellcheck="false"></textarea>
+          <div class="row" style="margin-top:12px">
+            <button type="button" class="primary" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
+            <button type="button" class="secondary" id="saveCandidateBtn" ${saveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(saveCandidateButton.label)}</button>
+            <button type="button" class="success" id="approveCandidateBtn" ${approveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(approveCandidateButton.label)}</button>
+            <button type="button" class="danger" id="rejectCandidateBtn" ${rejectCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(rejectCandidateButton.label)}</button>
+          </div>
+          <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
+          <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
+          ${parsedOutputHtml}
+        </div>
+        <details style="margin-top:12px">
+          <summary>Technical Details</summary>
+          <div class="stack" style="margin-top:12px">
+            <div class="check"><strong>Workflow ID</strong><div class="meta mono">${escapeHtml(binding.workflow_id || "")}</div></div>
+            <div class="check"><strong>Workflow Version</strong><div class="meta">${escapeHtml(binding.workflow_version || "")}</div></div>
+            <div class="check"><strong>Workflow Definition SHA-256</strong><div class="meta mono">${escapeHtml(binding.workflow_definition_sha256 || "")}</div></div>
+            <div class="check"><strong>Binding Source</strong><div>${pill(binding.binding_source || "UNKNOWN")}</div></div>
+            <div class="check"><strong>Prompt Set</strong><div>${pill(promptSet.status || "UNKNOWN")}</div></div>
+            <div class="check"><strong>Execution Mode</strong><div class="meta">${escapeHtml(definition.execution_mode || "Unknown")}</div></div>
+            <div class="check"><strong>State Revision</strong><div class="meta">${escapeHtml(String(workflowState.state_revision ?? 0))}</div></div>
+            <div class="check"><strong>State Persisted</strong><div>${pill(workflowState.state_persisted ? "FOUND" : "MISSING")}</div></div>
+            <div class="check"><strong>Current Step ID</strong><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
+            <div class="check"><strong>Next Step ID</strong><div class="meta mono">${escapeHtml(workflowState.next_step_id || "")}</div></div>
+            <div class="card">
+              <strong>Required Input Artifacts</strong>
+              <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.input_artifact_ids), "Required")}</div>
             </div>
-            <div class="status" style="margin-top:12px" role="status" aria-live="polite">${bundleFeedbackHtml}</div>
-            ${selectedCandidate && selectedCandidate.stale_reason ? `<div class="notice" style="margin-top:12px"><strong>Stale Output</strong><span class="meta">${escapeHtml(staleReasonSummary(selectedStep))}</span></div>` : ""}
-            ${selectedCandidate && selectedCandidate.invalidated_candidate_group_id ? `<div class="notice" style="margin-top:12px"><strong>Invalidated Candidate</strong><span class="meta">${escapeHtml(`Candidate ${selectedCandidate.invalidated_candidate_group_id} is no longer actionable because an upstream approved output changed.`)}</span></div>` : ""}
-            <div class="summary-grid" style="margin-top:12px">
-              <div class="card">
-                <strong>Required Input Artifacts</strong>
-                <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.input_artifact_ids), "Required")}</div>
-              </div>
-              <div class="card">
-                <strong>Optional Input Artifacts</strong>
-                <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.optional_input_artifact_ids), "Optional")}</div>
-              </div>
+            <div class="card">
+              <strong>Optional Input Artifacts</strong>
+              <div class="stack" style="margin-top:12px">${renderArtifacts(artifactListForIds(selectedStep.optional_input_artifact_ids), "Optional")}</div>
             </div>
-            <div class="card" style="margin-top:12px">
+            <div class="card">
               <strong>Output Artifact IDs</strong>
               <div class="stack" style="margin-top:12px">
                 ${(selectedStep.output_artifact_ids || []).length
@@ -2988,91 +3612,101 @@ function renderProjectDetailState() {
                 }
               </div>
             </div>
-            <div class="card" style="margin-top:12px">
-              <strong>Bundle Preview</strong>
-              <div class="meta">The preview below is plain text from the API. Copy Complete Bundle uses the exact full stored bundle.</div>
-              ${bundle ? `
-                <div class="summary-grid" style="margin-top:12px">
-                  <div class="card"><strong>Bundle SHA-256</strong><div class="meta mono">${escapeHtml(bundle.bundle_sha256 || "")}</div></div>
-                  <div class="card"><strong>Character Count</strong><div class="meta">${escapeHtml(String(bundle.bundle_character_count ?? ""))}</div></div>
-                  <div class="card"><strong>Required Model</strong><div class="meta">${escapeHtml(bundle.required_model || "")}</div></div>
-                  <div class="card"><strong>Prompt File SHA-256</strong><div class="meta mono">${escapeHtml(bundle.prompt_file_sha256 || "")}</div></div>
-                  <div class="card"><strong>Input Artifact IDs</strong><div class="meta">${escapeHtml((bundle.input_artifact_ids || []).join(", ") || "None")}</div></div>
-                  <div class="card"><strong>Missing Optional Inputs</strong><div class="meta">${escapeHtml((bundle.missing_optional_inputs || []).join(", ") || "None")}</div></div>
-                  <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(bundle.output_contract && bundle.output_contract.response_mode ? bundle.output_contract.response_mode : "Unknown")}</div></div>
-                </div>
-                <label for="bundlePreviewText" style="margin-top:12px">Complete Prompt Bundle Preview</label>
-                <textarea id="bundlePreviewText" readonly spellcheck="false"></textarea>
-              ` : `
-                <div class="notice" style="margin-top:12px">
-                  <strong>No bundle loaded</strong>
-                  <span class="meta">Select a step, then click Build Complete Bundle to preview and copy the exact full response.</span>
-                </div>
-              `}
-            </div>
-            <div class="card" style="margin-top:12px">
-              <strong>Paste AI Output</strong>
-              <div class="meta">Paste the model response for the loaded bundle. Parse and Preview checks it in memory only and does not write any artifact files.</div>
-              <label for="pastedOutputText" style="margin-top:12px">AI Output</label>
-              <textarea id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." ${bundle ? "" : "disabled"} spellcheck="false"></textarea>
-              <div class="row" style="margin-top:12px">
-                <button type="button" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
-                <button type="button" class="secondary" id="saveCandidateBtn" ${saveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(saveCandidateButton.label)}</button>
-                <button type="button" id="approveCandidateBtn" ${approveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(approveCandidateButton.label)}</button>
-                <button type="button" class="secondary" id="rejectCandidateBtn" ${rejectCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(rejectCandidateButton.label)}</button>
-              </div>
-              <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
-              <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
-              ${parsedOutput ? `
-                <div class="summary-grid" style="margin-top:12px">
-                  <div class="card"><strong>Preview Status</strong><div>${pill(parsedOutput.status || "UNKNOWN")}</div></div>
-                  <div class="card"><strong>Response Mode</strong><div class="meta">${escapeHtml(parsedOutput.contract && parsedOutput.contract.response_mode ? parsedOutput.contract.response_mode : "Unknown")}</div></div>
-                  <div class="card"><strong>Raw Output SHA-256</strong><div class="meta mono">${escapeHtml(parsedOutput.raw_output && parsedOutput.raw_output.sha256 ? parsedOutput.raw_output.sha256 : "")}</div></div>
-                  <div class="card"><strong>Raw Character Count</strong><div class="meta">${escapeHtml(String(parsedOutput.raw_output && parsedOutput.raw_output.character_count !== undefined ? parsedOutput.raw_output.character_count : ""))}</div></div>
-                  <div class="card"><strong>Artifact Count</strong><div class="meta">${escapeHtml(String((parsedOutput.artifacts || []).length))}</div></div>
-                </div>
-                ${(parsedOutput.validation && Array.isArray(parsedOutput.validation.errors) && parsedOutput.validation.errors.length)
-                  ? `<div class="notice" style="margin-top:12px"><strong>Parse Validation Errors</strong><span class="meta">${escapeHtml(parsedOutput.validation.errors.join(" | "))}</span></div>`
-                  : ""
-                }
-                ${(selectedCandidate || lastSavedCandidate) ? `
-                  <div class="card" style="margin-top:12px">
-                    <strong>Candidate Summary</strong>
-                    <div class="summary-grid" style="margin-top:12px">
-                      <div class="card"><strong>Candidate Group</strong><div class="meta mono">${escapeHtml(
-                        selectedCandidate && selectedCandidate.candidate_group_id
-                          ? selectedCandidate.candidate_group_id
-                          : (lastSavedCandidate && lastSavedCandidate.revision_group && lastSavedCandidate.revision_group.revision_group_id) || ""
-                      )}</div></div>
-                      <div class="card"><strong>Candidate Status</strong><div>${pill(selectedCandidate && selectedCandidate.status ? selectedCandidate.status : "CANDIDATE")}</div></div>
-                    </div>
-                    ${(lastSavedCandidate && lastSavedCandidate.revision_group && Array.isArray(lastSavedCandidate.revision_group.artifacts) && lastSavedCandidate.revision_group.artifacts.length)
-                      ? `<div class="stack" style="margin-top:12px">${lastSavedCandidate.revision_group.artifacts.map((artifact) => `
-                        <div class="check">
-                          <div>
-                            <strong>${escapeHtml(artifact.artifact_id || "")}</strong>
-                            <div class="meta mono">${escapeHtml(artifact.revision_id || "")}</div>
-                          </div>
-                          <div>${pill("CANDIDATE")}</div>
-                        </div>
-                      `).join("")}</div>`
-                      : ""
-                    }
-                  </div>
-                ` : ""}
-                ${parsedArtifactsHtml}
-              ` : ""}
-            </div>
           </div>
-        ` : ""}
-      ` : `
-        <div class="notice" style="margin-top:12px">
-          <strong>Workflow loading</strong>
-          <span class="meta">${escapeHtml(state.isLoadingWorkflow ? "Fetching the selected project workflow..." : "Workflow data will appear here after the selected project detail loads.")}</span>
+        </details>
+      </div>
+    `;
+  })() : "";
+  const completedWorkflowDetailsHtml = selectedStep && workflowCompleted ? `
+    <details style="margin-top:12px">
+      <summary>Workflow Details</summary>
+      <div class="stack" style="margin-top:12px">
+        <div class="check"><strong>Selected Step</strong><div>${pill(stepStatusLabel(selectedStep))}</div></div>
+        <div class="meta">${escapeHtml(`Prompt ${selectedStep.order}: ${selectedStep.display_name}`)}</div>
+        <div class="check"><strong>Workflow ID</strong><div class="meta mono">${escapeHtml(binding.workflow_id || "")}</div></div>
+        <div class="check"><strong>Workflow Version</strong><div class="meta">${escapeHtml(binding.workflow_version || "")}</div></div>
+        <div class="check"><strong>State Revision</strong><div class="meta">${escapeHtml(String(workflowState.state_revision ?? 0))}</div></div>
+      </div>
+    </details>
+  ` : "";
+  const completedWorkflowSectionHtml = workflowCompleted ? `
+      <div class="notice" style="margin-top:12px">
+        <strong>Workflow completed</strong>
+        <span class="meta">This project is ready for production handoff.</span>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <div class="step-heading">
+          <div>
+            <strong>Workflow Steps</strong>
+            <div class="meta">Compact workflow rail</div>
+          </div>
+          <div class="meta">${escapeHtml(String(workflowSteps.length))} step(s)</div>
         </div>
-      `}
-    </div>
+        <label for="workflowStepSelect">Selected Workflow Step</label>
+        <select id="workflowStepSelect">
+          ${workflowSteps.map((step) => `<option value="${escapeHtml(step.step_id)}"${step.step_id === state.selectedWorkflowStepId ? " selected" : ""}>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</option>`).join("")}
+        </select>
+        <div class="step-rail" style="margin-top:12px">${compactWorkflowRows}</div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <a id="workflowPrimaryAction" class="action-link success" href="${escapeHtml(productionPackage && productionPackage.download_url ? productionPackage.download_url : "#")}"${productionPackage && productionPackage.ready_for_export ? " download" : " aria-disabled=\"true\""} rel="noreferrer">Download Production Package</a>
+      </div>
+      <div class="stack" style="margin-top:12px">${productionArtifactsHtml}</div>
+      ${productionPackage && productionPackage.errors && productionPackage.errors.length ? `<div class="notice" style="margin-top:12px"><strong>Export Checks</strong><span class="meta">${escapeHtml(productionPackage.errors.join(" | "))}</span></div>` : ""}
+      ${completedWorkflowDetailsHtml}
+      <details style="margin-top:12px">
+        <summary>Technical Details</summary>
+        <div class="stack" style="margin-top:12px">
+          <div class="check"><strong>Lifecycle Code</strong><div class="meta mono">${escapeHtml(productionPackage && productionPackage.lifecycle ? productionPackage.lifecycle : "")}</div></div>
+          <div class="check"><strong>Approved Group</strong><div class="meta mono">${escapeHtml(productionPackage && productionPackage.approved_group_id ? productionPackage.approved_group_id : "")}</div></div>
+          <div class="check"><strong>Current Step ID</strong><div class="meta mono">${escapeHtml(workflowState.current_step_id || "")}</div></div>
+          ${productionArtifacts.map((artifact) => `<div class="check"><strong>${escapeHtml(artifact.filename || artifact.artifact_id || "Artifact")}</strong><div class="meta mono">${escapeHtml(artifact.sha256 || "")}</div></div>`).join("")}
+        </div>
+      </details>
+  ` : "";
+  const workflowSectionHtml = workflowCompleted && !workflow && !state.workflowError
+    ? `
+      <div class="meta" style="margin-top:12px">${escapeHtml(productionStatusSentence(productionPackage))}</div>
+      ${completedWorkflowSectionHtml}
+    `
+    : workflow && !state.workflowError
+    ? `
+      <div class="meta" style="margin-top:12px">${escapeHtml(definition.display_name || "Workflow")}</div>
+      ${workflowState.blocking_reason ? `<div class="notice" style="margin-top:12px"><strong>Blocking Reason</strong><span class="meta">${escapeHtml(workflowState.blocking_reason)}</span></div>` : ""}
+      ${workflowCompleted ? completedWorkflowSectionHtml : `<div class="card" style="margin-top:12px">
+        <div class="step-heading">
+          <div>
+            <strong>Workflow Steps</strong>
+            <div class="meta">Compact workflow rail</div>
+          </div>
+          <div class="meta">${escapeHtml(String(workflowSteps.length))} step(s)</div>
+        </div>
+        <label for="workflowStepSelect">Selected Workflow Step</label>
+        <select id="workflowStepSelect">
+          ${workflowSteps.map((step) => `<option value="${escapeHtml(step.step_id)}"${step.step_id === state.selectedWorkflowStepId ? " selected" : ""}>${escapeHtml(String(step.order))}. ${escapeHtml(step.display_name)}</option>`).join("")}
+        </select>
+        <div class="step-rail" style="margin-top:12px">${compactWorkflowRows}</div>
+      </div>`}
+      ${selectedStepHtml}
+    `
+    : `<div class="notice" style="margin-top:12px"><strong>${state.workflowError ? "Workflow unavailable" : "Workflow loading"}</strong><span class="meta">${escapeHtml(state.workflowError || (state.isLoadingWorkflow ? "Fetching the selected project workflow..." : "Workflow data will appear here after the selected project detail loads."))}</span></div>`;
+
+  panel.innerHTML = `
+    <section class="panel">
+      <div class="step-heading">
+        <div>
+          <h3 style="margin:0">Content Workflow</h3>
+          <div class="meta">${escapeHtml(workflowCompleted ? "Completed workflow result with the full prompt rail and handoff-ready output first." : "Selected project workflow with only the current step expanded.")}</div>
+        </div>
+        <div>${pill(state.isLoadingWorkflow ? "LOADING" : (workflow ? "READY" : "WAITING"))}</div>
+      </div>
+      ${state.productionPackageError && !workflowCompleted ? `<div class="notice" style="margin-top:12px"><strong>Production Handoff Error</strong><span class="meta">${escapeHtml(state.productionPackageError)}</span></div>` : ""}
+      ${!workflowCompleted ? `<div class="meta" style="margin-top:12px">${escapeHtml(productionStatusSentence(productionPackage))}</div>` : ""}
+      ${workflowSectionHtml}
+    </section>
+    ${projectManagementSectionHtmlForDetail}
   `;
+  syncProjectManagementControls();
   const bundlePreviewText = document.getElementById("bundlePreviewText");
   if (bundlePreviewText && bundle) {
     bundlePreviewText.value = typeof bundle.bundle === "string" ? bundle.bundle : "";
@@ -3101,159 +3735,134 @@ function renderProjectDetailState() {
   const checks = state.selectedProjectValidation.checks || {};
   const entries = Object.keys(checks).sort().map((key) => `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(checks[key] ? "PASS" : "FAILED")}</div>`).join("");
   validationPanel.innerHTML = `
-    <div class="card">
-      <strong>Validation Result</strong>
-      <div class="meta">Structured canonical validation for the selected project.</div>
-      <div class="stack" style="margin-top:12px">${entries}</div>
-    </div>
+    <details>
+      <summary>Technical Details</summary>
+      <div class="card" style="margin-top:12px">
+        <strong>Validation Result</strong>
+        <div class="meta">Structured canonical validation for the selected project.</div>
+        <div class="stack" style="margin-top:12px">${entries}</div>
+      </div>
+    </details>
   `;
 }
 
-function renderSelectedChannelSummary() {
-  const panel = document.getElementById("summaryPanel");
-  const message = document.getElementById("message");
-  if (state.errorMessage) {
-    message.textContent = state.errorMessage;
-  } else if (state.isLoadingSummary) {
-    message.textContent = "Loading selected channel summary...";
-  } else if (!state.selectedChannelSlug) {
-    message.textContent = "Select a channel to load its summary.";
-  } else {
-    message.textContent = "Selected channel summary is loaded from the canonical /api/v2 routes.";
-  }
-
+function renderAnalyticsWorkspace() {
+  const panel = document.getElementById("analyticsPanel");
+  if (!panel) return;
   if (!state.selectedChannelSlug) {
     panel.innerHTML = `
-      <div class="notice">
-        <strong>Selection required</strong>
-        <span class="meta">No channel is selected. Choose a channel from the list before using the read-only summary view.</span>
-      </div>
+      <section class="panel">
+        <div class="empty-state">
+          <strong>Selection required</strong>
+          <div class="meta">Select a channel to inspect analytics readiness and exports.</div>
+        </div>
+      </section>
     `;
     return;
   }
-  if (state.isLoadingSummary && !state.selectedChannelSummary) {
-    panel.innerHTML = `<div class="notice"><strong>Loading</strong><span class="meta">Fetching the selected channel summary...</span></div>`;
-    return;
-  }
-  if (!state.selectedChannelSummary) {
-    panel.innerHTML = `
-      <div class="notice">
-        <strong>Summary unavailable</strong>
-        <span class="meta">${escapeHtml(state.errorMessage || "The selected channel summary is not available yet.")}</span>
-      </div>
-    `;
-    return;
-  }
-
-  const summary = state.selectedChannelSummary;
+  const summary = state.selectedChannelSummary || {};
   const channel = summary.channel || {};
   const reporting = summary.reporting || {};
   const analytics = state.selectedChannelAnalytics;
   const analyticsFeedback = state.analyticsFeedback.slug === state.selectedChannelSlug ? state.analyticsFeedback : { kind: "", text: "" };
   const discoverModel = analyticsDiscoveryModel();
   const syncModel = analyticsSyncModel();
-  const availableMetrics = Array.isArray(reporting.available_metrics) && reporting.available_metrics.length ? reporting.available_metrics.join(", ") : "None reported";
-  const pendingMetrics = Array.isArray(reporting.pending_metrics) && reporting.pending_metrics.length ? reporting.pending_metrics.join(", ") : "None";
-  const disconnected = channel.status && channel.status !== "CONNECTED";
-  const analyticsCounts = analytics && analytics.query_group_counts ? analytics.query_group_counts : {};
   const capabilityCounts = analytics && analytics.capability_counts ? analytics.capability_counts : {};
   const reportReadinessCounts = analytics && analytics.report_readiness_counts ? analytics.report_readiness_counts : {};
+  const queryCounts = analytics && analytics.query_group_counts ? analytics.query_group_counts : {};
   const normalizedTables = analytics && Array.isArray(analytics.normalized_tables) ? analytics.normalized_tables : [];
   const sourceResults = analytics && analytics.source_results ? analytics.source_results : {};
-  const analyticsQueryStatus = sourceResults.analytics_queries && sourceResults.analytics_queries.status ? sourceResults.analytics_queries.status : (analytics && analytics.last_successful_sync_at ? "SUCCESS" : "WAITING");
-  const analyticsStatusPill = state.isLoadingChannelAnalytics
-    ? pill("LOADING")
-    : pill(analyticsQueryStatus || (analytics ? "WAITING" : "UNKNOWN"));
-  const analyticsFeedbackHtml = analyticsFeedback.text
-    ? `<div class="notice" style="margin-top:12px"><strong>${analyticsFeedback.kind === "error" ? "Collector Error" : "Collector Status"}</strong><span class="meta">${escapeHtml(analyticsFeedback.text)}</span></div>`
+  const analyticsSummary = analyticsPlainLanguageSummary(analytics);
+  const downloadLabel = analytics && analytics.export_url ? "Download Analytics ZIP" : "Analytics ZIP unavailable";
+  const tablesWithDataCount = normalizedTables.filter((table) => Number(table.row_count || 0) > 0).length;
+  const feedbackHtml = analyticsFeedback.text
+    ? `<div class="notice"><strong>${analyticsFeedback.kind === "error" ? "Collector Error" : "Collector Status"}</strong><span class="meta">${escapeHtml(analyticsFeedback.text)}</span></div>`
     : "";
-  const sourceResultHtml = Object.keys(sourceResults).length
-    ? Object.keys(sourceResults).sort().map((key) => {
-        const item = sourceResults[key] || {};
-        return `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(item.status || "UNKNOWN")}</div>`;
-      }).join("")
-    : `<div class="meta">No analytics collector state has been recorded yet.</div>`;
   const normalizedTableHtml = normalizedTables.length
     ? normalizedTables.map((table) => `
-      <div class="check">
-        <strong>${escapeHtml(table.filename || "")}</strong>
-        <div>${pill(table.exists ? "READY" : "MISSING")}</div>
-        <div class="meta">${escapeHtml(String(table.row_count ?? 0))} rows</div>
-      </div>
+      <tr>
+        <td><strong>${escapeHtml(humanizeIdentifier(String(table.filename || "").replace(/\.csv$/i, "")) || "Table")}</strong></td>
+        <td>${escapeHtml(String(table.row_count ?? 0))}</td>
+        <td>${escapeHtml(normalizedTableAvailabilityLabel(table))}</td>
+        <td>${escapeHtml(Number(table.row_count || 0) > 0 ? "Ready" : normalizedTableReason(table))}</td>
+      </tr>
     `).join("")
-    : `<div class="meta">No normalized analytics files exist yet.</div>`;
+    : `<tr><td colspan="4" class="meta">No normalized analytics files exist yet.</td></tr>`;
+  const sourceResultHtml = Object.keys(sourceResults).length
+    ? Object.keys(sourceResults).sort().map((key) => {
+      const item = sourceResults[key] || {};
+      return `<div class="check"><strong>${escapeHtml(key)}</strong><div>${pill(item.status || "UNKNOWN")}</div></div>`;
+    }).join("")
+    : `<div class="meta">No analytics collector state has been recorded yet.</div>`;
 
   panel.innerHTML = `
-    <div class="summary-grid">
-      <div class="card"><strong>Display Name</strong><div class="meta">${escapeHtml(channel.display_name || "")}</div></div>
-      <div class="card"><strong>Handle</strong><div class="meta">${escapeHtml(channel.youtube_handle || "Not set")}</div></div>
-      <div class="card"><strong>Channel ID</strong><div class="meta mono">${escapeHtml(channel.youtube_channel_id || "")}</div></div>
-      <div class="card"><strong>Status</strong><div>${pill(channel.status || "UNKNOWN")}</div></div>
-      <div class="card"><strong>Last Metrics Sync</strong><div class="meta">${escapeHtml(formatTime(channel.last_metrics_sync_at))}</div></div>
-      <div class="card"><strong>Projects</strong><div class="meta">${escapeHtml(String(summary.project_count ?? channel.project_count ?? 0))}</div></div>
-      <div class="card"><strong>Reporting</strong><div>${pill(reporting.status || "UNAVAILABLE")}</div></div>
-      <div class="card"><strong>Metrics File</strong><div>${pill(summary.metrics && summary.metrics.exists ? "FOUND" : "MISSING")}</div></div>
-      <div class="card"><strong>Learnings File</strong><div>${pill(summary.learnings && summary.learnings.exists ? "FOUND" : "MISSING")}</div></div>
-    </div>
-    <div class="card">
-      <strong>Reporting Detail</strong>
-      <div class="meta">Available metrics: ${escapeHtml(availableMetrics)}</div>
-      <div class="meta">Pending metrics: ${escapeHtml(pendingMetrics)}</div>
-      <div class="meta">Last checked: ${escapeHtml(formatTime(reporting.last_checked_at))}</div>
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+    <section class="panel">
+      <div class="workspace-block-header">
         <div>
-          <strong>Analytics Collector</strong>
-          <div class="meta">Read-only status, focused capability discovery, structured analytics sync, and export for the selected channel.</div>
+          <h3 style="margin:0">Analytics</h3>
+          <div class="meta">${escapeHtml(analyticsSummary.detail)}</div>
         </div>
-        <div>${analyticsStatusPill}</div>
+        <div>${pill(state.isLoadingChannelAnalytics ? "LOADING" : analyticsStatusTone(analyticsSummary.label))}</div>
+      </div>
+      <div class="mini-grid" style="margin-top:12px">
+        <div class="card"><strong>Status</strong><div class="meta">${escapeHtml(analyticsSummary.label)}</div></div>
+        <div class="card"><strong>Last completed sync</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_completed_sync_at))}</div></div>
+        <div class="card"><strong>Tables with data</strong><div class="meta">${escapeHtml(String(tablesWithDataCount))}</div></div>
+        <div class="card"><strong>Bulk reports</strong><div class="meta">${escapeHtml(generatedReportsSummary(analytics))}</div></div>
       </div>
       <div class="row" style="margin-top:12px">
-        <button id="discoverAnalyticsBtn" class="secondary"${discoverModel.disabled ? " disabled" : ""}>${escapeHtml(discoverModel.label)}</button>
-        <button id="syncAnalyticsCollectorBtn" class="secondary"${syncModel.disabled ? " disabled" : ""}>${escapeHtml(syncModel.label)}</button>
-        <a id="downloadAnalyticsZipLink" href="${escapeHtml(analytics && analytics.export_url ? analytics.export_url : "#")}"${analytics && analytics.export_url ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(analytics && analytics.export_url ? "Download Analytics ZIP" : "Analytics ZIP unavailable")}</a>
+        <button id="syncAnalyticsCollectorBtn" class="primary"${syncModel.disabled ? " disabled" : ""}>${escapeHtml(syncModel.label)}</button>
+        <a id="downloadAnalyticsZipLink" class="action-link success" href="${escapeHtml(analytics && analytics.export_url ? analytics.export_url : "#")}"${analytics && analytics.export_url ? " download" : " aria-disabled=\"true\""} rel="noreferrer">${escapeHtml(downloadLabel)}</a>
       </div>
-      <div class="meta" style="margin-top:12px">${escapeHtml(discoverModel.helper)}</div>
-      <div class="meta">${escapeHtml(syncModel.helper)}</div>
-      ${analyticsFeedbackHtml}
-      ${state.channelAnalyticsError ? `<div class="notice" style="margin-top:12px"><strong>Analytics Status Error</strong><span class="meta">${escapeHtml(state.channelAnalyticsError)}</span></div>` : ""}
-      <div class="summary-grid" style="margin-top:12px">
-        <div class="card"><strong>Last Attempt</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_attempt_at))}</div></div>
-        <div class="card"><strong>Last Completed Sync</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_completed_sync_at))}</div></div>
-        <div class="card"><strong>Last Successful Sync</strong><div class="meta">${escapeHtml(formatTime(analytics && analytics.last_successful_sync_at))}</div></div>
-        <div class="card"><strong>Reports Downloaded</strong><div class="meta">${escapeHtml(String(analytics && analytics.ingested_report_count ? analytics.ingested_report_count : 0))}</div></div>
-        <div class="card"><strong>Report Types</strong><div class="meta">${escapeHtml(String(capabilityCounts.AVAILABLE || 0))} available / ${escapeHtml(String(capabilityCounts.ERROR || 0))} errors</div></div>
-        <div class="card"><strong>Generated Reports</strong><div class="meta">${escapeHtml(String(reportReadinessCounts.READY || 0))} ready / ${escapeHtml(String(reportReadinessCounts.PENDING || 0))} pending / ${escapeHtml(String(reportReadinessCounts.ERROR || 0))} errors</div></div>
-        <div class="card"><strong>Query Groups</strong><div class="meta">${escapeHtml(String(analyticsCounts.SUCCESS || 0))} success / ${escapeHtml(String(analyticsCounts.PARTIAL || 0))} partial / ${escapeHtml(String(analyticsCounts.ERROR || 0))} errors</div></div>
-        <div class="card"><strong>Warnings</strong><div class="meta">${escapeHtml(String((analyticsCounts.UNAVAILABLE || 0) + (analyticsCounts.UNAUTHORIZED || 0) + (analyticsCounts.UNSUPPORTED || 0) + (analyticsCounts.ERROR || 0)))}</div></div>
-      </div>
-      <div class="card" style="margin-top:12px">
-        <strong>Source Status</strong>
-        <div class="stack" style="margin-top:12px">${sourceResultHtml}</div>
-      </div>
-      <div class="card" style="margin-top:12px">
-        <strong>Normalized Tables</strong>
-        <div class="stack" style="margin-top:12px">${normalizedTableHtml}</div>
-      </div>
-    </div>
-    ${disconnected ? `
-      <div class="notice">
-        <strong>Channel disconnected</strong>
-        <span class="meta">This selected channel is not currently connected. Read-only details are visible, but workflow actions remain blocked until later cutover phases.</span>
-      </div>
-    ` : ""}
+      <div class="meta" style="margin-top:12px">${escapeHtml(syncModel.helper)}</div>
+      ${feedbackHtml}
+      ${state.channelAnalyticsError ? `<div class="notice"><strong>Analytics Status Error</strong><span class="meta">${escapeHtml(state.channelAnalyticsError)}</span></div>` : ""}
+    </section>
+    <section class="panel">
+      <h3>Normalized Tables</h3>
+      <table class="compact-table">
+        <thead>
+          <tr>
+            <th>Table</th>
+            <th>Rows</th>
+            <th>Status</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody>${normalizedTableHtml}</tbody>
+      </table>
+    </section>
+    <section class="panel">
+      <details>
+        <summary>Technical Details</summary>
+        <div class="stack" style="margin-top:12px">
+          <div class="row">
+            <button id="discoverAnalyticsBtn" class="secondary"${discoverModel.disabled ? " disabled" : ""}>${escapeHtml(discoverModel.label)}</button>
+          </div>
+          <div class="meta">${escapeHtml(discoverModel.helper)}</div>
+          <div class="check"><strong>Report Type Availability</strong><div class="meta">${escapeHtml(String(capabilityCounts.AVAILABLE || 0))} available / ${escapeHtml(String(capabilityCounts.ERROR || 0))} error</div></div>
+          <div class="check"><strong>Generated Report Readiness</strong><div class="meta">${escapeHtml(String(reportReadinessCounts.READY || 0))} ready / ${escapeHtml(String(reportReadinessCounts.PENDING || 0))} pending / ${escapeHtml(String(reportReadinessCounts.ERROR || 0))} error</div></div>
+          <div class="check"><strong>Query Groups</strong><div class="meta">${escapeHtml(String(queryCounts.SUCCESS || 0))} success / ${escapeHtml(String(queryCounts.EMPTY || 0))} empty / ${escapeHtml(String(queryCounts.UNAVAILABLE || 0))} unavailable / ${escapeHtml(String(queryCounts.UNAUTHORIZED || 0))} unauthorized / ${escapeHtml(String(queryCounts.ERROR || 0))} error</div></div>
+          <div class="check"><strong>Source Status</strong><div class="meta">${escapeHtml(Object.keys(sourceResults).length ? "Loaded" : "Not recorded yet")}</div></div>
+          <div class="stack">${sourceResultHtml}</div>
+        </div>
+      </details>
+    </section>
   `;
 }
 
 function render() {
+  renderWorkspaceIntro();
   syncChannelSelector();
+  renderAppHeaderState();
+  renderWorkspaceNavigation();
   renderChannelState();
   renderActionState();
-  renderSelectedChannelSummary();
+  renderOverviewWorkspace();
   renderProjectListState();
   renderProjectCreateState();
   renderProjectDetailState();
+  renderAnalyticsWorkspace();
 }
 
 async function refreshSelectedSummaryForAction(slug) {
@@ -3446,17 +4055,26 @@ async function loadProjectsForChannel(slug, options = {}) {
     if (requestId !== state.projectListRequestId || slug !== state.selectedChannelSlug) return;
     const projects = Array.isArray(data.projects) ? data.projects : [];
     state.projects = projects;
-    let nextSelectedSlug = state.selectedProjectSlug;
+    const savedProjectSlug = savedProjectSlugForChannel(slug);
+    const hasProject = (projectSlug) => !!projectSlug && projects.some((item) => item.project_slug === projectSlug);
+    let nextSelectedSlug = null;
     if (options.preferProjectSlug && projects.some((item) => item.project_slug === options.preferProjectSlug)) {
       nextSelectedSlug = options.preferProjectSlug;
-    } else if (nextSelectedSlug && !projects.some((item) => item.project_slug === nextSelectedSlug)) {
-      nextSelectedSlug = null;
+    } else if (hasProject(state.selectedProjectSlug)) {
+      nextSelectedSlug = state.selectedProjectSlug;
+    } else if (hasProject(savedProjectSlug)) {
+      nextSelectedSlug = savedProjectSlug;
+    } else if (savedProjectSlug) {
+      rememberProjectSlugForChannel(slug, null);
+    } else if (projects.length === 1) {
+      nextSelectedSlug = projects[0].project_slug;
     }
     const selectionChanged = nextSelectedSlug !== state.selectedProjectSlug;
     if (selectionChanged) {
       clearProjectSelectionState();
       state.selectedProjectSlug = nextSelectedSlug;
     }
+    rememberProjectSlugForChannel(slug, nextSelectedSlug);
     render();
     if (state.selectedProjectSlug) {
       await loadSelectedProjectDetail(state.selectedProjectSlug, slug);
@@ -4418,19 +5036,19 @@ function refreshStatus() {
 document.getElementById("channelSelect").addEventListener("change", (event) => {
   setSelectedChannelSlug(event.target.value || null);
 });
-document.getElementById("workflowBinding").addEventListener("change", () => {
-  render();
-});
 document.getElementById("connectChannelBtn").addEventListener("click", startOAuthAction);
 document.getElementById("syncMetricsBtn").addEventListener("click", syncMetricsAction);
-document.getElementById("refreshProjectsBtn").addEventListener("click", refreshProjectsAction);
-document.getElementById("createBtn").addEventListener("click", createProjectAction);
 document.getElementById("saveTranscriptBtn").addEventListener("click", saveTranscriptAction);
 document.getElementById("validateProjectBtn").addEventListener("click", validateProjectAction);
 document.getElementById("transcript").addEventListener("input", (event) => {
   state.transcriptDraft = event.target.value;
 });
-document.getElementById("summaryPanel").addEventListener("click", (event) => {
+document.getElementById("workspaceNav").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-workspace]");
+  if (!button) return;
+  setActiveWorkspace(button.getAttribute("data-workspace") || "overview");
+});
+document.getElementById("analyticsPanel").addEventListener("click", (event) => {
   const discoverButton = event.target.closest("#discoverAnalyticsBtn");
   if (discoverButton) {
     discoverAnalyticsAction();
@@ -4443,8 +5061,41 @@ document.getElementById("summaryPanel").addEventListener("click", (event) => {
 });
 document.getElementById("projectListPanel").addEventListener("click", (event) => {
   const button = event.target.closest("[data-project-slug]");
-  if (!button) return;
-  setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
+  if (button) {
+    setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
+    return;
+  }
+  if (event.target.id === "refreshProjectsBtn") {
+    refreshProjectsAction();
+    return;
+  }
+  if (event.target.id === "createBtn") {
+    createProjectAction();
+  }
+});
+document.getElementById("projectListPanel").addEventListener("change", (event) => {
+  if (event.target.id === "workflowBinding") {
+    render();
+  }
+});
+document.getElementById("projectDetailPanel").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-project-slug]");
+  if (button) {
+    setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
+    return;
+  }
+  if (event.target.id === "refreshProjectsBtn") {
+    refreshProjectsAction();
+    return;
+  }
+  if (event.target.id === "createBtn") {
+    createProjectAction();
+  }
+});
+document.getElementById("projectDetailPanel").addEventListener("change", (event) => {
+  if (event.target.id === "workflowBinding") {
+    render();
+  }
 });
 document.getElementById("projectDetailPanel").addEventListener("change", (event) => {
   if (event.target.id === "workflowStepSelect") {
@@ -4488,6 +5139,16 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
   }
   if (event.target.id === "rejectCandidateBtn") {
     candidateDecisionAction("REJECT");
+  }
+});
+document.getElementById("summaryPanel").addEventListener("click", (event) => {
+  if (event.target.id === "recommendedActionBtn") {
+    const action = recommendedNextAction();
+    if (action.download_url) {
+      window.location.href = action.download_url;
+      return;
+    }
+    setActiveWorkspace(action.workspace || "overview");
   }
 });
 
