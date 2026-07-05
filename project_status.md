@@ -12,13 +12,29 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Phase 10A.4 - Final Content Workflow Compression And Status Repair
+Project Closeout - Maintenance Mode
 
 ## Phase Status
-IMPLEMENTED_LOCAL_VERIFICATION_COMPLETE
+CORE_PROJECT_COMPLETE
 
 ## Approval
-PENDING_TECH_LEAD_REVIEW
+LIVE_VERIFIED_COMMITTED_PUSHED
+
+## Final Repository Baseline
+- Branch: `master`
+- `HEAD = origin/master = 76bcff92d5a79af2845cf19f0a7c977b300eb799`
+- Latest commit subject: `feat: simplify operator workspace ui`
+
+## Final Verification Summary
+- Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`91` run, `91` passed, `0` failures, `0` errors)
+- Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`13` run, `13` passed, `0` failures, `0` errors)
+- Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
+- Live operator UI verification: `PASS`
+
+## Final Project State
+- `CORE_PROJECT_COMPLETE`
+- `MAINTENANCE_MODE`
+- `SAFE_TO_STOP`
 
 ## Phase 10A Scope
 - Redesigned the embedded UI in `scripts/ui_server.py` around three operator-first work areas: `Overview`, `Content Workflow`, and `Analytics`, while keeping the existing single-server architecture and `/api/v2/` backend contract unchanged.
@@ -42,12 +58,21 @@ PENDING_TECH_LEAD_REVIEW
 - Focused compile verification passed: `python -m py_compile scripts/ui_server.py tests/test_ui_frontend_contract.py`.
 - Focused embedded UI contract/runtime suite passed: `python -m unittest tests.test_ui_frontend_contract` (`91` run, `91` passed, `0` failures, `0` errors).
 - Phase 10A.4 coverage now verifies the three primary navigation areas, deterministic overview action logic, operator-first header wording, hidden raw project slugs in the default header, context-aware `Workflow Status` versus `Analytics Status`, workspace-specific introduction copy, compact workflow rail rendering, single-step expansion, collapsed `Technical Details`, production handoff visibility, one production download action only for completed projects, one completion message only, selected approved-step semantics, selected-project persistence across workspace switching, channel-summary refresh, project-list refresh, sole-project auto-selection, stale saved-project clearing, read-only project restoration, orphan create-state removal from the default workflow view, completion-first ordering for `PRODUCTION_READY` projects, redundant project-summary removal, disabled/busy action presentation, project-management collapse by default, channel/project selection, workflow loading and step switching, prompt bundle behavior, parse/preview behavior, candidate save/approve/reject controls, stale/conflict handling, OAuth/connect wiring, safe rendering, and duplicate-submission blocking.
-- No live API calls, analytics sync, reporting job creation, runtime workflow mutation, runtime analytics mutation, server restart, commit, or push occurred during the implementation pass.
+- Final live operator verification passed after the implementation sequence was completed and published.
+- No workflow runtime, analytics runtime, token file, or production artifact was mutated by Phase 10A.
 
 ## Phase 10A Repository State
-- Changed files are limited to `scripts/ui_server.py`, `tests/test_ui_frontend_contract.py`, `project_status.md`, `changelog.md`, and `next_task.md`.
+- Phase 10A through 10A.4 is complete, live-verified, committed, and pushed on `master`.
+- Final synchronized baseline is `76bcff92d5a79af2845cf19f0a7c977b300eb799` (`feat: simplify operator workspace ui`).
 - `implement.docx` remains unrelated and untracked.
 - Approved workflow runtime, analytics runtime, production artifacts, revisions, decisions, workflow state, token files, and protected channel data remain outside this implementation scope and were not modified.
+
+## Resume Instructions
+- Verify the repository is on branch `master` and confirm Git status before resuming work.
+- Synchronize local `master` with the shared baseline before starting a new scoped task.
+- Start `scripts.ui_server` on port `8766` for normal operator use.
+- Do not affect the unrelated local service on port `8765`.
+- Resume with normal operation or define and approve a new scoped development phase before making additional changes.
 
 ## Phase 9 Scope
 - Added `scripts/channel_analytics_collector.py` as a focused analytics collection, normalization, status, and export module for canonical channel workspaces.
