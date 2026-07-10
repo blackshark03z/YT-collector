@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Task 10C Closeout - Maintenance Mode
+Task 10D Closeout - Maintenance / Operator Mode
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
@@ -22,10 +22,17 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 
 ## Final Repository Baseline
 - Branch: `master`
+- Task 10D code baseline: `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580`
+- Task 10D code subject: `feat: prioritize next workflow action`
 - Task 10C code baseline: `1c399940ee9b72bb5e0508776674cd0ca6563cc2`
 - Task 10C code subject: `feat: streamline project creation flow`
 
 ## Final Verification Summary
+- Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`113` run, `113` passed, `0` failures, `0` errors)
+- Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
+- Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
+- Non-mutating transcript-missing visual fixture verification: `PASS`
+- Ancient Rome live completion-first regression: `PASS`
 - Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`105` run, `105` passed, `0` failures, `0` errors)
 - Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
 - Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
@@ -36,6 +43,31 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 - `CORE_PROJECT_COMPLETE`
 - `MAINTENANCE_MODE`
 - `SAFE_TO_STOP`
+
+## Task 10D Closeout
+- Task 10D and Task 10D.1 are complete. The code repair was committed and pushed as `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580` (`feat: prioritize next workflow action`).
+- Repaired the root cause where the transcript input lived below the workflow-detail surface and the first required operator action was visually buried for transcript-required Prompt 1 projects.
+- Added a dedicated `projectTranscriptPanel` before `projectDetailPanel` so the Manual Transcript action now appears first when the current workflow state truly requires transcript input.
+- Transcript-required priority is resolved from supported workflow/project state only; it is not tied to any hard-coded project slug.
+- Preserved one editable transcript textarea only, with valid label association and the existing canonical backend transcript-save route/payload.
+- Preserved project-scoped in-memory transcript drafts so project switching does not leak drafts and safe rerenders preserve multiline content exactly.
+- Focus now occurs on the correct state/project transitions into transcript-required workflow work, instead of being stolen on ordinary rerenders.
+- Completed-transcript and production-ready workflows no longer keep the transcript editor visually dominant.
+- Preserved production-ready completion-first behavior for Ancient Rome, including the compact approved Prompt 1-7 rail and `Download Production Package` handoff.
+- Reworked bundle-state gating so a clean transcript-required no-bundle state does not show `Bundle Error`, does not promote `Build Complete Bundle` as the first action, and keeps copy/preview unavailable until a valid bundle exists.
+- Non-mutating visual fixture verification passed using the actual current frontend HTML/JavaScript with mocked supported read API state only:
+  - viewport `1366 x 768`
+  - `projectTranscriptPanel` top `478.4`
+  - `projectDetailPanel` top `877.4`
+  - one transcript textarea
+  - textarea editable
+  - `Save Transcript` button visible without scrolling with bottom `725.8`
+  - textarea received focus
+  - multiline draft survived safe rerender exactly
+  - no premature `Bundle Error`
+- Ancient Rome live regression passed with completion-first handoff preserved.
+- Verification did not create a real project, did not submit a real transcript, did not create a revision or decision, did not mutate workflow state, and did not mutate analytics runtime.
+- Maintenance/operator mode remains valid after the Task 10D UI repair.
 
 ## Task 10C Closeout
 - Task 10C and Task 10C.1 are complete. The code repair was committed and pushed as `1c399940ee9b72bb5e0508776674cd0ca6563cc2` (`feat: streamline project creation flow`).

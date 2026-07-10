@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Task 10D - Next-Action-First Workflow UX Closeout
+- Closed Task 10D and Task 10D.1 after the next-action-first workflow UI repair was committed and pushed as `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580` (`feat: prioritize next workflow action`).
+- Recorded the root cause: the transcript form still lived outside the effective workflow action flow and lower visual ordering kept the first required Prompt 1 operator step buried under workflow-detail surfaces.
+- Added a separate `projectTranscriptPanel` before workflow detail so transcript-required projects now see Manual Transcript before Workflow Steps, Selected Step Detail, and bundle controls.
+- Preserved a single editable transcript textarea, project-scoped in-memory draft preservation, safe line-break retention, and state-transition-safe focus behavior without introducing localStorage persistence for transcript content.
+- Kept duplicate transcript submission blocked while pending and preserved the existing canonical transcript-save route/payload.
+- Reworked bundle-state gating so clean no-bundle transcript-required views do not show premature `Bundle Error`, do not promote build/copy/preview before prerequisites, and still preserve real build-error visibility when an actual bundle action fails.
+- Preserved production-ready regression behavior so Ancient Rome remains completion-first with `Workflow completed`, the compact approved Prompt 1-7 rail, and `Download Production Package` ahead of transcript controls.
+- Recorded the accepted non-mutating fixture and live verification evidence:
+  - actual current frontend HTML/JS used
+  - mocked supported read API state only
+  - viewport `1366 x 768`
+  - one editable textarea
+  - visible `Save Transcript` without scrolling
+  - no premature bundle error
+  - multiline draft survives safe rerender
+  - Ancient Rome live regression `PASS`
+- Recorded the final test gate:
+  - frontend `113` pass
+  - analytics collector `19` pass
+  - production export `6` pass
+- This closeout records the verified UX outcome only; it does not add runtime mutation, project creation, transcript submission, analytics sync, OAuth reconnect, or server/process control changes.
+
 ### Task 10C - Operator-First Project Creation UX Closeout
 - Closed Task 10C and Task 10C.1 after the operator-first project-creation UX repair was committed and pushed as `1c399940ee9b72bb5e0508776674cd0ca6563cc2` (`feat: streamline project creation flow`).
 - Added a top project action bar with `+ New Project` and `Change Project`, and kept the completed-project handoff below that action area.
