@@ -201,10 +201,14 @@ globalThis.window = window;
   "window",
   "actionState",
   "refreshProjectsBtn",
-  "createBtn",
-  "url",
-  "name",
-  "workflowBinding",
+  "openCreateProjectBtn",
+  "openChangeProjectBtn",
+  "submitCreateProjectBtn",
+  "cancelCreateProjectBtn",
+  "createProjectUrlInput",
+  "createProjectNameInput",
+  "createProjectChannelDisplay",
+  "createProjectWorkflowBinding",
   "projectListState",
   "projectListPanel",
   "projectCreateState",
@@ -569,8 +573,9 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn('workflow_id: workflowOption.workflow_id,', self.html)
         self.assertIn('workflow_version: workflowOption.workflow_version', self.html)
         self.assertIn("payload.project_name = projectName;", self.html)
-        self.assertIn('Select a workflow version before creating a project.', self.html)
-        self.assertIn('No server-approved workflow options are available for the selected channel.', self.html)
+        self.assertIn('Select a workflow before creating a project.', self.html)
+        self.assertIn('No project workflow is available for this channel.', self.html)
+        self.assertIn('Enter a supported YouTube video URL.', self.html)
         create_action = self.html[self.html.index("async function createProjectAction()"):self.html.index("async function loadSelectedProjectDetail(")]
         self.assertNotIn('workflow_definition_sha256', create_action)
         self.assertNotIn('workflow_definition_path', create_action)
@@ -579,19 +584,20 @@ class UiFrontendContractTests(unittest.TestCase):
 
     def test_workflow_selector_uses_server_owned_options_without_hidden_default(self):
         for token in [
-            '<label for="workflowBinding">Workflow Version</label>',
-            'workflowBinding',
+            '<label for="createProjectWorkflowBinding">Workflow Version</label>',
+            'createProjectWorkflowBinding',
             'available_workflows',
             'function channelWorkflowOptions()',
+            'function createEligibleWorkflowOptions()',
             'function selectedCreateWorkflowOption()',
-            'workflowSelect.innerHTML = optionRows.join("")',
-            'workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;',
+            'selectedCreateWorkflowValue()',
+            'workflowOptionLabel(option)',
+            'workflowSelect.disabled = create.workflowDisabled;',
             "return `${option.workflow_id}@@${option.workflow_version}`;",
-            'const label = `${option.display_name || option.workflow_id} v${option.workflow_version}`;',
+            'return `${option.display_name || option.workflow_id} - v${option.workflow_version}`;',
             'document.getElementById("projectListPanel").addEventListener("change", (event) => {',
         ]:
             self.assertIn(token, self.html)
-        self.assertNotIn('workflowSelect.value = workflowOptions[0]', self.html)
         self.assertNotIn('value="mist_of_ages_assisted_content@@2"', self.html)
 
     def test_transcript_and_validation_use_exact_v2_project_routes(self):
@@ -923,6 +929,249 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result["selectedProjectSlug"], "project-a")
         self.assertEqual(result["selectedProjectText"], "Project A")
+
+    def test_project_action_bar_renders_before_completed_handoff(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            state.selectedProjectProductionPackage = { lifecycle: "PRODUCTION_READY", approved_group_id: "grp_000007", state_revision: 14, ready_for_export: true, download_url: "/download", artifacts: [] };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-alpha", workflow_version: "2", workflow_definition_sha256: "abc123", binding_source: "PROJECT_JSON" },
+              definition: { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", execution_mode: "ASSISTED", prompt_set: { status: "AVAILABLE", bundle_available: true }, steps: [{ step_id: "prompt_7", order: 7, display_name: "Final", required_model: "Claude", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: [], resulting_lifecycle_state: "PRODUCTION_READY", constraints: [] }] },
+              state: { current_step_id: "prompt_7", current_step_status: "APPROVED", next_step_id: null, current_lifecycle_state: "PRODUCTION_READY", state_revision: 14, step_states: { prompt_7: { status: "APPROVED", approved_group_id: "grp_000007", candidate_group_id: null } } },
+              available_actions: {},
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_7";
+            render();
+            return {
+              listHtml: document.getElementById("projectListPanel").innerHTML,
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertIn('id="openCreateProjectBtn"', result["listHtml"])
+        self.assertIn('id="openChangeProjectBtn"', result["listHtml"])
+        self.assertIn("Workflow completed", result["detailHtml"])
+
+    def test_only_one_create_project_form_exists_in_dom(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            openCreateProjectPanel();
+            await flush();
+            const html = document.getElementById("projectListPanel").innerHTML;
+            return { formCount: (html.match(/id="createProjectPanel"/g) || []).length };
+            """
+        )
+        self.assertEqual(result["formCount"], 1)
+
+    def test_create_project_url_input_is_editable_and_focused_when_panel_opens(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            openCreateProjectPanel();
+            await flush();
+            const input = document.getElementById("createProjectUrlInput");
+            return {
+              disabled: input.disabled,
+              readonly: input.getAttribute("readonly"),
+              activeId: document.activeElement && document.activeElement.id,
+            };
+            """
+        )
+        self.assertFalse(result["disabled"])
+        self.assertIsNone(result["readonly"])
+        self.assertEqual(result["activeId"], "createProjectUrlInput")
+
+    def test_existing_selected_project_does_not_disable_create_project_url_input(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            openCreateProjectPanel();
+            await flush();
+            return { disabled: document.getElementById("createProjectUrlInput").disabled };
+            """
+        )
+        self.assertFalse(result["disabled"])
+
+    def test_create_project_url_typing_and_validation_state_update(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            openCreateProjectPanel();
+            await flush();
+            const input = document.getElementById("createProjectUrlInput");
+            input.value = "notaurl";
+            state.createProjectUrlDraft = input.value;
+            render();
+            const invalidHtml = document.getElementById("projectListPanel").innerHTML;
+            input.value = "https://www.youtube.com/watch?v=VIDEO12345A";
+            state.createProjectUrlDraft = input.value;
+            render();
+            return {
+              invalidHtml,
+              buttonDisabledAfterValid: document.getElementById("submitCreateProjectBtn").disabled,
+              finalValue: document.getElementById("createProjectUrlInput").value,
+            };
+            """
+        )
+        self.assertIn("Enter a supported YouTube video URL.", result["invalidHtml"])
+        self.assertFalse(result["buttonDisabledAfterValid"])
+        self.assertEqual(result["finalValue"], "https://www.youtube.com/watch?v=VIDEO12345A")
+
+    def test_supported_watch_youtu_be_and_shorts_urls_enable_create(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            openCreateProjectPanel();
+            await flush();
+            const cases = [
+              "https://www.youtube.com/watch?v=VIDEO12345A",
+              "https://youtu.be/VIDEO12345A",
+              "https://www.youtube.com/shorts/VIDEO12345A",
+            ];
+            const results = [];
+            for (const value of cases) {
+              state.createProjectUrlDraft = value;
+              render();
+              results.push({ value, disabled: document.getElementById("submitCreateProjectBtn").disabled });
+            }
+            return { results };
+            """
+        )
+        self.assertEqual([item["disabled"] for item in result["results"]], [False, False, False])
+
+    def test_cancel_create_panel_preserves_current_selected_project(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            closeCreateProjectPanel();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              panelPresent: document.getElementById("projectListPanel").innerHTML.includes('id="createProjectPanel"'),
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-a")
+        self.assertFalse(result["panelPresent"])
+
+    def test_pending_create_submission_prevents_duplicate_requests(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            const deferred = makeDeferred();
+            fetchHandler = async (path, config) => {
+              if (path === "/api/v2/channels/channel-a/projects" && (config.method || "GET") === "POST") {
+                return await deferred.promise;
+              }
+              return jsonResponse({ projects: [] });
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            render();
+            createProjectAction();
+            await flush();
+            const disabledWhileBusy = document.getElementById("submitCreateProjectBtn").disabled;
+            createProjectAction();
+            await flush();
+            const postCalls = fetchCalls.filter((call) => call.path === "/api/v2/channels/channel-a/projects" && call.method === "POST").length;
+            deferred.resolve(jsonResponse({ project: { project_slug: "project-b", channel_slug: "channel-a" } }));
+            return { disabledWhileBusy, postCalls };
+            """
+        )
+        self.assertTrue(result["disabledWhileBusy"])
+        self.assertEqual(result["postCalls"], 1)
+
+    def test_create_project_failure_preserves_url_selected_project_and_error(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            state.selectedProjectSlug = "project-a";
+            fetchHandler = async (path, config) => {
+              if (path === "/api/v2/channels/channel-a/projects" && (config.method || "GET") === "POST") {
+                return errorResponse("INVALID_INPUT", "Could not create project.");
+              }
+              return jsonResponse({ projects: [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }] });
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            render();
+            await createProjectAction();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              savedValue: document.getElementById("createProjectUrlInput").value,
+              panelPresent: document.getElementById("projectListPanel").innerHTML.includes('id="createProjectPanel"'),
+              feedback: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-a")
+        self.assertEqual(result["savedValue"], "https://youtu.be/VIDEO12345A")
+        self.assertTrue(result["panelPresent"])
+        self.assertIn("Could not create project.", result["feedback"])
 
     def test_selected_project_survives_channel_summary_and_project_refresh(self):
         result = run_ui_runtime_scenario(
@@ -1320,7 +1569,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             """
         )
         self.assertNotIn("Create Status", result["workflowHtml"])
-        self.assertNotIn("<strong>Create</strong>", result["workflowHtml"].split("<summary>Create New Project</summary>")[0])
+        self.assertNotIn("<strong>Create</strong>", result["workflowHtml"].split('id="createProjectPanel"')[0])
         self.assertNotIn("Waiting", result["stateHtml"])
 
     def test_create_status_appears_only_inside_expanded_create_new_project(self):
@@ -1336,14 +1585,31 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             render();
             const html = document.getElementById("projectListPanel").innerHTML;
             return {
-              beforeCreateSummary: html.split("<summary>Create New Project</summary>")[0],
+              beforeCreateSummary: html.split('id="createProjectPanel"')[0],
               fullHtml: html,
             };
             """
         )
         self.assertNotIn("Create Status", result["beforeCreateSummary"])
         self.assertNotIn("<strong>Create</strong>", result["beforeCreateSummary"])
-        self.assertIn('id="projectCreateState"', result["fullHtml"])
+        self.assertNotIn('id="projectCreateState"', result["fullHtml"])
+
+        opened = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "workflow";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            render();
+            openCreateProjectPanel();
+            await flush();
+            return { html: document.getElementById("projectListPanel").innerHTML };
+            """
+        )
+        self.assertIn('id="projectCreateState"', opened["html"])
 
     def test_production_ready_completion_and_handoff_render_before_project_management_controls(self):
         result = run_ui_runtime_scenario(
@@ -1376,9 +1642,9 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             };
             """
         )
-        self.assertEqual(result["listHtml"], "")
-        self.assertLess(result["detailHtml"].index("Workflow completed"), result["detailHtml"].index("Project Management"))
-        self.assertLess(result["detailHtml"].index("Download Production Package"), result["detailHtml"].index("Change Project"))
+        self.assertIn("openCreateProjectBtn", result["listHtml"])
+        self.assertIn("openChangeProjectBtn", result["listHtml"])
+        self.assertLess(result["listHtml"].index("openCreateProjectBtn"), result["detailHtml"].index("Workflow completed"))
         self.assertIn("content.md", result["detailHtml"])
 
     def test_project_management_is_collapsed_by_default(self):
@@ -1398,9 +1664,10 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             };
             """
         )
-        self.assertIn("<summary>Change Project</summary>", result["html"])
-        self.assertIn("<summary>Create New Project</summary>", result["html"])
-        self.assertNotIn("<details open", result["html"])
+        self.assertIn('id="openCreateProjectBtn"', result["html"])
+        self.assertIn('id="openChangeProjectBtn"', result["html"])
+        self.assertNotIn('id="createProjectPanel"', result["html"])
+        self.assertNotIn('id="changeProjectPanel"', result["html"])
 
     def test_completed_workflow_defaults_to_completion_and_download_view(self):
         result = run_ui_runtime_scenario(
@@ -1653,7 +1920,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertIn("<summary>Workflow Details</summary>", result["html"])
         self.assertIn("<summary>Technical Details</summary>", result["html"])
         self.assertNotIn("<details open", result["html"])
-    def test_workflow_selector_loads_from_server_summary_and_create_stays_disabled_without_selection(self):
+    def test_multiple_workflows_require_selection_before_create(self):
         result = run_ui_runtime_scenario(
             """
             await flush();
@@ -1662,26 +1929,180 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               channel: { channel_slug: "channel-a", status: "CONNECTED" },
               available_workflows: [
                 { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow <Alpha>", version_status: "ACTIVE" },
-                { workflow_id: "wf-alpha", workflow_version: "1", display_name: "Workflow <Alpha>", version_status: "ACTIVE" },
+                { workflow_id: "wf-beta", workflow_version: "1", display_name: "Workflow <Beta>", version_status: "ACTIVE" },
               ],
             };
             render();
-            const select = document.getElementById("workflowBinding");
-            const button = document.getElementById("createBtn");
+            openCreateProjectPanel();
+            await flush();
+            const select = document.getElementById("createProjectWorkflowBinding");
+            const button = document.getElementById("submitCreateProjectBtn");
             return {
               createDisabled: button.disabled,
               selectDisabled: select.disabled,
-              selectHtml: select.innerHTML,
-              helperHtml: document.getElementById("projectCreateState").innerHTML,
+              selectedValue: select.value,
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
             };
             """
         )
         self.assertTrue(result["createDisabled"])
         self.assertFalse(result["selectDisabled"])
-        self.assertIn("Select a workflow</option>", result["selectHtml"])
-        self.assertIn("Workflow &lt;Alpha&gt; v2", result["selectHtml"])
-        self.assertIn("Workflow &lt;Alpha&gt; v1", result["selectHtml"])
-        self.assertIn("Select a workflow version before creating a project.", result["helperHtml"])
+        self.assertEqual(result["selectedValue"], "")
+        self.assertIn("Select a workflow before creating a project.", result["helperHtml"])
+        self.assertIn("Workflow &lt;Alpha&gt; - v2", result["helperHtml"])
+        self.assertIn("Workflow &lt;Beta&gt; - v1", result["helperHtml"])
+
+    def test_single_active_workflow_is_auto_selected_and_selector_hidden(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "mist_of_ages";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "mist_of_ages", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "mist_of_ages_assisted_content", workflow_version: "1", display_name: "Mist of Ages Assisted Content", version_status: "ACTIVE" },
+                { workflow_id: "mist_of_ages_assisted_content", workflow_version: "2", display_name: "Mist of Ages Assisted Content", version_status: "ACTIVE" },
+              ],
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://www.youtube.com/watch?v=VIDEO12345A";
+            render();
+            return {
+              selectedWorkflowValue: state.createProjectWorkflowValue,
+              selectedWorkflowVersion: selectedCreateWorkflowOption() && selectedCreateWorkflowOption().workflow_version,
+              createDisabled: document.getElementById("submitCreateProjectBtn").disabled,
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["selectedWorkflowValue"], "mist_of_ages_assisted_content@@2")
+        self.assertEqual(result["selectedWorkflowVersion"], "2")
+        self.assertNotIn('id="createProjectWorkflowBinding"', result["helperHtml"])
+        self.assertFalse(result["createDisabled"])
+        self.assertNotIn("mist_of_ages_assisted_content@@2", result["helperHtml"])
+
+    def test_multiple_workflow_selection_enables_create_after_choice(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "1", display_name: "Workflow Alpha", version_status: "ACTIVE" },
+                { workflow_id: "wf-beta", workflow_version: "2", display_name: "Workflow Beta", version_status: "ACTIVE" },
+              ],
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            render();
+            const before = document.getElementById("submitCreateProjectBtn").disabled;
+            state.createProjectWorkflowValue = "wf-beta@@2";
+            render();
+            return {
+              before,
+              after: document.getElementById("submitCreateProjectBtn").disabled,
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
+              visibleText: document.getElementById("projectListPanel").textContent,
+            };
+            """
+        )
+        self.assertTrue(result["before"])
+        self.assertFalse(result["after"])
+        self.assertIn("Workflow Beta - v2", result["helperHtml"])
+        self.assertNotIn("wf-beta@@2", result["visibleText"])
+
+    def test_no_active_workflow_keeps_url_editable_and_create_disabled(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "1", display_name: "Workflow Alpha", version_status: "DEPRECATED" },
+              ],
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            render();
+            return {
+              inputDisabled: document.getElementById("createProjectUrlInput").disabled,
+              createDisabled: document.getElementById("submitCreateProjectBtn").disabled,
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertNotIn('id="createProjectWorkflowBinding"', result["helperHtml"])
+        self.assertFalse(result["inputDisabled"])
+        self.assertTrue(result["createDisabled"])
+        self.assertIn("No project workflow is available for this channel.", result["helperHtml"])
+
+    def test_channel_change_clears_incompatible_selection_and_auto_selects_sole_workflow(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-alpha", workflow_version: "1", display_name: "Workflow Alpha", version_status: "ACTIVE" },
+                { workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" },
+              ],
+            };
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectUrlDraft = "https://youtu.be/VIDEO12345A";
+            state.createProjectWorkflowValue = "wf-alpha@@1";
+            state.selectedChannelSlug = "channel-b";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-b", status: "CONNECTED" },
+              available_workflows: [
+                { workflow_id: "wf-beta", workflow_version: "7", display_name: "Workflow Beta", version_status: "ACTIVE" },
+              ],
+            };
+            syncCreateProjectWorkflowSelection();
+            render();
+            return {
+              workflowValue: state.createProjectWorkflowValue,
+              workflowVersion: selectedCreateWorkflowOption() && selectedCreateWorkflowOption().workflow_version,
+              urlDraft: state.createProjectUrlDraft,
+              helperHtml: document.getElementById("projectListPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["workflowValue"], "wf-beta@@7")
+        self.assertEqual(result["workflowVersion"], "7")
+        self.assertEqual(result["urlDraft"], "https://youtu.be/VIDEO12345A")
+        self.assertNotIn('id="createProjectWorkflowBinding"', result["helperHtml"])
+
+    def test_existing_selected_project_does_not_block_sole_workflow_auto_selection(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedChannelSummary = {
+              channel: { channel_slug: "channel-a", display_name: "Channel A", status: "CONNECTED" },
+              available_workflows: [{ workflow_id: "wf-alpha", workflow_version: "2", display_name: "Workflow Alpha", version_status: "ACTIVE" }],
+            };
+            state.projects = [{ project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY" }];
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "READY", runnable: true } };
+            openCreateProjectPanel();
+            await flush();
+            return {
+              selectedProjectSlug: state.selectedProjectSlug,
+              workflowValue: state.createProjectWorkflowValue,
+              createDisabledBeforeUrl: document.getElementById("submitCreateProjectBtn").disabled,
+            };
+            """
+        )
+        self.assertEqual(result["selectedProjectSlug"], "project-a")
+        self.assertEqual(result["workflowValue"], "wf-alpha@@2")
+        self.assertTrue(result["createDisabledBeforeUrl"])
 
     def test_create_project_sends_only_selected_workflow_id_and_version(self):
         result = run_ui_runtime_scenario(
@@ -1769,8 +2190,10 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               return jsonResponse({ channels: [] });
             };
             render();
-            document.getElementById("url").value = "https://youtube.com/watch?v=VIDEO12345A";
-            document.getElementById("workflowBinding").value = "wf-alpha@@2";
+            openCreateProjectPanel();
+            await flush();
+            document.getElementById("createProjectUrlInput").value = "https://youtube.com/watch?v=VIDEO12345A";
+            state.createProjectUrlDraft = "https://youtube.com/watch?v=VIDEO12345A";
             render();
             await createProjectAction();
             await flush();
@@ -1781,7 +2204,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             }
             const createCall = fetchCalls.find((call) => call.path === "/api/v2/channels/channel-a/projects" && call.method === "POST");
             return {
-              createDisabledAfterSelection: document.getElementById("createBtn").disabled,
+              createPanelStillOpen: document.getElementById("projectListPanel").innerHTML.includes('id="createProjectPanel"'),
               createBody: JSON.parse(createCall.body),
               feedback: state.projectFeedback.text,
               workflowSummaryVisible: document.getElementById("projectDetailPanel").innerHTML.includes("Workflow Alpha"),
@@ -1789,7 +2212,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             };
             """
         )
-        self.assertFalse(result["createDisabledAfterSelection"])
+        self.assertFalse(result["createPanelStillOpen"])
         self.assertEqual(
             result["createBody"],
             {
@@ -1830,19 +2253,22 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               ],
             };
             render();
-            document.getElementById("workflowBinding").value = "wf-alpha@@2";
+            openCreateProjectPanel();
+            await flush();
+            state.createProjectWorkflowValue = "wf-alpha@@2";
             render();
             setSelectedChannelSlug("channel-b");
             await flush();
-            const select = document.getElementById("workflowBinding");
+            openCreateProjectPanel();
+            await flush();
+            const select = document.getElementById("createProjectWorkflowBinding");
             return {
               selectedChannelSlug: state.selectedChannelSlug,
               selectedChannelSummary: state.selectedChannelSummary,
               selectedProjectSlug: state.selectedProjectSlug,
               selectValue: select.value,
               selectDisabled: select.disabled,
-              createDisabled: document.getElementById("createBtn").disabled,
-              selectHtml: select.innerHTML,
+              createDisabled: document.getElementById("submitCreateProjectBtn").disabled,
             };
             """
         )
@@ -1852,7 +2278,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertIsNone(result["selectedProjectSlug"])
         self.assertTrue(result["selectDisabled"])
         self.assertTrue(result["createDisabled"])
-        self.assertNotIn("wf-alpha@@2", result["selectHtml"])
+        self.assertEqual(result["selectValue"], "")
 
     def test_step_change_build_copy_and_inert_bundle_preview(self):
         result = run_ui_runtime_scenario(

@@ -1710,6 +1710,13 @@ const state = {
   pastedOutputDraft: "",
   parsedOutputResult: null,
   parsedOutputError: "",
+  isCreateProjectPanelOpen: false,
+  isChangeProjectPanelOpen: false,
+  createProjectUrlDraft: "",
+  createProjectNameDraft: "",
+  createProjectWorkflowValue: "",
+  createProjectFocusPending: false,
+  workflowStartFocusPending: false,
   transcriptDraft: "",
   isLoadingChannels: false,
   isLoadingSummary: false,
@@ -2254,8 +2261,42 @@ function channelWorkflowOptions() {
   );
 }
 
+function createEligibleWorkflowOptions() {
+  const options = channelWorkflowOptions();
+  return options.filter((item) => String(item.version_status || "").toUpperCase() === "ACTIVE");
+}
+
+function compareWorkflowVersions(left, right) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber) && String(leftNumber) === String(left) && String(rightNumber) === String(right)) {
+    return leftNumber - rightNumber;
+  }
+  return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function preferredWorkflowOption(options) {
+  if (!options.length) return null;
+  return options.slice().sort((left, right) => compareWorkflowVersions(left.workflow_version, right.workflow_version)).slice(-1)[0];
+}
+
+function createSelectableWorkflowOptions() {
+  const options = createEligibleWorkflowOptions();
+  if (options.length <= 1) return options;
+  const workflowIds = Array.from(new Set(options.map((item) => item.workflow_id)));
+  if (workflowIds.length === 1) {
+    const preferred = preferredWorkflowOption(options);
+    return preferred ? [preferred] : [];
+  }
+  return options;
+}
+
 function workflowOptionValue(option) {
   return `${option.workflow_id}@@${option.workflow_version}`;
+}
+
+function workflowOptionLabel(option) {
+  return `${option.display_name || option.workflow_id} - v${option.workflow_version}`;
 }
 
 function parseWorkflowOptionValue(value) {
@@ -2266,13 +2307,77 @@ function parseWorkflowOptionValue(value) {
 }
 
 function selectedCreateWorkflowOption() {
-  const select = document.getElementById("workflowBinding");
-  if (!select) return null;
-  const parsed = parseWorkflowOptionValue(String(select.value || ""));
+  const options = createSelectableWorkflowOptions();
+  if (!options.length) return null;
+  if (!state.createProjectWorkflowValue && options.length === 1) {
+    return options[0];
+  }
+  const parsed = parseWorkflowOptionValue(String(state.createProjectWorkflowValue || ""));
   if (!parsed) return null;
-  return channelWorkflowOptions().find((option) =>
+  return options.find((option) =>
     option.workflow_id === parsed.workflow_id && option.workflow_version === parsed.workflow_version
   ) || null;
+}
+
+function selectedCreateWorkflowValue() {
+  const option = selectedCreateWorkflowOption();
+  if (option) return workflowOptionValue(option);
+  return "";
+}
+
+function syncCreateProjectWorkflowSelection() {
+  const options = createSelectableWorkflowOptions();
+  if (!options.length) {
+    state.createProjectWorkflowValue = "";
+    return;
+  }
+  const current = String(state.createProjectWorkflowValue || "");
+  if (current) {
+    const parsed = parseWorkflowOptionValue(current);
+    if (parsed && options.some((option) =>
+      option.workflow_id === parsed.workflow_id && option.workflow_version === parsed.workflow_version
+    )) {
+      return;
+    }
+  }
+  state.createProjectWorkflowValue = options.length === 1 ? workflowOptionValue(options[0]) : "";
+}
+
+function createProjectUrlValidationMessage(value) {
+  const text = String(value || "");
+  const normalized = text.trim();
+  if (!normalized) return "Competitor video URL is required.";
+  const supported = /^(https?:\/\/)?((www|m)\.)?(youtube\.com\/watch\?[^#\s]*\bv=[A-Za-z0-9_-]{6,}|youtube\.com\/shorts\/[A-Za-z0-9_-]{6,}|youtu\.be\/[A-Za-z0-9_-]{6,})(?:[^\s]*)?$/i;
+  if (supported.test(normalized)) return "";
+  return "Enter a supported YouTube video URL.";
+}
+
+function openCreateProjectPanel() {
+  syncCreateProjectWorkflowSelection();
+  state.isCreateProjectPanelOpen = true;
+  state.isChangeProjectPanelOpen = false;
+  state.createProjectFocusPending = true;
+  clearProjectFeedback();
+  render();
+}
+
+function closeCreateProjectPanel() {
+  state.isCreateProjectPanelOpen = false;
+  state.createProjectUrlDraft = "";
+  state.createProjectNameDraft = "";
+  if (!createSelectableWorkflowOptions().length) {
+    state.createProjectWorkflowValue = "";
+  }
+  clearProjectFeedback();
+  render();
+}
+
+function toggleChangeProjectPanel(forceOpen) {
+  const nextOpen = typeof forceOpen === "boolean" ? forceOpen : !state.isChangeProjectPanelOpen;
+  state.isChangeProjectPanelOpen = nextOpen;
+  if (nextOpen) state.isCreateProjectPanelOpen = false;
+  clearProjectFeedback();
+  render();
 }
 
 function clearActionFeedback() {
@@ -2341,6 +2446,13 @@ function clearSelectedChannelAnalyticsState() {
 function clearProjectState() {
   state.projects = [];
   state.projectListError = "";
+  state.isCreateProjectPanelOpen = false;
+  state.isChangeProjectPanelOpen = false;
+  state.createProjectUrlDraft = "";
+  state.createProjectNameDraft = "";
+  state.createProjectWorkflowValue = "";
+  state.createProjectFocusPending = false;
+  state.workflowStartFocusPending = false;
   clearProjectSelectionState();
   clearProjectFeedback();
 }
@@ -2839,26 +2951,48 @@ function projectsRefreshModel() {
 
 function createProjectModel() {
   const channel = selectedChannelRecord();
+  const trimmedUrl = String(state.createProjectUrlDraft || "").trim();
+  const workflowOption = selectedCreateWorkflowOption();
+  const eligibleWorkflowOptions = createSelectableWorkflowOptions();
+  const urlValidation = trimmedUrl ? createProjectUrlValidationMessage(trimmedUrl) : "";
+  const busy = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
+  const canEditInputs = !!(
+    state.selectedChannelSlug
+    && !state.isLoadingSummary
+    && state.selectedChannelSummary
+    && channel
+    && channel.status === "CONNECTED"
+    && !busy
+  );
   if (!state.selectedChannelSlug) {
-    return { disabled: true, label: "Create Research Project", helper: "Select a channel first." };
+    return { disabled: true, label: "Create Project", helper: "Select a channel first.", inputDisabled: true, workflowDisabled: true, urlValidation: "", canEditInputs };
   }
   if (state.isLoadingSummary || !state.selectedChannelSummary || !channel) {
-    return { disabled: true, label: "Create Research Project", helper: "Load the selected channel summary before creating a project." };
+    return { disabled: true, label: "Create Project", helper: "Load the selected channel summary before creating a project.", inputDisabled: true, workflowDisabled: true, urlValidation: "", canEditInputs };
   }
   if (channel.status !== "CONNECTED") {
-    return { disabled: true, label: "Create Research Project", helper: "Project creation is available only when the selected channel is connected." };
+    return { disabled: true, label: "Create Project", helper: "Project creation is available only when the selected channel is connected.", inputDisabled: true, workflowDisabled: true, urlValidation: "", canEditInputs };
   }
-  if (!channelWorkflowOptions().length) {
-    return { disabled: true, label: "Create Research Project", helper: "No server-approved workflow options are available for the selected channel." };
+  if (!eligibleWorkflowOptions.length) {
+    return { disabled: true, label: "Create Project", helper: "No project workflow is available for this channel.", inputDisabled: false, workflowDisabled: true, urlValidation: "", canEditInputs };
   }
-  if (!selectedCreateWorkflowOption()) {
-    return { disabled: true, label: "Create Research Project", helper: "Select a workflow version before creating a project." };
+  if (!workflowOption) {
+    return { disabled: true, label: "Create Project", helper: "Select a workflow before creating a project.", inputDisabled: false, workflowDisabled: false, urlValidation, canEditInputs };
   }
-  const busy = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
+  if (urlValidation) {
+    return { disabled: true, label: "Create Project", helper: urlValidation, inputDisabled: false, workflowDisabled: false, urlValidation, canEditInputs };
+  }
+  if (!trimmedUrl) {
+    return { disabled: true, label: "Create Project", helper: "Paste a competitor YouTube URL to start a new project.", inputDisabled: false, workflowDisabled: false, urlValidation: "", canEditInputs };
+  }
   return {
     disabled: busy,
-    label: busy ? "Creating Project..." : "Create Research Project",
-    helper: "Create a canonical project under the selected channel with an explicit server-approved workflow binding."
+    label: busy ? "Creating Project..." : "Create Project",
+    helper: busy ? "Creating a canonical project for the selected channel..." : "Create a canonical project under the selected channel with an explicit server-approved workflow binding.",
+    inputDisabled: false,
+    workflowDisabled: false,
+    urlValidation: "",
+    canEditInputs
   };
 }
 
@@ -3138,6 +3272,13 @@ function renderActionState() {
 function projectManagementSectionHtml() {
   const refresh = projectsRefreshModel();
   const create = createProjectModel();
+  const channel = selectedChannelRecord();
+  const workflowOptions = createSelectableWorkflowOptions();
+  const currentWorkflowValue = selectedCreateWorkflowValue();
+  const feedback = state.projectFeedback.channelSlug === state.selectedChannelSlug && !state.projectFeedback.projectSlug
+    ? state.projectFeedback
+    : { kind: "", text: "" };
+  const urlValidation = state.isCreateProjectPanelOpen && state.createProjectUrlDraft ? createProjectUrlValidationMessage(state.createProjectUrlDraft) : "";
   const items = state.projects.map((project) => {
     const selected = project.project_slug === state.selectedProjectSlug;
     return `
@@ -3151,79 +3292,143 @@ function projectManagementSectionHtml() {
       </button>
     `;
   });
-  const selectedLabel = state.selectedProjectSlug ? selectedProjectDisplayName() : "No project selected";
-  return `
-    <div class="card">
-      <div class="compact-label">Current project</div>
-      <strong>${escapeHtml(selectedLabel)}</strong>
-      <div class="meta">${escapeHtml(state.selectedProjectSlug ? "Workflow progress and the current step are shown below." : "Open Change Project to choose a project.")}</div>
-    </div>
-    <details>
-      <summary>Change Project</summary>
-      <div class="row" style="margin-top:12px">
-        <button class="secondary" id="refreshProjectsBtn" disabled>Refresh Projects</button>
+  const createStatusHtml = feedback.text
+    ? `
+      <div id="projectCreateState" class="status" role="status" aria-live="polite">
+        <div class="check"><strong>${feedback.kind === "error" ? "Create Error" : "Create Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div>
+        <div class="meta">${escapeHtml(feedback.text)}</div>
       </div>
-      <div class="meta" style="margin-top:12px">${escapeHtml(refresh.helper)}</div>
-      ${state.projects.length ? `<div class="stack" style="margin-top:12px">${items.join("")}</div>` : `<div class="notice" style="margin-top:12px"><strong>No canonical projects yet</strong><span class="meta">Create one to begin the workflow.</span></div>`}
-    </details>
-    <details>
-      <summary>Create New Project</summary>
-      <div id="projectCreateForm" class="stack" style="margin-top:12px">
-        <label for="url">Competitor YouTube URL</label>
-        <input id="url" placeholder="https://www.youtube.com/watch?v=...">
-        <label for="name">Project Name (optional)</label>
-        <input id="name" placeholder="Optional project title override">
-        <label for="workflowBinding">Workflow Version</label>
-        <select id="workflowBinding" disabled>
-          <option value="">Select a workflow</option>
-        </select>
-        <div id="projectCreateState" class="status"></div>
-        <div class="row">
-          <button class="secondary" id="createBtn" disabled>Create Research Project</button>
+    `
+    : urlValidation
+    ? `
+      <div id="projectCreateState" class="status" role="status" aria-live="polite">
+        <div class="check"><strong>Validation</strong>${pill("WAITING")}</div>
+        <div class="meta">${escapeHtml(urlValidation)}</div>
+      </div>
+    `
+    : `
+      <div id="projectCreateState" class="status" role="status" aria-live="polite">
+        <div class="check"><strong>Create</strong>${pill(create.disabled ? "WAITING" : "READY")}</div>
+        <div class="meta">${escapeHtml(create.helper)}</div>
+      </div>
+    `;
+  const workflowFieldHtml = workflowOptions.length > 1
+    ? `
+      <label for="createProjectWorkflowBinding">Workflow Version</label>
+      <select id="createProjectWorkflowBinding" ${create.workflowDisabled ? "disabled" : ""}>
+        <option value="">Select a workflow</option>
+        ${workflowOptions.map((option) => {
+          const value = workflowOptionValue(option);
+          const selected = currentWorkflowValue === value ? " selected" : "";
+          const label = workflowOptionLabel(option);
+          return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
+        }).join("")}
+      </select>
+    `
+    : "";
+  const createPanelHtml = state.isCreateProjectPanelOpen
+    ? `
+      <section class="card" id="createProjectPanel">
+        <div class="step-heading">
+          <div>
+            <strong>Create New Project</strong>
+            <div class="meta">Start a new content project without leaving the current workflow view.</div>
+          </div>
         </div>
-      </div>
-    </details>
+        <label for="createProjectChannelDisplay">Channel</label>
+        <input id="createProjectChannelDisplay" value="${escapeHtml(channel ? (channel.display_name || channel.channel_slug || "") : "")}" readonly aria-readonly="true">
+        <label for="createProjectUrlInput">Competitor video URL *</label>
+        <input id="createProjectUrlInput" placeholder="https://www.youtube.com/watch?v=..." value="${escapeHtml(state.createProjectUrlDraft)}" ${create.inputDisabled ? "disabled" : ""} aria-describedby="projectCreateState">
+        <label for="createProjectNameInput">Project Name (optional)</label>
+        <input id="createProjectNameInput" placeholder="Optional project title override" value="${escapeHtml(state.createProjectNameDraft)}" ${create.inputDisabled ? "disabled" : ""}>
+        ${workflowFieldHtml}
+        ${createStatusHtml}
+        <div class="row">
+          <button type="button" class="secondary" id="cancelCreateProjectBtn">Cancel</button>
+          <button type="button" class="primary" id="submitCreateProjectBtn" ${create.disabled ? "disabled" : ""}>${escapeHtml(create.label)}</button>
+        </div>
+      </section>
+    `
+    : "";
+  const changeProjectHtml = state.isChangeProjectPanelOpen
+    ? `
+      <section class="card" id="changeProjectPanel">
+        <div class="step-heading">
+          <div>
+            <strong>Change Project</strong>
+            <div class="meta">Choose another canonical project for the selected channel.</div>
+          </div>
+        </div>
+        <div class="row">
+          <button class="secondary" id="refreshProjectsBtn" ${refresh.disabled ? "disabled" : ""}>${escapeHtml(refresh.label)}</button>
+        </div>
+        <div class="meta" style="margin-top:12px">${escapeHtml(refresh.helper)}</div>
+        ${state.projects.length ? `<div class="stack" style="margin-top:12px">${items.join("")}</div>` : `<div class="notice" style="margin-top:12px"><strong>No canonical projects yet</strong><span class="meta">Create one to begin the workflow.</span></div>`}
+      </section>
+    `
+    : "";
+  return `
+    <div class="row" id="projectActionBar" style="align-items:center;justify-content:flex-start">
+      <button type="button" class="primary" id="openCreateProjectBtn" aria-expanded="${state.isCreateProjectPanelOpen ? "true" : "false"}">+ New Project</button>
+      <button type="button" class="secondary" id="openChangeProjectBtn" aria-expanded="${state.isChangeProjectPanelOpen ? "true" : "false"}">Change Project</button>
+    </div>
+    ${createPanelHtml}
+    ${changeProjectHtml}
   `;
 }
 
 function syncProjectManagementControls() {
   const refresh = projectsRefreshModel();
   const create = createProjectModel();
-  const newRefreshButton = document.getElementById("refreshProjectsBtn");
-  if (newRefreshButton) {
-    newRefreshButton.disabled = refresh.disabled;
-    newRefreshButton.textContent = refresh.label;
+  const newProjectButton = document.getElementById("openCreateProjectBtn");
+  if (newProjectButton) {
+    newProjectButton.disabled = !state.selectedChannelSlug || (state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug);
+    newProjectButton.textContent = "+ New Project";
   }
-  const createButton = document.getElementById("createBtn");
-  const urlInput = document.getElementById("url");
-  const nameInput = document.getElementById("name");
-  const workflowSelect = document.getElementById("workflowBinding");
-  const workflowOptions = channelWorkflowOptions();
-  const currentWorkflow = selectedCreateWorkflowOption();
-  const optionRows = ['<option value="">Select a workflow</option>'].concat(
-    workflowOptions.map((option) => {
-      const value = workflowOptionValue(option);
-      const selected = currentWorkflow && workflowOptionValue(currentWorkflow) === value ? " selected" : "";
-      const label = `${option.display_name || option.workflow_id} v${option.workflow_version}`;
-      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(label)}</option>`;
-    })
-  );
+  const changeProjectButton = document.getElementById("openChangeProjectBtn");
+  if (changeProjectButton) {
+    changeProjectButton.disabled = !state.selectedChannelSlug;
+    changeProjectButton.textContent = "Change Project";
+  }
+  const refreshButton = document.getElementById("refreshProjectsBtn");
+  if (refreshButton) {
+    refreshButton.disabled = refresh.disabled;
+    refreshButton.textContent = refresh.label;
+  }
+  const submitButton = document.getElementById("submitCreateProjectBtn");
+  if (submitButton) {
+    submitButton.disabled = create.disabled;
+    submitButton.textContent = create.label;
+  }
+  const cancelButton = document.getElementById("cancelCreateProjectBtn");
+  if (cancelButton) {
+    cancelButton.disabled = state.createProjectAction.busy && state.createProjectAction.slug === state.selectedChannelSlug;
+  }
+  const urlInput = document.getElementById("createProjectUrlInput");
+  if (urlInput) {
+    urlInput.disabled = create.inputDisabled;
+    urlInput.value = state.createProjectUrlDraft;
+  }
+  const nameInput = document.getElementById("createProjectNameInput");
+  if (nameInput) {
+    nameInput.disabled = create.inputDisabled;
+    nameInput.value = state.createProjectNameDraft;
+  }
+  const channelDisplay = document.getElementById("createProjectChannelDisplay");
+  const channel = selectedChannelRecord();
+  if (channelDisplay) {
+    channelDisplay.value = channel ? (channel.display_name || channel.channel_slug || "") : "";
+  }
+  const workflowSelect = document.getElementById("createProjectWorkflowBinding");
   if (workflowSelect) {
-    workflowSelect.innerHTML = optionRows.join("");
-    workflowSelect.disabled = !state.selectedChannelSlug || state.isLoadingSummary || !workflowOptions.length || state.createProjectAction.busy;
+    workflowSelect.disabled = create.workflowDisabled;
+    workflowSelect.value = selectedCreateWorkflowValue();
   }
-  if (createButton) {
-    createButton.disabled = create.disabled;
-    createButton.textContent = create.label;
-  }
-  if (urlInput) urlInput.disabled = create.disabled;
-  if (nameInput) nameInput.disabled = create.disabled;
 }
 
 function renderProjectListState() {
   const stateTarget = document.getElementById("projectListState");
   const listTarget = document.getElementById("projectListPanel");
-  const workflowCompleted = !!(state.selectedProjectProductionPackage && (state.selectedProjectProductionPackage.lifecycle === "PRODUCTION_READY" || state.selectedProjectProductionPackage.ready_for_export));
 
   if (!state.selectedChannelSlug) {
     stateTarget.innerHTML = `
@@ -3248,39 +3453,19 @@ function renderProjectListState() {
       <div class="check"><strong>Project</strong>${pill("ERROR")}</div>
       <div class="meta">${escapeHtml(state.projectListError)}</div>
     `;
-  } else if (!workflowCompleted) {
+  } else {
     stateTarget.innerHTML = `
       <div class="check"><strong>Selected Project</strong>${pill(state.selectedProjectSlug ? "READY" : "WAITING")}</div>
-      <div class="meta">${escapeHtml(state.selectedProjectSlug ? selectedProjectDisplayName() : "Choose a project to continue the workflow.")}</div>
+      <div class="meta">${escapeHtml(state.selectedProjectSlug ? selectedProjectDisplayName() : "Start a new project or choose an existing one.")}</div>
     `;
-  } else {
-    stateTarget.innerHTML = "";
   }
 
-  listTarget.innerHTML = workflowCompleted ? "" : projectManagementSectionHtml();
+  listTarget.innerHTML = projectManagementSectionHtml();
   syncProjectManagementControls();
 }
 
 function renderProjectCreateState() {
-  const target = document.getElementById("projectCreateState");
-  if (!target) return;
-  const create = createProjectModel();
-  const feedback = state.projectFeedback.channelSlug === state.selectedChannelSlug && !state.projectFeedback.projectSlug
-    ? state.projectFeedback
-    : { kind: "", text: "" };
-
-  if (feedback.text) {
-    target.innerHTML = `
-      <div class="check"><strong>${feedback.kind === "error" ? "Create Error" : "Create Status"}</strong>${pill(feedback.kind === "error" ? "ERROR" : "PASS")}</div>
-      <div class="meta">${escapeHtml(feedback.text)}</div>
-    `;
-    return;
-  }
-
-  target.innerHTML = `
-    <div class="check"><strong>Create</strong>${pill(create.disabled ? "WAITING" : "READY")}</div>
-    <div class="meta">${escapeHtml(create.helper)}</div>
-  `;
+  syncProjectManagementControls();
 }
 
 function renderProjectDetailState() {
@@ -3512,19 +3697,6 @@ function renderProjectDetailState() {
       </details>
     `
     : `<div class="meta" style="margin-top:12px">${escapeHtml(state.isLoadingProductionPackage ? "Loading the production handoff summary..." : "Production handoff details will appear here once the project workflow is loaded.")}</div>`;
-  const projectManagementSectionHtmlForDetail = workflowCompleted
-    ? `
-      <section class="panel" style="margin-top:12px">
-        <div class="step-heading">
-          <div>
-            <h3 style="margin:0">Project Management</h3>
-            <div class="meta">Change the current project or create a new one after reviewing the completed result.</div>
-          </div>
-        </div>
-        <div class="stack" style="margin-top:12px">${projectManagementSectionHtml()}</div>
-      </section>
-    `
-    : "";
   const selectedStepHtml = selectedStep && !workflowCompleted ? (() => {
     const invalidatedNotice = selectedCandidate && selectedCandidate.invalidated_candidate_group_id
       ? `<div class="notice" style="margin-top:12px"><strong>Invalidated Candidate</strong><span class="meta">${escapeHtml(`Candidate ${selectedCandidate.invalidated_candidate_group_id} is no longer actionable because an upstream approved output changed.`)}</span></div>`
@@ -3728,7 +3900,6 @@ function renderProjectDetailState() {
       ${!workflowCompleted ? `<div class="meta" style="margin-top:12px">${escapeHtml(productionStatusSentence(productionPackage))}</div>` : ""}
       ${workflowSectionHtml}
     </section>
-    ${projectManagementSectionHtmlForDetail}
   `;
   syncProjectManagementControls();
   const bundlePreviewText = document.getElementById("bundlePreviewText");
@@ -3887,6 +4058,22 @@ function render() {
   renderProjectCreateState();
   renderProjectDetailState();
   renderAnalyticsWorkspace();
+  if (state.createProjectFocusPending) {
+    state.createProjectFocusPending = false;
+    setTimeout(() => {
+      const input = document.getElementById("createProjectUrlInput");
+      if (input && !input.disabled) input.focus();
+    }, 0);
+  }
+  if (state.workflowStartFocusPending) {
+    state.workflowStartFocusPending = false;
+    setTimeout(() => {
+      const stepSelect = document.getElementById("workflowStepSelect");
+      const primaryAction = document.getElementById("workflowPrimaryAction");
+      const target = stepSelect || primaryAction;
+      if (target && !target.disabled) target.focus();
+    }, 0);
+  }
 }
 
 async function refreshSelectedSummaryForAction(slug) {
@@ -4140,16 +4327,17 @@ async function createProjectAction() {
     return;
   }
 
-  const url = String(document.getElementById("url").value || "").trim();
-  const projectName = String(document.getElementById("name").value || "").trim();
+  const url = String(state.createProjectUrlDraft || "").trim();
+  const projectName = String(state.createProjectNameDraft || "").trim();
   const workflowOption = selectedCreateWorkflowOption();
-  if (!url) {
-    setProjectFeedback("error", slug, null, "Competitor YouTube URL is required.");
+  const urlValidation = createProjectUrlValidationMessage(url);
+  if (urlValidation) {
+    setProjectFeedback("error", slug, null, urlValidation);
     render();
     return;
   }
   if (!workflowOption) {
-    setProjectFeedback("error", slug, null, "Select a workflow version before creating a project.");
+    setProjectFeedback("error", slug, null, createSelectableWorkflowOptions().length ? "Select a workflow before creating a project." : "No project workflow is available for this channel.");
     render();
     return;
   }
@@ -4177,12 +4365,15 @@ async function createProjectAction() {
     await loadProjectsForChannel(slug, { preferProjectSlug: createdSlug });
     if (state.selectedChannelSlug === slug) {
       setProjectFeedback("success", slug, createdSlug, "Canonical project created for the selected channel.");
-      document.getElementById("url").value = "";
-      document.getElementById("name").value = "";
-      const workflowSelect = document.getElementById("workflowBinding");
-      if (workflowSelect) workflowSelect.value = workflowOptionValue(workflowOption);
+      state.createProjectUrlDraft = "";
+      state.createProjectNameDraft = "";
+      state.isCreateProjectPanelOpen = false;
+      state.isChangeProjectPanelOpen = false;
       if (createdSlug && state.projects.some((item) => item.project_slug === createdSlug)) {
+        state.workflowStartFocusPending = true;
         setSelectedProjectSlug(createdSlug);
+      } else {
+        render();
       }
     }
   } catch (error) {
@@ -4972,6 +5163,7 @@ async function loadSelectedChannelSummary() {
     const data = await v2Api(`channels/${encodeURIComponent(slug)}`, { signal: controller.signal });
     if (requestId !== state.summaryRequestId || slug !== state.selectedChannelSlug) return;
     state.selectedChannelSummary = data;
+    syncCreateProjectWorkflowSelection();
     await loadSelectedChannelAnalytics(slug);
     await loadProjectsForChannel(slug);
   } catch (error) {
@@ -5089,20 +5281,70 @@ document.getElementById("projectListPanel").addEventListener("click", (event) =>
     setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
     return;
   }
+  if (event.target.id === "openCreateProjectBtn") {
+    openCreateProjectPanel();
+    return;
+  }
+  if (event.target.id === "openChangeProjectBtn") {
+    toggleChangeProjectPanel();
+    return;
+  }
+  if (event.target.id === "cancelCreateProjectBtn") {
+    closeCreateProjectPanel();
+    return;
+  }
   if (event.target.id === "refreshProjectsBtn") {
     refreshProjectsAction();
     return;
   }
-  if (event.target.id === "createBtn") {
+  if (event.target.id === "submitCreateProjectBtn") {
     createProjectAction();
   }
 });
 document.getElementById("projectListPanel").addEventListener("change", (event) => {
-  if (event.target.id === "workflowBinding") {
+  if (event.target.id === "createProjectWorkflowBinding") {
+    state.createProjectWorkflowValue = event.target.value || "";
+    clearProjectFeedback();
     render();
   }
 });
+document.getElementById("projectListPanel").addEventListener("input", (event) => {
+  if (event.target.id === "createProjectUrlInput") {
+    state.createProjectUrlDraft = event.target.value;
+    clearProjectFeedback();
+    render();
+    return;
+  }
+  if (event.target.id === "createProjectNameInput") {
+    state.createProjectNameDraft = event.target.value;
+    render();
+  }
+});
+document.getElementById("projectListPanel").addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.isCreateProjectPanelOpen) {
+    closeCreateProjectPanel();
+    return;
+  }
+  if (event.key === "Enter" && event.target.id === "createProjectUrlInput" && !createProjectModel().disabled) {
+    event.preventDefault();
+    createProjectAction();
+    return;
+  }
+  if (event.key === "Enter" && event.target.id === "createProjectNameInput" && !createProjectModel().disabled) {
+    event.preventDefault();
+    createProjectAction();
+    return;
+  }
+});
 document.getElementById("projectDetailPanel").addEventListener("click", (event) => {
+  if (event.target.id === "openCreateProjectBtn") {
+    openCreateProjectPanel();
+    return;
+  }
+  if (event.target.id === "openChangeProjectBtn") {
+    toggleChangeProjectPanel();
+    return;
+  }
   const button = event.target.closest("[data-project-slug]");
   if (button) {
     setSelectedProjectSlug(button.getAttribute("data-project-slug") || null);
@@ -5112,13 +5354,39 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
     refreshProjectsAction();
     return;
   }
-  if (event.target.id === "createBtn") {
+  if (event.target.id === "cancelCreateProjectBtn") {
+    closeCreateProjectPanel();
+    return;
+  }
+  if (event.target.id === "submitCreateProjectBtn") {
     createProjectAction();
   }
 });
 document.getElementById("projectDetailPanel").addEventListener("change", (event) => {
-  if (event.target.id === "workflowBinding") {
+  if (event.target.id === "createProjectWorkflowBinding") {
+    state.createProjectWorkflowValue = event.target.value || "";
+    clearProjectFeedback();
     render();
+  }
+});
+document.getElementById("projectDetailPanel").addEventListener("input", (event) => {
+  if (event.target.id === "createProjectUrlInput") {
+    state.createProjectUrlDraft = event.target.value;
+    clearProjectFeedback();
+    render();
+    return;
+  }
+  if (event.target.id === "createProjectNameInput") {
+    state.createProjectNameDraft = event.target.value;
+    render();
+    return;
+  }
+  if (event.target.id === "pastedOutputText") {
+    state.pastedOutputDraft = event.target.value;
+    if (state.parsedOutputResult || state.parsedOutputError) {
+      invalidateParsedOutputResult();
+      render();
+    }
   }
 });
 document.getElementById("projectDetailPanel").addEventListener("change", (event) => {
@@ -5126,13 +5394,14 @@ document.getElementById("projectDetailPanel").addEventListener("change", (event)
     setSelectedWorkflowStepId(event.target.value || null);
   }
 });
-document.getElementById("projectDetailPanel").addEventListener("input", (event) => {
-  if (event.target.id === "pastedOutputText") {
-    state.pastedOutputDraft = event.target.value;
-    if (state.parsedOutputResult || state.parsedOutputError) {
-      invalidateParsedOutputResult();
-      render();
-    }
+document.getElementById("projectDetailPanel").addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.isCreateProjectPanelOpen) {
+    closeCreateProjectPanel();
+    return;
+  }
+  if ((event.target.id === "createProjectUrlInput" || event.target.id === "createProjectNameInput") && event.key === "Enter" && !createProjectModel().disabled) {
+    event.preventDefault();
+    createProjectAction();
   }
 });
 document.getElementById("projectDetailPanel").addEventListener("click", (event) => {
