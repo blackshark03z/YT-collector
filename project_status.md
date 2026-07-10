@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Task 10B Closeout - Maintenance Mode
+Task 10C Closeout - Maintenance Mode
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
@@ -22,19 +22,40 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 
 ## Final Repository Baseline
 - Branch: `master`
-- `HEAD = origin/master = db5344478bc33cc313774196a2ae172b4d8b16e7`
-- Latest commit subject: `fix: repair analytics OAuth sync state`
+- Task 10C code baseline: `1c399940ee9b72bb5e0508776674cd0ca6563cc2`
+- Task 10C code subject: `feat: streamline project creation flow`
 
 ## Final Verification Summary
-- Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`91` run, `91` passed, `0` failures, `0` errors)
+- Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`105` run, `105` passed, `0` failures, `0` errors)
 - Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
 - Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
 - Live analytics sync blocker repair verification: `PASS`
+- Live operator project-creation UX verification: `PASS`
 
 ## Final Project State
 - `CORE_PROJECT_COMPLETE`
 - `MAINTENANCE_MODE`
 - `SAFE_TO_STOP`
+
+## Task 10C Closeout
+- Task 10C and Task 10C.1 are complete. The code repair was committed and pushed as `1c399940ee9b72bb5e0508776674cd0ca6563cc2` (`feat: streamline project creation flow`).
+- Added a top operator-first project action bar with `+ New Project` and `Change Project` ahead of the completed-project handoff.
+- Repaired the root cause where URL editability was coupled to Create-button readiness; the competitor URL field is now focused and editable whenever the create panel is truly available.
+- Preserved supported operator URL forms for project creation:
+  - `youtube.com/watch`
+  - `youtu.be`
+  - `youtube.com/shorts`
+- Added a dedicated single create panel and removed the duplicated lower create form.
+- Preserved success/failure safety:
+  - Cancel keeps the currently selected project
+  - pending duplicate submissions are blocked
+  - failure preserves URL draft and current project context
+  - success continues to auto-select the newly created project only after real success
+- Added sole-workflow automatic resolution from loaded channel data so the Mist of Ages operator flow no longer requires a manual workflow-selection click.
+- Kept raw technical workflow bindings hidden from normal operator copy while preserving exact backend payload fields `workflow_id` and `workflow_version`.
+- Preserved and covered multiple-workflow and zero-workflow behavior in focused frontend tests.
+- Live verification passed on the embedded UI without creating a real project.
+- No workflow runtime, analytics runtime, approved artifact, production package, token file, or unrelated research output was mutated by Task 10C verification.
 
 ## Task 10B Closeout
 - Task 10B is complete. The repair code was committed and pushed at `db5344478bc33cc313774196a2ae172b4d8b16e7` (`fix: repair analytics OAuth sync state`).

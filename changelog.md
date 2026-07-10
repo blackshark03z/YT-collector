@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+### Task 10C - Operator-First Project Creation UX Closeout
+- Closed Task 10C and Task 10C.1 after the operator-first project-creation UX repair was committed and pushed as `1c399940ee9b72bb5e0508776674cd0ca6563cc2` (`feat: streamline project creation flow`).
+- Added a top project action bar with `+ New Project` and `Change Project`, and kept the completed-project handoff below that action area.
+- Replaced the duplicated lower create flow with one dedicated create panel that focuses the competitor URL field when opened.
+- Repaired the disabled-state root cause so URL typing and paste are no longer blocked by Create-button readiness or selected-project context.
+- Preserved supported YouTube URL validation for `youtube.com/watch`, `youtu.be`, and `youtube.com/shorts`.
+- Preserved pending-state duplicate-request protection, create success navigation, create failure context preservation, and safe Cancel behavior with no backend mutation.
+- Added sole-workflow automatic binding resolution from loaded channel data so the Mist of Ages operator flow no longer requires a manual workflow-selection click.
+- Kept raw workflow binding values hidden from normal operator copy while preserving exact backend payload compatibility for `workflow_id`, `workflow_version`, `competitor_url`, and optional `project_name`.
+- Preserved explicit operator choice for real multi-workflow channels with friendly labels, and preserved editable URL plus controlled disabled messaging for zero-workflow channels.
+- Verified the final UX live without creating a real project, and reran:
+  - frontend `105` pass
+  - analytics collector `19` pass
+  - production export `6` pass
+- This closeout records the verified UX outcome only; it does not add runtime mutation, project creation, analytics sync, OAuth reconnect, or new product scope.
+
 ### Task 10B - Analytics Sync Repair Closeout
 - Closed the verified analytics sync blocker repair after the code fix was committed and pushed as `db5344478bc33cc313774196a2ae172b4d8b16e7` (`fix: repair analytics OAuth sync state`).
 - Repaired safe OAuth HTTP error-shape parsing so controlled reconnect-required behavior handles nested error payloads, `error_description`, top-level string errors, JSON string bodies, and empty/non-JSON responses without misleading stale error text.
