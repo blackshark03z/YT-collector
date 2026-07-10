@@ -12,29 +12,39 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Project Closeout - Maintenance Mode
+Task 10B Closeout - Maintenance Mode
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
 
 ## Approval
-LIVE_VERIFIED_COMMITTED_PUSHED
+LIVE_VERIFIED_MAINTENANCE_MODE
 
 ## Final Repository Baseline
 - Branch: `master`
-- `HEAD = origin/master = 76bcff92d5a79af2845cf19f0a7c977b300eb799`
-- Latest commit subject: `feat: simplify operator workspace ui`
+- `HEAD = origin/master = db5344478bc33cc313774196a2ae172b4d8b16e7`
+- Latest commit subject: `fix: repair analytics OAuth sync state`
 
 ## Final Verification Summary
 - Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`91` run, `91` passed, `0` failures, `0` errors)
-- Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`13` run, `13` passed, `0` failures, `0` errors)
+- Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
 - Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
-- Live operator UI verification: `PASS`
+- Live analytics sync blocker repair verification: `PASS`
 
 ## Final Project State
 - `CORE_PROJECT_COMPLETE`
 - `MAINTENANCE_MODE`
 - `SAFE_TO_STOP`
+
+## Task 10B Closeout
+- Task 10B is complete. The repair code was committed and pushed at `db5344478bc33cc313774196a2ae172b4d8b16e7` (`fix: repair analytics OAuth sync state`).
+- Repaired OAuth HTTP error parsing so controlled reconnect-required handling now survives nested JSON error shapes, `error_description`, top-level string errors, JSON string bodies, and empty/non-JSON bodies without surfacing misleading stale text.
+- Repaired analytics sync state so a successful token acquisition overwrites stale `UNAUTHORIZED` token-source metadata instead of leaving a revoked-token warning behind after a successful sync.
+- Live verification after the repair returned HTTP `200` and recorded `last_completed_sync_at = 2026-07-10T05:01:53+00:00`.
+- Post-repair token source state is `SUCCESS` with `checked_at = 2026-07-10T05:01:53+00:00`.
+- Reporting/runtime readiness after the verified sync is `20` jobs total, `20` generated reports ready, `0` pending, and `0` error.
+- Post-repair Analytics ZIP verification passed with `generated_at = 2026-07-10T05:18:18+00:00` and SHA-256 `520234C6998DA97A8954A471758E0C3FDB63C2831768C5F49158EF8A253F412A`.
+- Remaining `PARTIAL` or reconnect-advisory items are downstream availability/permission conditions rather than Task 10B sync blockers.
 
 ## Phase 10A Scope
 - Redesigned the embedded UI in `scripts/ui_server.py` around three operator-first work areas: `Overview`, `Content Workflow`, and `Analytics`, while keeping the existing single-server architecture and `/api/v2/` backend contract unchanged.
@@ -62,8 +72,8 @@ LIVE_VERIFIED_COMMITTED_PUSHED
 - No workflow runtime, analytics runtime, token file, or production artifact was mutated by Phase 10A.
 
 ## Phase 10A Repository State
-- Phase 10A through 10A.4 is complete, live-verified, committed, and pushed on `master`.
-- Final synchronized baseline is `76bcff92d5a79af2845cf19f0a7c977b300eb799` (`feat: simplify operator workspace ui`).
+- Phase 10A through 10A.4 remains complete, live-verified, committed, and pushed in repository history.
+- The current synchronized repository baseline now includes the later Task 10B code repair at `db5344478bc33cc313774196a2ae172b4d8b16e7` (`fix: repair analytics OAuth sync state`).
 - `implement.docx` remains unrelated and untracked.
 - Approved workflow runtime, analytics runtime, production artifacts, revisions, decisions, workflow state, token files, and protected channel data remain outside this implementation scope and were not modified.
 
@@ -121,7 +131,7 @@ LIVE_VERIFIED_COMMITTED_PUSHED
 - Added focused coverage for dynamic capability discovery, no duplicate Reporting jobs, canonical video-filter paging, country summary fallback, subscriber retry, persistent subscriber error with honest `PARTIAL`, per-video retention isolation, per-playlist daily queries, reach/end-screen bulk pending behavior, unauthorized monetary metrics, generated-report pending/ready/error semantics, snapshot/state/export count consistency, `last_completed_sync_at` versus `last_successful_sync_at`, successful CSV preservation, ZIP contents/hashes, no secret or absolute-path leakage, no workflow-project mutation, and UI rendering/action wiring for separated availability/readiness semantics.
 
 ## Phase 9 Repository State
-- The Phase 9 implementation is local only and has not been committed or pushed.
+- The Phase 9 implementation has been committed, pushed, and remains part of the synchronized repository history.
 - `implement.docx` remains unrelated and untracked.
 - Protected runtime files, OAuth token contents, approved workflow outputs, and canonical production pilot artifacts remain outside this implementation scope.
 

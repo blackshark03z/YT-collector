@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Task 10B - Analytics Sync Repair Closeout
+- Closed the verified analytics sync blocker repair after the code fix was committed and pushed as `db5344478bc33cc313774196a2ae172b4d8b16e7` (`fix: repair analytics OAuth sync state`).
+- Repaired safe OAuth HTTP error-shape parsing so controlled reconnect-required behavior handles nested error payloads, `error_description`, top-level string errors, JSON string bodies, and empty/non-JSON responses without misleading stale error text.
+- Repaired analytics sync state so a successful token acquisition now overwrites stale `UNAUTHORIZED` token-source status instead of preserving a revoked-token warning after a successful sync.
+- Recorded live verification of the repaired path: analytics sync returned HTTP `200`, `last_completed_sync_at = 2026-07-10T05:01:53+00:00`, token-source status became `SUCCESS`, and reporting readiness reached `20` ready / `0` pending / `0` error.
+- Recorded verified Analytics ZIP evidence for the repaired state: `generated_at = 2026-07-10T05:18:18+00:00`, SHA-256 `520234C6998DA97A8954A471758E0C3FDB63C2831768C5F49158EF8A253F412A`.
+- This closeout records the repair outcome only; it does not add unrelated workflow, analytics-collector, or runtime behavior.
+
 ### Documentation Closeout - Post-Phase-10A Synchronization
 - Synchronized `project_status.md`, `changelog.md`, and `next_task.md` with the actual post-push repository baseline after Phase 10A through 10A.4 completed.
 - Recorded the final operator-first UI simplification outcome: project-selection persistence, workspace-specific introductory copy, simplified Analytics view, compact completed-workflow rail, corrected approved-status semantics, and the final live operator verification result.
