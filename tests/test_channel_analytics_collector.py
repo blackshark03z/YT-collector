@@ -5,8 +5,10 @@ import json
 import sys
 import tempfile
 import unittest
+import urllib.error
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,6 +238,95 @@ class FakeCollectorBackend:
 
 def make_channel(root: Path, slug: str = "mist_of_ages") -> None:
     channel_workspace.create_channel_workspace(root, slug, "Mist of Ages", "UC123", "@mistofages")
+
+
+def write_oauth_client_config(root: Path) -> None:
+    (root / "youtube_oauth_client.json").write_text(
+        json.dumps(
+            {
+                "installed": {
+                    "client_id": "client-id",
+                    "client_secret": "client-secret",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "redirect_uris": ["http://127.0.0.1/callback"],
+                }
+            },
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+
+def write_expired_channel_token(root: Path, slug: str = "mist_of_ages") -> None:
+    token_path = channel_workspace.canonical_channel_paths(root, slug).oauth_token_file
+    token_path.parent.mkdir(parents=True, exist_ok=True)
+    token_path.write_text(
+        json.dumps(
+            {
+                "access_token": "stale-token",
+                "refresh_token": "refresh-token",
+                "token_type": "Bearer",
+                "expires_at": "2026-07-01T00:00:00+00:00",
+                "expires_in": 3600,
+            },
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+
+
+def make_http_error(url: str, code: int, body: str, message: str = "Bad Request") -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(url, code, message, hdrs=None, fp=io.BytesIO(body.encode("utf-8")))
+
+
+class RequestJsonErrorShapeTests(unittest.TestCase):
+    def test_request_json_uses_nested_error_message_when_error_is_mapping(self):
+        error = make_http_error("https://example.invalid", 400, json.dumps({"error": {"message": "nested error"}}))
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ui_server.AppError) as ctx:
+                ui_server.request_json("https://example.invalid")
+        self.assertEqual(ctx.exception.message, "nested error")
+        self.assertEqual(ctx.exception.status, 400)
+
+    def test_request_json_uses_error_description_for_string_error_payload(self):
+        error = make_http_error(
+            "https://example.invalid",
+            400,
+            json.dumps({"error": "invalid_grant", "error_description": "Token expired or revoked"}),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ui_server.AppError) as ctx:
+                ui_server.request_json("https://example.invalid")
+        self.assertEqual(ctx.exception.message, "Token expired or revoked")
+        self.assertEqual(ctx.exception.status, 400)
+
+    def test_request_json_uses_top_level_string_error_when_description_missing(self):
+        error = make_http_error(
+            "https://example.invalid",
+            400,
+            json.dumps({"error": "invalid_request"}),
+        )
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ui_server.AppError) as ctx:
+                ui_server.request_json("https://example.invalid")
+        self.assertEqual(ctx.exception.message, "invalid_request")
+        self.assertEqual(ctx.exception.status, 400)
+
+    def test_request_json_handles_json_string_and_plain_text_or_empty_bodies(self):
+        cases = [
+            ('"oauth failed"', "oauth failed"),
+            ("plain text failure", "plain text failure"),
+            ("", "HTTP Error 400: Bad Request"),
+        ]
+        for body, expected in cases:
+            error = make_http_error("https://example.invalid", 400, body)
+            with self.subTest(body=body or "<empty>"):
+                with mock.patch("urllib.request.urlopen", side_effect=error):
+                    with self.assertRaises(ui_server.AppError) as ctx:
+                        ui_server.request_json("https://example.invalid")
+                self.assertEqual(ctx.exception.message, expected)
+                self.assertEqual(ctx.exception.status, 400)
 
 
 class ChannelAnalyticsCollectorTests(unittest.TestCase):
@@ -568,6 +659,155 @@ class ChannelAnalyticsCollectorTests(unittest.TestCase):
             archive = zipfile.ZipFile(io.BytesIO(data["__binary__"]))
             self.assertIn("country_summary.csv", archive.namelist())
             self.assertIn("end_screens_daily.csv", archive.namelist())
+
+    def test_sync_route_handles_string_oauth_error_without_attribute_error_and_preserves_existing_outputs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root)
+            write_oauth_client_config(root)
+            write_expired_channel_token(root)
+            backend = FakeCollectorBackend()
+
+            seeded_status = channel_analytics_collector.sync_channel_analytics(
+                root,
+                "mist_of_ages",
+                token_provider=backend.token_provider,
+                data_api_fetcher=backend.data_api_fetcher,
+                analytics_query_fetcher=backend.analytics_query_fetcher,
+                reporting_api_fetcher=backend.reporting_api_fetcher,
+                report_download_fetcher=backend.report_download_fetcher,
+                window_days=30,
+            )
+            baseline_completed = seeded_status["last_completed_sync_at"]
+            baseline_successful = seeded_status["last_successful_sync_at"]
+            normalized_before = tree_hashes(root / "channels" / "mist_of_ages" / "analytics" / "normalized")
+
+            data_api_calls = 0
+            analytics_calls = 0
+            reporting_calls = 0
+            download_calls = 0
+
+            def counting_data_api_fetcher(**kwargs):
+                nonlocal data_api_calls
+                data_api_calls += 1
+                return backend.data_api_fetcher(**kwargs)
+
+            def counting_analytics_query_fetcher(**kwargs):
+                nonlocal analytics_calls
+                analytics_calls += 1
+                return backend.analytics_query_fetcher(**kwargs)
+
+            def counting_reporting_api_fetcher(**kwargs):
+                nonlocal reporting_calls
+                reporting_calls += 1
+                return backend.reporting_api_fetcher(**kwargs)
+
+            def counting_report_download_fetcher(**kwargs):
+                nonlocal download_calls
+                download_calls += 1
+                return backend.report_download_fetcher(**kwargs)
+
+            context = ui_server.build_app_context(root=root)
+            context["data_api_fetcher"] = counting_data_api_fetcher
+            context["analytics_query_api_fetcher"] = counting_analytics_query_fetcher
+            context["reporting_api_fetcher"] = counting_reporting_api_fetcher
+            context["report_download_fetcher"] = counting_report_download_fetcher
+
+            oauth_error = make_http_error(
+                "https://oauth2.googleapis.com/token",
+                400,
+                json.dumps({"error": "invalid_grant", "error_description": "Token expired or revoked"}),
+            )
+
+            with mock.patch("urllib.request.urlopen", side_effect=oauth_error):
+                with self.assertRaises(ui_server.V2Error) as ctx:
+                    ui_server.dispatch_v2_request(
+                        "POST",
+                        "/api/v2/channels/mist_of_ages/analytics/sync",
+                        payload={"window_days": 30},
+                        context=context,
+                    )
+
+            self.assertEqual(ctx.exception.code, "OAUTH_RECONNECT_REQUIRED")
+            self.assertEqual(ctx.exception.status, 409)
+            self.assertNotIn("AttributeError", ctx.exception.message)
+            self.assertIn("Token expired or revoked", ctx.exception.message)
+            self.assertEqual(data_api_calls, 0)
+            self.assertEqual(analytics_calls, 0)
+            self.assertEqual(reporting_calls, 0)
+            self.assertEqual(download_calls, 0)
+
+            state = json.loads((root / "channels" / "mist_of_ages" / "analytics" / "state" / "collector_state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["last_completed_sync_at"], baseline_completed)
+            self.assertEqual(state["last_successful_sync_at"], baseline_successful)
+            self.assertEqual(state["source_results"]["token"]["status"], "UNAUTHORIZED")
+            self.assertEqual(state["source_results"]["token"]["message"], "Token expired or revoked")
+            self.assertEqual(state["errors"], ["Token expired or revoked"])
+            normalized_after = tree_hashes(root / "channels" / "mist_of_ages" / "analytics" / "normalized")
+            self.assertEqual(normalized_before, normalized_after)
+            self.assertEqual(backend.created_jobs, [])
+
+    def test_successful_sync_overwrites_stale_token_unauthorized_state_and_export_reflects_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            make_channel(root)
+            backend = FakeCollectorBackend()
+
+            stale_state = {
+                "schema_version": channel_analytics_collector.SCHEMA_VERSION,
+                "channel_slug": "mist_of_ages",
+                "last_attempt_at": "2026-07-10T02:15:23+00:00",
+                "last_completed_sync_at": "2026-07-04T15:31:59+00:00",
+                "last_successful_sync_at": None,
+                "collection_window": {},
+                "source_results": {
+                    "token": {
+                        "status": "UNAUTHORIZED",
+                        "checked_at": "2026-07-10T02:15:23+00:00",
+                        "message": "Token expired or revoked.",
+                    }
+                },
+                "query_group_results": {},
+                "report_jobs": {},
+                "ingested_reports": {},
+                "row_counts": {},
+                "report_type_counts": {"AVAILABLE": 0, "PENDING": 0, "UNAUTHORIZED": 0, "UNSUPPORTED": 0, "UNAVAILABLE": 0, "ERROR": 0},
+                "generated_report_counts": {"READY": 0, "PENDING": 0, "UNAVAILABLE": 0, "UNAUTHORIZED": 0, "UNSUPPORTED": 0, "ERROR": 0},
+                "errors": ["Token expired or revoked."],
+            }
+            state_path = root / "channels" / "mist_of_ages" / "analytics" / "state" / "collector_state.json"
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            state_path.write_text(json.dumps(stale_state, indent=2) + "\n", encoding="utf-8")
+
+            status = channel_analytics_collector.sync_channel_analytics(
+                root,
+                "mist_of_ages",
+                token_provider=backend.token_provider,
+                data_api_fetcher=backend.data_api_fetcher,
+                analytics_query_fetcher=backend.analytics_query_fetcher,
+                reporting_api_fetcher=backend.reporting_api_fetcher,
+                report_download_fetcher=backend.report_download_fetcher,
+                window_days=30,
+            )
+
+            self.assertEqual(status["source_results"]["token"]["status"], "SUCCESS")
+            self.assertEqual(status["source_results"]["token"]["checked_at"], status["last_completed_sync_at"])
+            self.assertNotIn("message", status["source_results"]["token"])
+            self.assertEqual(status["last_completed_sync_at"], status["last_attempt_at"])
+
+            persisted = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["source_results"]["token"]["status"], "SUCCESS")
+            self.assertEqual(persisted["source_results"]["token"]["checked_at"], persisted["last_attempt_at"])
+            self.assertNotIn("message", persisted["source_results"]["token"])
+
+            export = channel_analytics_collector.build_channel_analytics_export(root, "mist_of_ages")
+            archive = zipfile.ZipFile(io.BytesIO(export["body_bytes"]))
+            collector_status = json.loads(archive.read("collector_status.json").decode("utf-8"))
+            manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
+            self.assertEqual(collector_status["source_results"]["token"]["status"], "SUCCESS")
+            self.assertNotIn("message", collector_status["source_results"]["token"])
+            self.assertEqual(manifest["source_statuses"]["token"]["status"], "SUCCESS")
+            self.assertNotIn("message", manifest["source_statuses"]["token"])
 
 
 if __name__ == "__main__":

@@ -1482,6 +1482,7 @@ def sync_channel_analytics(
         state["errors"] = [message]
         _write_json_atomic(paths["collector_state"], _sanitize_value(state, root=repo_root))
         raise _error("OAUTH_RECONNECT_REQUIRED", message, 409) from exc
+    state["source_results"]["token"] = {"status": "SUCCESS", "checked_at": now}
 
     try:
         capability_snapshot = discover_channel_analytics_capabilities(

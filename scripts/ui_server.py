@@ -137,6 +137,34 @@ def safe_slug(text: str, fallback: str) -> str:
     return text[:70].strip("-") or fallback
 
 
+def _extract_http_error_message(detail: str, fallback: str) -> str:
+    fallback_message = detail or fallback
+    try:
+        payload = json.loads(detail)
+    except json.JSONDecodeError:
+        return fallback_message
+
+    if isinstance(payload, dict):
+        nested_error = payload.get("error")
+        if isinstance(nested_error, dict):
+            nested_message = nested_error.get("message")
+            if isinstance(nested_message, str) and nested_message.strip():
+                return nested_message.strip()
+        error_description = payload.get("error_description")
+        if isinstance(error_description, str) and error_description.strip():
+            return error_description.strip()
+        if isinstance(nested_error, str) and nested_error.strip():
+            return nested_error.strip()
+        top_level_message = payload.get("message")
+        if isinstance(top_level_message, str) and top_level_message.strip():
+            return top_level_message.strip()
+        return fallback_message
+
+    if isinstance(payload, str) and payload.strip():
+        return payload.strip()
+    return fallback_message
+
+
 def request_json(url: str, headers: dict | None = None, data: bytes | None = None) -> dict:
     req = urllib.request.Request(url, data=data, headers=headers or {})
     try:
@@ -145,11 +173,7 @@ def request_json(url: str, headers: dict | None = None, data: bytes | None = Non
             return json.loads(body) if body else {}
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        try:
-            payload = json.loads(detail)
-            message = payload.get("error", {}).get("message", detail)
-        except json.JSONDecodeError:
-            message = detail or str(exc)
+        message = _extract_http_error_message(detail, str(exc))
         raise AppError(message, exc.code) from exc
     except urllib.error.URLError as exc:
         raise AppError(f"Network error: {exc.reason}") from exc
