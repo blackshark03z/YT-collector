@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Task 10E - Unicode Workflow Bundle Count Repair Closeout
+- Closed Task 10E after the workflow-bundle metadata mismatch was traced to character-count semantics rather than stale hashes, stale bundle identity, or a backend contract regression.
+- Recorded the accepted root cause: Python `len(...)` counts Unicode code points, while the old frontend validation used JavaScript `String.length`, which counts UTF-16 code units and miscounted non-BMP characters.
+- Repaired the frontend validation path in `scripts/ui_server.py` to use `Array.from(value).length` while preserving string/integer validation, bundle identity checks, hash/staleness checks, and genuine mismatch rejection behavior.
+- Recorded the accepted live read-only Sulla verification:
+  - backend bundle count `23532`
+  - corrected frontend bundle count `23532`
+  - legacy JavaScript count `23533`
+  - `Bundle Status PASS`
+  - `Copy Complete Bundle` enabled
+  - `Bundle Preview` available
+  - false metadata inconsistency message absent
+- Recorded the preserved negative-path result: a genuine bundle metadata mismatch is still rejected.
+- Re-ran the focused verification gate successfully:
+  - frontend `118` pass
+  - analytics collector `19` pass
+  - production export `6` pass
+- This closeout records the verified repair only; it does not add runtime mutation, workflow mutation, analytics mutation, bundle rebuild, server restart, or new product scope.
+
 ### Task 10D - Next-Action-First Workflow UX Closeout
 - Closed Task 10D and Task 10D.1 after the next-action-first workflow UI repair was committed and pushed as `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580` (`feat: prioritize next workflow action`).
 - Recorded the root cause: the transcript form still lived outside the effective workflow action flow and lower visual ordering kept the first required Prompt 1 operator step buried under workflow-detail surfaces.

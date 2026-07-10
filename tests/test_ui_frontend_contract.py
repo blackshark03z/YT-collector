@@ -1248,6 +1248,69 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertNotIn("Bundle Error", result["detailHtml"])
         self.assertNotIn("loaded workflow bundle metadata is inconsistent", result["detailHtml"])
 
+    def test_bundle_validation_accepts_non_bmp_code_point_count(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            const bundle = { bundle: "A🎥B", bundle_character_count: 3 };
+            return {
+              validationError: bundleValidationError(bundle),
+              jsLength: bundle.bundle.length,
+              codePointLength: unicodeCodePointCount(bundle.bundle),
+            };
+            """
+        )
+        self.assertEqual(result["validationError"], "")
+        self.assertEqual(result["jsLength"], 4)
+        self.assertEqual(result["codePointLength"], 3)
+
+    def test_bundle_validation_accepts_multiple_non_bmp_code_points(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            const bundle = { bundle: "A🎥🧭B", bundle_character_count: 4 };
+            return {
+              validationError: bundleValidationError(bundle),
+              jsLength: bundle.bundle.length,
+              codePointLength: unicodeCodePointCount(bundle.bundle),
+            };
+            """
+        )
+        self.assertEqual(result["validationError"], "")
+        self.assertEqual(result["jsLength"], 6)
+        self.assertEqual(result["codePointLength"], 4)
+
+    def test_bundle_validation_rejects_genuine_non_bmp_count_mismatch(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            const bundle = { bundle: "A🎥B", bundle_character_count: 4 };
+            return {
+              validationError: bundleValidationError(bundle),
+              codePointLength: unicodeCodePointCount(bundle.bundle),
+            };
+            """
+        )
+        self.assertEqual(result["codePointLength"], 3)
+        self.assertEqual(result["validationError"], "The loaded workflow bundle metadata is inconsistent.")
+
+    def test_bundle_validation_accepts_ascii_and_bmp_counts(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            return {
+              asciiError: bundleValidationError({ bundle: "Plain ASCII", bundle_character_count: 11 }),
+              bmpError: bundleValidationError({ bundle: "Xin chào", bundle_character_count: 8 }),
+              asciiCount: unicodeCodePointCount("Plain ASCII"),
+              bmpCount: unicodeCodePointCount("Xin chào"),
+            };
+            """
+        )
+        self.assertEqual(result["asciiError"], "")
+        self.assertEqual(result["bmpError"], "")
+        self.assertEqual(result["asciiCount"], 11)
+        self.assertEqual(result["bmpCount"], 8)
+
     def test_only_one_create_project_form_exists_in_dom(self):
         result = run_ui_runtime_scenario(
             """
@@ -3367,6 +3430,58 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         self.assertIsNone(result["finalBundle"])
         self.assertEqual(result["clipboardCalls"], [])
         self.assertEqual(result["bundleFeedback"], "The loaded bundle is stale. Build it again for the current selection.")
+
+    def test_bundle_ready_render_accepts_non_bmp_bundle_and_keeps_copy_available(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "READY", runnable: true, source_video_id: "VID1", source_video_url: "https://example.com", updated_at: "2026-07-02T00:00:00Z" } };
+            state.selectedProjectTranscript = { transcript: "Saved transcript", is_template: false, has_real_content: true };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: true, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedWorkflowBundle = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              step_id: "prompt_1_transcript_analysis",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" },
+              bundle: "A🎥B",
+              bundle_sha256: "sha-bundle",
+              bundle_character_count: 3,
+              prompt_file_sha256: "prompt-sha",
+              input_artifact_ids: [],
+              missing_optional_inputs: [],
+              required_model: "Gemini",
+              output_contract: { response_mode: "SINGLE_ARTIFACT" },
+              identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "prompt_1_transcript_analysis", bundle_sha256: "sha-bundle" },
+            };
+            render();
+            return {
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+              previewValue: document.getElementById("bundlePreviewText").value,
+              copyDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="copyBundleBtn" disabled'),
+            };
+            """
+        )
+        self.assertNotIn("Bundle Error", result["detailHtml"])
+        self.assertNotIn("loaded workflow bundle metadata is inconsistent", result["detailHtml"])
+        self.assertIn("Bundle Status", result["detailHtml"])
+        self.assertIn("Bundle Preview", result["detailHtml"])
+        self.assertFalse(result["copyDisabled"])
 
     def test_clipboard_fallback_restores_focus_and_cleans_up(self):
         result = run_ui_runtime_scenario(

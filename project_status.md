@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Task 10D Closeout - Maintenance / Operator Mode
+Task 10E Complete - Maintenance / Operator Mode
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
@@ -22,12 +22,19 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 
 ## Final Repository Baseline
 - Branch: `master`
+- Task 10E baseline before commit/push: `fc2343d5686ba50e21167cd7345fc3730390a151`
+- Task 10E pending subject: `fix: handle unicode workflow bundle counts`
 - Task 10D code baseline: `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580`
 - Task 10D code subject: `feat: prioritize next workflow action`
 - Task 10C code baseline: `1c399940ee9b72bb5e0508776674cd0ca6563cc2`
 - Task 10C code subject: `feat: streamline project creation flow`
 
 ## Final Verification Summary
+- Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`118` run, `118` passed, `0` failures, `0` errors)
+- Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
+- Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
+- Real Sulla bundle live read-only verification: `PASS`
+- Genuine bundle metadata mismatch rejection: `PASS`
 - Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`113` run, `113` passed, `0` failures, `0` errors)
 - Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
 - Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
@@ -43,6 +50,22 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 - `CORE_PROJECT_COMPLETE`
 - `MAINTENANCE_MODE`
 - `SAFE_TO_STOP`
+
+## Task 10E Closeout
+- Task 10E is complete and closes the false workflow-bundle metadata blocker without mutating workflow runtime, analytics runtime, tokens, or protected project artifacts.
+- Root cause: backend bundle character counts are measured with Python Unicode code points, while the old frontend validation used JavaScript `String.length`, which counts UTF-16 code units and over-counted non-BMP characters.
+- Repair: the frontend now validates bundle character counts with `Array.from(value).length`, preserving the existing integer/type checks and all stale-bundle identity, hash, and mismatch rejection logic.
+- Accepted live evidence for the real Sulla bundle remains:
+  - backend bundle character count `23532`
+  - corrected frontend bundle character count `23532`
+  - old JavaScript `String.length` result `23533`
+  - read-only UI result `Bundle Status PASS`
+  - `Copy Complete Bundle` enabled
+  - `Bundle Preview` available
+  - false metadata inconsistency error absent
+- Genuine mismatched bundle metadata is still rejected after the repair.
+- The project returns to normal operator and maintenance mode with no active bundle metadata blocker.
+- `implement.docx` remains unrelated and untracked.
 
 ## Task 10D Closeout
 - Task 10D and Task 10D.1 are complete. The code repair was committed and pushed as `84c1bc62e38fd1194d2dbd3d458ec4c422f1d580` (`feat: prioritize next workflow action`).

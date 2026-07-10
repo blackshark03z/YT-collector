@@ -2648,11 +2648,16 @@ function bundleMatchesSelection(bundle) {
   );
 }
 
+function unicodeCodePointCount(value) {
+  if (typeof value !== "string") return NaN;
+  return Array.from(value).length;
+}
+
 function bundleValidationError(bundle) {
   if (!bundle || typeof bundle !== "object") return "Load a valid bundle for the selected step before copying.";
   if (typeof bundle.bundle !== "string") return "The loaded workflow bundle is missing its text payload.";
-  if (typeof bundle.bundle_character_count !== "number") return "The loaded workflow bundle is missing a valid character count.";
-  if (bundle.bundle.length !== bundle.bundle_character_count) return "The loaded workflow bundle metadata is inconsistent.";
+  if (typeof bundle.bundle_character_count !== "number" || !Number.isInteger(bundle.bundle_character_count) || bundle.bundle_character_count < 0) return "The loaded workflow bundle is missing a valid character count.";
+  if (unicodeCodePointCount(bundle.bundle) !== bundle.bundle_character_count) return "The loaded workflow bundle metadata is inconsistent.";
   return "";
 }
 
