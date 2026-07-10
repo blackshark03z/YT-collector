@@ -1661,25 +1661,16 @@ HTML_PAGE = r"""<!doctype html>
           <div id="projectListPanel" class="stack" style="margin-top:12px"></div>
         </div>
         <div class="panel">
-          <div class="row" style="justify-content:space-between;align-items:flex-start;gap:12px">
+          <div class="row" id="projectDetailShellHeader" style="justify-content:space-between;align-items:flex-start;gap:12px">
             <div>
               <h3 style="margin:0">Project Detail</h3>
-              <div class="meta">Selected project workflow, candidate controls, and production handoff.</div>
+              <div class="meta" id="projectDetailShellMeta">Selected project workflow, candidate controls, and production handoff.</div>
             </div>
           </div>
           <div id="projectDetailState" class="status" style="margin-top:12px"></div>
+          <div id="projectTranscriptPanel" class="result" style="margin-top:12px"></div>
           <div id="projectDetailPanel" class="result" style="margin-top:12px"></div>
           <div id="validationPanel" class="result" style="margin-top:12px"></div>
-          <div class="row">
-            <button class="secondary" id="validateProjectBtn" disabled>Validate Inputs</button>
-            <button class="ghost" id="openProjectBtn" disabled data-cutover-state="disabled">Open Project Folder</button>
-            <button class="ghost" id="openTranscriptBtn" disabled data-cutover-state="disabled">Open Transcript File</button>
-          </div>
-          <label for="transcript">Manual Transcript</label>
-          <textarea id="transcript" placeholder="Select a project to load its canonical transcript." disabled></textarea>
-          <div class="row" style="margin-top:10px">
-            <button id="saveTranscriptBtn" disabled>Save Transcript</button>
-          </div>
         </div>
       </section>
 
@@ -1717,7 +1708,9 @@ const state = {
   createProjectWorkflowValue: "",
   createProjectFocusPending: false,
   workflowStartFocusPending: false,
+  transcriptFocusPendingProjectKey: null,
   transcriptDraft: "",
+  transcriptDraftByProjectKey: {},
   isLoadingChannels: false,
   isLoadingSummary: false,
   isLoadingChannelAnalytics: false,
@@ -1918,6 +1911,80 @@ function currentWorkflowState() {
   return state.selectedProjectWorkflow && state.selectedProjectWorkflow.state ? state.selectedProjectWorkflow.state : {};
 }
 
+function projectSelectionKey(channelSlugArg, projectSlugArg) {
+  const channelSlug = String(channelSlugArg || "").trim();
+  const projectSlug = String(projectSlugArg || "").trim();
+  if (!channelSlug || !projectSlug) return "";
+  return `${channelSlug}::${projectSlug}`;
+}
+
+function currentProjectSelectionKey() {
+  return projectSelectionKey(state.selectedChannelSlug, state.selectedProjectSlug);
+}
+
+function transcriptDraftForProject(channelSlugArg, projectSlugArg) {
+  const key = projectSelectionKey(channelSlugArg, projectSlugArg);
+  if (!key) return "";
+  return typeof state.transcriptDraftByProjectKey[key] === "string" ? state.transcriptDraftByProjectKey[key] : "";
+}
+
+function rememberTranscriptDraftForProject(channelSlugArg, projectSlugArg, draftValue) {
+  const key = projectSelectionKey(channelSlugArg, projectSlugArg);
+  if (!key) return;
+  state.transcriptDraftByProjectKey[key] = typeof draftValue === "string" ? draftValue : "";
+}
+
+function currentWorkflowStepRecord() {
+  const workflowState = currentWorkflowState();
+  if (!workflowState.current_step_id) return null;
+  return workflowStepList().find((step) => step.step_id === workflowState.current_step_id) || null;
+}
+
+function selectedProjectHasSavedTranscript() {
+  return !!(state.selectedProjectTranscript && state.selectedProjectTranscript.has_real_content);
+}
+
+function isTranscriptAnalysisStep(step) {
+  if (!step) return false;
+  const stepId = String(step.step_id || "").toLowerCase();
+  const displayName = String(step.display_name || "").toLowerCase();
+  return stepId.includes("transcript") || displayName.includes("transcript");
+}
+
+function transcriptPanelProjectState() {
+  const currentStep = currentWorkflowStepRecord();
+  const currentCandidate = currentStep ? stepCandidateSummary(currentStep.step_id) : null;
+  const workflowCompleted = !!(state.selectedProjectProductionPackage && (state.selectedProjectProductionPackage.lifecycle === "PRODUCTION_READY" || state.selectedProjectProductionPackage.ready_for_export));
+  const hasDraft = !!String(state.transcriptDraft || "").trim();
+  const transcriptSaved = selectedProjectHasSavedTranscript();
+  const hasWorkflowProgress = !!(
+    activeBundleRecord()
+    || parsedOutputMatchesSelection(state.parsedOutputResult)
+    || String(state.pastedOutputDraft || "").trim()
+    || (currentCandidate && (currentCandidate.candidate_group_id || currentCandidate.approved_group_id || currentCandidate.status === "CANDIDATE" || currentCandidate.status === "APPROVED"))
+  );
+  const transcriptRequired = !!(
+    state.selectedProjectSlug
+    && state.selectedProjectDetail
+    && state.selectedProjectWorkflow
+    && !workflowCompleted
+    && currentStep
+    && Number(currentStep.order || 0) === 1
+    && isTranscriptAnalysisStep(currentStep)
+    && !transcriptSaved
+    && !hasWorkflowProgress
+  );
+  return {
+    current_step: currentStep,
+    workflow_completed: workflowCompleted,
+    transcript_required: transcriptRequired,
+    transcript_saved: transcriptSaved,
+    has_draft: hasDraft,
+    show_primary_panel: transcriptRequired,
+    show_collapsed_panel: !transcriptRequired && !workflowCompleted && (transcriptSaved || hasDraft),
+  };
+}
+
 function currentWorkflowLifecycle() {
   const productionPackage = state.selectedProjectProductionPackage;
   const workflowState = currentWorkflowState();
@@ -2057,6 +2124,12 @@ function setActiveWorkspace(nextWorkspace) {
   const normalized = normalizeWorkspace(nextWorkspace);
   if (normalized === state.activeWorkspace) return;
   state.activeWorkspace = normalized;
+  if (normalized === "workflow") {
+    const panelState = transcriptPanelProjectState();
+    if (panelState.show_primary_panel) {
+      state.transcriptFocusPendingProjectKey = currentProjectSelectionKey();
+    }
+  }
   render();
 }
 
@@ -2434,6 +2507,7 @@ function clearProjectSelectionState() {
   state.bundleFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
   state.candidateSaveFeedback = { kind: "", channelSlug: null, projectSlug: null, stepId: null, text: "" };
   state.lastSaveCandidateResult = null;
+  state.transcriptFocusPendingProjectKey = null;
 }
 
 function clearSelectedChannelAnalyticsState() {
@@ -2725,8 +2799,12 @@ function stepAvailabilitySummary(step) {
 function bundleButtonModel() {
   const workflow = state.selectedProjectWorkflow;
   const step = selectedWorkflowStepRecord();
+  const transcriptState = transcriptPanelProjectState();
   if (!state.selectedChannelSlug || !state.selectedProjectSlug || !workflow || !step) {
     return { disabled: true, label: "Build Complete Bundle", helper: "Load a selected project workflow before requesting a bundle." };
+  }
+  if (transcriptState.transcript_required) {
+    return { disabled: true, label: "Build Complete Bundle", helper: "Save the manual transcript before building the first workflow bundle." };
   }
   const promptSet = workflow.definition && workflow.definition.prompt_set ? workflow.definition.prompt_set : {};
   if (promptSet.status !== "AVAILABLE" || !promptSet.bundle_available) {
@@ -3069,7 +3147,8 @@ function setSelectedProjectSlug(nextSlug) {
   state.selectedProjectValidation = null;
   clearWorkflowState();
   state.projectDetailError = "";
-  state.transcriptDraft = "";
+  state.transcriptDraft = transcriptDraftForProject(state.selectedChannelSlug, normalized);
+  state.transcriptFocusPendingProjectKey = normalized ? projectSelectionKey(state.selectedChannelSlug, normalized) : null;
   clearProjectFeedback();
   render();
   if (state.selectedProjectSlug) {
@@ -3470,28 +3549,21 @@ function renderProjectCreateState() {
 
 function renderProjectDetailState() {
   const target = document.getElementById("projectDetailState");
+  const shellHeader = document.getElementById("projectDetailShellHeader");
+  const transcriptPanel = document.getElementById("projectTranscriptPanel");
   const panel = document.getElementById("projectDetailPanel");
   const validationPanel = document.getElementById("validationPanel");
-  const transcript = document.getElementById("transcript");
-  const saveButton = document.getElementById("saveTranscriptBtn");
-  const validateButton = document.getElementById("validateProjectBtn");
   const save = transcriptSaveModel();
   const validate = validationModel();
   const feedback = projectFeedbackForSelection();
   const project = selectedProjectSummaryRecord();
-
-  transcript.disabled = save.disabled && !(state.selectedChannelSlug && state.selectedProjectSlug && state.selectedProjectDetail);
-  transcript.value = state.transcriptDraft;
-  saveButton.disabled = save.disabled;
-  saveButton.textContent = save.label;
-  validateButton.disabled = validate.disabled;
-  validateButton.textContent = validate.label;
 
   if (!state.selectedChannelSlug) {
     target.innerHTML = `
       <div class="check"><strong>Project Detail</strong>${pill("WAITING")}</div>
       <div class="meta">Select a channel before choosing a project.</div>
     `;
+    transcriptPanel.innerHTML = "";
     panel.innerHTML = "";
     validationPanel.innerHTML = "";
     return;
@@ -3502,6 +3574,7 @@ function renderProjectDetailState() {
       <div class="check"><strong>Project Detail</strong>${pill("WAITING")}</div>
       <div class="meta">Select a canonical project to load its detail, transcript, and workflow controls.</div>
     `;
+    transcriptPanel.innerHTML = "";
     panel.innerHTML = "";
     validationPanel.innerHTML = "";
     return;
@@ -3514,12 +3587,14 @@ function renderProjectDetailState() {
   `;
 
   if (state.isLoadingProjectDetail && !state.selectedProjectDetail) {
+    transcriptPanel.innerHTML = "";
     panel.innerHTML = `<div class="notice"><strong>Loading</strong><span class="meta">Fetching canonical project detail and transcript...</span></div>`;
     validationPanel.innerHTML = "";
     return;
   }
 
   if (!state.selectedProjectDetail) {
+    transcriptPanel.innerHTML = "";
     panel.innerHTML = `
       <div class="notice">
         <strong>Project detail unavailable</strong>
@@ -3562,6 +3637,70 @@ function renderProjectDetailState() {
       ? state.lastSaveCandidateResult
       : null;
   const workflowCompleted = !!(productionPackage && (productionPackage.lifecycle === "PRODUCTION_READY" || productionPackage.ready_for_export));
+  const transcriptPanelState = transcriptPanelProjectState();
+  const transcriptSummaryLabel = transcriptPanelState.transcript_saved ? "Transcript saved" : (transcriptPanelState.has_draft ? "Draft preserved" : "Manual Transcript");
+  const transcriptDisabled = save.disabled && !(state.selectedChannelSlug && state.selectedProjectSlug && state.selectedProjectDetail);
+  const compactProjectDetailShell = !!(transcriptPanelState.show_primary_panel || workflowCompleted);
+  if (shellHeader) {
+    shellHeader.hidden = compactProjectDetailShell;
+    shellHeader.style.display = compactProjectDetailShell ? "none" : "flex";
+  }
+
+  if (compactProjectDetailShell) {
+    target.innerHTML = "";
+  }
+
+  const transcriptPanelStatusHtml = `
+    <div class="status" style="margin-top:12px" role="status" aria-live="polite">
+      <div class="check"><strong>${escapeHtml(transcriptSummaryLabel)}</strong>${pill(transcriptPanelState.transcript_required ? "READY" : (transcriptPanelState.transcript_saved ? "APPROVED" : (transcriptPanelState.has_draft ? "WAITING" : "READY")))}</div>
+      <div class="meta">${escapeHtml(transcriptPanelState.transcript_required ? "Paste the competitor transcript here to begin Prompt 1." : (save.helper || "Manual transcript input is available when this project needs it again."))}</div>
+    </div>
+  `;
+  const transcriptLabelHtml = transcriptPanelState.show_primary_panel ? "" : `<label for="transcript" style="margin-top:12px">Manual Transcript</label>`;
+  const transcriptTextareaStyle = transcriptPanelState.show_primary_panel ? ` style="min-height:140px;height:140px"` : "";
+  const transcriptControlsHtml = `
+    ${transcriptLabelHtml}
+    <textarea id="transcript" aria-label="Manual Transcript" placeholder="Paste the manually collected competitor transcript here."${transcriptTextareaStyle}${transcriptDisabled ? " disabled" : ""}>${escapeHtml(state.transcriptDraft)}</textarea>
+    <div class="row" style="margin-top:12px">
+      <button id="saveTranscriptBtn" class="primary"${save.disabled ? " disabled" : ""}>${escapeHtml(save.label)}</button>
+    </div>
+  `;
+  const transcriptSecondaryControlsHtml = `
+    <div class="row" style="margin-top:12px">
+      <button class="secondary" id="validateProjectBtn"${validate.disabled ? " disabled" : ""}>${escapeHtml(validate.label)}</button>
+      <button class="ghost" id="openProjectBtn" disabled data-cutover-state="disabled">Open Project Folder</button>
+      <button class="ghost" id="openTranscriptBtn" disabled data-cutover-state="disabled">Open Transcript File</button>
+    </div>
+  `;
+
+  if (transcriptPanelState.show_primary_panel) {
+    transcriptPanel.innerHTML = `
+      <section class="panel" id="manualTranscriptPrimaryPanel">
+        <div class="workspace-block-header">
+          <div>
+            <h3 style="margin:0">Manual Transcript</h3>
+            <div class="meta">Paste the competitor transcript here to begin Prompt 1.</div>
+          </div>
+          <div>${pill("READY")}</div>
+        </div>
+        ${transcriptControlsHtml}
+        ${transcriptPanelStatusHtml}
+      </section>
+    `;
+  } else if (transcriptPanelState.show_collapsed_panel) {
+    transcriptPanel.innerHTML = `
+      <details>
+        <summary>Manual Transcript</summary>
+        <div class="card" style="margin-top:12px">
+          <div class="meta">${escapeHtml(transcriptPanelState.transcript_saved ? "The transcript is already available for this project." : "This unsent transcript draft is preserved for the selected project only.")}</div>
+          ${transcriptControlsHtml}
+          ${transcriptPanelStatusHtml}
+        </div>
+      </details>
+    `;
+  } else {
+    transcriptPanel.innerHTML = "";
+  }
 
   const renderArtifacts = (items, requiredLabel) => {
     if (!items.length) {
@@ -3628,9 +3767,16 @@ function renderProjectDetailState() {
     `;
   }).join("");
 
-  const bundleFeedbackHtml = bundleFeedback.text
-    ? `<div class="check"><strong>${bundleFeedback.kind === "error" ? "Bundle Error" : "Bundle Status"}</strong>${pill(bundleFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(bundleFeedback.text)}</div>`
-    : `<div class="meta">${escapeHtml(state.bundleError || bundleButton.helper || copyButton.helper)}</div>`;
+  const bundleReady = !!bundle;
+  const bundleBuildError = !!(bundleFeedback.kind === "error" || state.bundleError);
+  const bundleNotYetAvailable = !bundleReady && !bundleBuildError && transcriptPanelState.transcript_required;
+  const bundleFeedbackHtml = bundleBuildError
+    ? `<div class="check"><strong>Bundle Error</strong>${pill("ERROR")}</div><div class="meta">${escapeHtml(bundleFeedback.text || state.bundleError)}</div>`
+    : bundleReady
+    ? `<div class="check"><strong>Bundle Status</strong>${pill("PASS")}</div><div class="meta">${escapeHtml(bundleFeedback.text || copyButton.helper)}</div>`
+    : bundleNotYetAvailable
+    ? `<div class="meta">Bundle tools will appear after the required transcript is saved.</div>`
+    : `<div class="meta">${escapeHtml(bundleButton.helper || copyButton.helper)}</div>`;
   const parseFeedbackHtml = state.parsedOutputError
     ? `<div class="check"><strong>Output Preview Error</strong>${pill("ERROR")}</div><div class="meta">${escapeHtml(state.parsedOutputError)}</div>`
     : `<div class="meta">${escapeHtml(parseButton.helper)}</div>`;
@@ -3741,11 +3887,13 @@ function renderProjectDetailState() {
         </div>
         ${staleNotice}
         ${invalidatedNotice}
+        ${transcriptPanelState.show_primary_panel ? "" : `
         <div class="row" style="margin-top:12px">
-          <button type="button" class="primary" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>
-          <button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>
+          ${!bundleNotYetAvailable ? `<button type="button" class="primary" id="buildBundleBtn" ${bundleButton.disabled ? "disabled" : ""}>${escapeHtml(bundleButton.label)}</button>` : ""}
+          ${(bundleReady || bundleBuildError) ? `<button type="button" class="secondary" id="copyBundleBtn" ${copyButton.disabled ? "disabled" : ""}>${escapeHtml(copyButton.label)}</button>` : ""}
         </div>
         <div class="status" style="margin-top:12px" role="status" aria-live="polite">${bundleFeedbackHtml}</div>
+        ${bundleReady ? `
         <div class="card" style="margin-top:12px">
           <strong>Bundle Preview</strong>
           <div class="meta">The preview below is plain text from the API. Copy Complete Bundle uses the exact full stored bundle.</div>
@@ -3758,8 +3906,9 @@ function renderProjectDetailState() {
             </div>
             <label for="bundlePreviewText" style="margin-top:12px">Complete Prompt Bundle Preview</label>
             <textarea id="bundlePreviewText" readonly spellcheck="false"></textarea>
-          ` : `<div class="notice" style="margin-top:12px"><strong>No bundle loaded</strong><span class="meta">Select a step, then click Build Complete Bundle to preview and copy the exact full response.</span></div>`}
+          ` : ""}
         </div>
+        ` : ""}
         <div class="card" style="margin-top:12px">
           <strong>Paste AI Output</strong>
           <div class="meta">Paste the model response for the loaded bundle. Parse and Preview checks it in memory only and does not write any artifact files.</div>
@@ -3775,6 +3924,7 @@ function renderProjectDetailState() {
           <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
           ${parsedOutputHtml}
         </div>
+        `}
         <details style="margin-top:12px">
           <summary>Technical Details</summary>
           <div class="stack" style="margin-top:12px">
@@ -3883,7 +4033,7 @@ function renderProjectDetailState() {
         </select>
         <div class="step-rail" style="margin-top:12px">${compactWorkflowRows}</div>
       </div>`}
-      ${selectedStepHtml}
+      ${transcriptPanelState.show_primary_panel ? `<details style="margin-top:12px"><summary>Workflow Details</summary>${selectedStepHtml}</details>` : selectedStepHtml}
     `
     : `<div class="notice" style="margin-top:12px"><strong>${state.workflowError ? "Workflow unavailable" : "Workflow loading"}</strong><span class="meta">${escapeHtml(state.workflowError || (state.isLoadingWorkflow ? "Fetching the selected project workflow..." : "Workflow data will appear here after the selected project detail loads."))}</span></div>`;
 
@@ -3892,7 +4042,7 @@ function renderProjectDetailState() {
       <div class="step-heading">
         <div>
           <h3 style="margin:0">Content Workflow</h3>
-          <div class="meta">${escapeHtml(workflowCompleted ? "Completed workflow result with the full prompt rail and handoff-ready output first." : "Selected project workflow with only the current step expanded.")}</div>
+          <div class="meta">${escapeHtml(workflowCompleted ? "Completed workflow result with the full prompt rail and handoff-ready output first." : (transcriptPanelState.show_primary_panel ? "Complete the current transcript input first, then continue the workflow." : "Selected project workflow with only the current step expanded."))}</div>
         </div>
         <div>${pill(state.isLoadingWorkflow ? "LOADING" : (workflow ? "READY" : "WAITING"))}</div>
       </div>
@@ -3919,10 +4069,7 @@ function renderProjectDetailState() {
 
   if (!state.selectedProjectValidation) {
     validationPanel.innerHTML = `
-      <div class="notice">
-        <strong>Validation not run yet</strong>
-        <span class="meta">Run canonical validation for the selected project to refresh the workflow readiness checks.</span>
-      </div>
+      ${transcriptPanelState.show_primary_panel ? `<details><summary>Secondary Details</summary><div class="card" style="margin-top:12px">${transcriptSecondaryControlsHtml}<div class="meta" style="margin-top:12px">Run canonical validation for the selected project after the transcript is in place.</div></div></details>` : `<div class="notice"><strong>Validation not run yet</strong><span class="meta">Run canonical validation for the selected project to refresh the workflow readiness checks.</span></div>`}
     `;
     return;
   }
@@ -3931,8 +4078,9 @@ function renderProjectDetailState() {
   const entries = Object.keys(checks).sort().map((key) => `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(checks[key] ? "PASS" : "FAILED")}</div>`).join("");
   validationPanel.innerHTML = `
     <details>
-      <summary>Technical Details</summary>
+      <summary>${transcriptPanelState.show_primary_panel ? "Secondary Details" : "Technical Details"}</summary>
       <div class="card" style="margin-top:12px">
+        ${transcriptPanelState.show_primary_panel ? transcriptSecondaryControlsHtml : ""}
         <strong>Validation Result</strong>
         <div class="meta">Structured canonical validation for the selected project.</div>
         <div class="stack" style="margin-top:12px">${entries}</div>
@@ -4073,6 +4221,16 @@ function render() {
       const target = stepSelect || primaryAction;
       if (target && !target.disabled) target.focus();
     }, 0);
+  }
+  if (state.transcriptFocusPendingProjectKey && state.transcriptFocusPendingProjectKey === currentProjectSelectionKey()) {
+    const panelState = transcriptPanelProjectState();
+    if (panelState.show_primary_panel) {
+      state.transcriptFocusPendingProjectKey = null;
+      setTimeout(() => {
+        const transcriptInput = document.getElementById("transcript");
+        if (transcriptInput && !transcriptInput.disabled) transcriptInput.focus();
+      }, 0);
+    }
   }
 }
 
@@ -4412,18 +4570,20 @@ async function loadSelectedProjectDetail(projectSlugArg, channelSlugArg) {
       const transcript = await v2Api(`channels/${encodeURIComponent(channelSlug)}/projects/${encodeURIComponent(projectSlug)}/transcript`);
       if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
       state.selectedProjectTranscript = transcript;
-      state.transcriptDraft = typeof transcript.transcript === "string" ? transcript.transcript : "";
+      const preservedDraft = transcriptDraftForProject(channelSlug, projectSlug);
+      state.transcriptDraft = preservedDraft || (typeof transcript.transcript === "string" ? transcript.transcript : "");
+      rememberTranscriptDraftForProject(channelSlug, projectSlug, state.transcriptDraft);
     } catch (error) {
       if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
       state.selectedProjectTranscript = null;
-      state.transcriptDraft = "";
+      state.transcriptDraft = transcriptDraftForProject(channelSlug, projectSlug);
       state.projectDetailError = describeError(error, "Could not load the selected project transcript.");
     }
   } catch (error) {
     if (requestId !== state.projectDetailRequestId || channelSlug !== state.selectedChannelSlug || projectSlug !== state.selectedProjectSlug) return;
     state.selectedProjectDetail = null;
     state.selectedProjectTranscript = null;
-    state.transcriptDraft = "";
+    state.transcriptDraft = transcriptDraftForProject(channelSlug, projectSlug);
     state.projectDetailError = describeError(error, "Could not load the selected project detail.");
   } finally {
     if (requestId === state.projectDetailRequestId) {
@@ -5049,6 +5209,7 @@ async function saveTranscriptAction() {
   const requestId = state.transcriptSaveAction.requestId + 1;
   const shouldOverwrite = !!(state.selectedProjectTranscript && state.selectedProjectTranscript.has_real_content);
   state.transcriptSaveAction = { busy: true, slug, projectSlug, requestId };
+  rememberTranscriptDraftForProject(slug, projectSlug, transcriptText);
   setProjectFeedback("info", slug, projectSlug, "Saving transcript for the selected project...");
   render();
 
@@ -5254,11 +5415,6 @@ document.getElementById("channelSelect").addEventListener("change", (event) => {
 });
 document.getElementById("connectChannelBtn").addEventListener("click", startOAuthAction);
 document.getElementById("syncMetricsBtn").addEventListener("click", syncMetricsAction);
-document.getElementById("saveTranscriptBtn").addEventListener("click", saveTranscriptAction);
-document.getElementById("validateProjectBtn").addEventListener("click", validateProjectAction);
-document.getElementById("transcript").addEventListener("input", (event) => {
-  state.transcriptDraft = event.target.value;
-});
 document.getElementById("workspaceNav").addEventListener("click", (event) => {
   const button = event.target.closest("[data-workspace]");
   if (!button) return;
@@ -5432,6 +5588,21 @@ document.getElementById("projectDetailPanel").addEventListener("click", (event) 
   }
   if (event.target.id === "rejectCandidateBtn") {
     candidateDecisionAction("REJECT");
+  }
+});
+document.getElementById("workflowWorkspace").addEventListener("click", (event) => {
+  if (event.target.id === "saveTranscriptBtn") {
+    saveTranscriptAction();
+    return;
+  }
+  if (event.target.id === "validateProjectBtn") {
+    validateProjectAction();
+  }
+});
+document.getElementById("workflowWorkspace").addEventListener("input", (event) => {
+  if (event.target.id === "transcript") {
+    state.transcriptDraft = event.target.value;
+    rememberTranscriptDraftForProject(state.selectedChannelSlug, state.selectedProjectSlug, state.transcriptDraft);
   }
 });
 document.getElementById("summaryPanel").addEventListener("click", (event) => {

@@ -213,6 +213,7 @@ globalThis.window = window;
   "projectListPanel",
   "projectCreateState",
   "projectDetailState",
+  "projectTranscriptPanel",
   "projectDetailPanel",
   "validationPanel",
   "transcript",
@@ -505,6 +506,10 @@ class UiFrontendContractTests(unittest.TestCase):
         self.assertIn("Save Candidate", self.html)
         self.assertIn("Paste AI Output", self.html)
         self.assertIn("Prompt bundle unavailable for this workflow version.", self.html)
+
+    def test_workflow_shell_places_transcript_panel_before_detail_panel(self):
+        self.assertIn('id="projectTranscriptPanel"', self.html)
+        self.assertLess(self.html.index('id="projectTranscriptPanel"'), self.html.index('id="projectDetailPanel"'))
 
     def test_workflow_step_selection_clears_bundle_without_auto_fetch(self):
         self.assertIn("setSelectedWorkflowStepId(nextStepId)", self.html)
@@ -954,13 +959,294 @@ class UiFrontendRuntimeTests(unittest.TestCase):
             render();
             return {
               listHtml: document.getElementById("projectListPanel").innerHTML,
+              summaryHtml: document.getElementById("projectDetailState").innerHTML,
+              shellHeaderHidden: document.getElementById("projectDetailShellHeader").hidden,
               detailHtml: document.getElementById("projectDetailPanel").innerHTML,
             };
             """
         )
         self.assertIn('id="openCreateProjectBtn"', result["listHtml"])
         self.assertIn('id="openChangeProjectBtn"', result["listHtml"])
+        self.assertEqual(result["summaryHtml"].strip(), "")
+        self.assertTrue(result["shellHeaderHidden"])
         self.assertIn("Workflow completed", result["detailHtml"])
+
+    def test_transcript_required_project_prioritizes_manual_transcript_and_hides_bundle_tools(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING", runnable: true, source_video_url: "https://example.com" } };
+            state.selectedProjectWorkflow = {
+              channel_slug: "channel-a",
+              project_slug: "project-a",
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [
+                  { step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] },
+                  { step_id: "prompt_2_historical_research", order: 2, display_name: "Historical Research", required_model: "Gemini", input_artifact_ids: ["transcript_analysis"], optional_input_artifact_ids: [], output_artifact_ids: ["research_pack"], resulting_lifecycle_state: "TWO", constraints: [] },
+                ],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: "prompt_2_historical_research", current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [{ artifact_id: "transcript_analysis", display_name: "Transcript Analysis", relative_path: "workflow/transcript_analysis.md", exists: false }],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            render();
+            return {
+              summaryHtml: document.getElementById("projectDetailState").innerHTML,
+              shellHeaderHidden: document.getElementById("projectDetailShellHeader").hidden,
+              transcriptHtml: document.getElementById("projectTranscriptPanel").innerHTML,
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+              validationHtml: document.getElementById("validationPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["summaryHtml"].strip(), "")
+        self.assertTrue(result["shellHeaderHidden"])
+        self.assertIn("Manual Transcript", result["transcriptHtml"])
+        self.assertIn("Save Transcript", result["transcriptHtml"])
+        self.assertNotIn("<details>", result["transcriptHtml"])
+        self.assertIn("Workflow Steps", result["detailHtml"])
+        self.assertIn("Selected Step Detail", result["detailHtml"])
+        self.assertNotIn("Build Complete Bundle", result["detailHtml"])
+        self.assertNotIn("Copy Complete Bundle", result["detailHtml"])
+        self.assertNotIn("Bundle Preview", result["detailHtml"])
+        self.assertIn("Secondary Details", result["validationHtml"])
+
+    def test_transcript_required_project_keeps_manual_transcript_ahead_of_project_detail_summary(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            render();
+            return {
+              projectDetailStateHtml: document.getElementById("projectDetailState").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["projectDetailStateHtml"].strip(), "")
+
+    def test_transcript_required_project_focuses_textarea_and_keeps_single_transcript_form(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            state.transcriptFocusPendingProjectKey = "channel-a::project-a";
+            render();
+            await flush();
+            return {
+              activeElementId: document.activeElement && document.activeElement.id,
+              transcriptCount: (document.getElementById("projectTranscriptPanel").innerHTML.match(/id="transcript"/g) || []).length + (document.getElementById("projectDetailPanel").innerHTML.match(/id="transcript"/g) || []).length,
+            };
+            """
+        )
+        self.assertEqual(result["activeElementId"], "transcript")
+        self.assertEqual(result["transcriptCount"], 1)
+
+    def test_switching_to_workflow_workspace_focuses_transcript_when_manual_input_is_required(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.activeWorkspace = "overview";
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            render();
+            setActiveWorkspace("workflow");
+            await flush();
+            return {
+              activeElementId: document.activeElement && document.activeElement.id,
+              workspace: state.activeWorkspace,
+            };
+            """
+        )
+        self.assertEqual(result["workspace"], "workflow")
+        self.assertEqual(result["activeElementId"], "transcript")
+
+    def test_transcript_draft_survives_safe_rerender_with_line_breaks(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "WAITING", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            render();
+            const transcriptText = "Line one\\nLine two\\n\\nLine four";
+            document.getElementById("workflowWorkspace").listeners["input"]({ target: { id: "transcript", value: transcriptText } });
+            state.selectedProjectValidation = { checks: { transcript_present: false } };
+            render();
+            return {
+              draft: state.transcriptDraft,
+              savedDraft: state.transcriptDraftByProjectKey["channel-a::project-a"],
+              transcriptHtml: document.getElementById("projectTranscriptPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["draft"], "Line one\nLine two\n\nLine four")
+        self.assertEqual(result["savedDraft"], "Line one\nLine two\n\nLine four")
+        self.assertIn("Line one", result["transcriptHtml"])
+
+    def test_transcript_draft_is_project_scoped_and_restored_after_switch_back(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.projects = [
+              { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING" },
+              { project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "WAITING" },
+            ];
+            const workflowPayload = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            fetchHandler = async (path) => {
+              if (path === "/api/v2/channels/channel-a/projects/project-a") return jsonResponse({ project: { project_slug: "project-a", project_name: "Project A", status: "READY", workflow_input_status: "WAITING", runnable: true } });
+              if (path === "/api/v2/channels/channel-a/projects/project-b") return jsonResponse({ project: { project_slug: "project-b", project_name: "Project B", status: "READY", workflow_input_status: "WAITING", runnable: true } });
+              if (path === "/api/v2/channels/channel-a/projects/project-a/workflow") return jsonResponse({ channel_slug: "channel-a", project_slug: "project-a", ...workflowPayload });
+              if (path === "/api/v2/channels/channel-a/projects/project-b/workflow") return jsonResponse({ channel_slug: "channel-a", project_slug: "project-b", ...workflowPayload });
+              if (path === "/api/v2/channels/channel-a/projects/project-a/transcript") return jsonResponse({ transcript: "", is_template: true, has_real_content: false });
+              if (path === "/api/v2/channels/channel-a/projects/project-b/transcript") return jsonResponse({ transcript: "", is_template: true, has_real_content: false });
+              return jsonResponse({ channels: [] });
+            };
+            setSelectedProjectSlug("project-a");
+            await flush();
+            await flush();
+            document.getElementById("workflowWorkspace").listeners["input"]({ target: { id: "transcript", value: "draft for A" } });
+            setSelectedProjectSlug("project-b");
+            await flush();
+            await flush();
+            const projectBDraft = state.transcriptDraft;
+            document.getElementById("workflowWorkspace").listeners["input"]({ target: { id: "transcript", value: "draft for B" } });
+            setSelectedProjectSlug("project-a");
+            await flush();
+            await flush();
+            return {
+              restoredDraft: state.transcriptDraft,
+              projectBDraft,
+              draftMap: state.transcriptDraftByProjectKey,
+            };
+            """
+        )
+        self.assertEqual(result["restoredDraft"], "draft for A")
+        self.assertEqual(result["projectBDraft"], "")
+        self.assertEqual(result["draftMap"]["channel-a::project-a"], "draft for A")
+        self.assertEqual(result["draftMap"]["channel-a::project-b"], "draft for B")
+
+    def test_clean_new_project_does_not_render_bundle_error_before_bundle_exists(self):
+        result = run_ui_runtime_scenario(
+            """
+            await flush();
+            state.selectedChannelSlug = "channel-a";
+            state.selectedProjectSlug = "project-a";
+            state.selectedProjectDetail = { project: { project_slug: "project-a", status: "READY", workflow_input_status: "WAITING", runnable: true } };
+            state.selectedProjectWorkflow = {
+              binding: { workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" },
+              definition: {
+                workflow_id: "wf-demo",
+                workflow_version: "2",
+                display_name: "Workflow Demo",
+                execution_mode: "ASSISTED",
+                prompt_set: { status: "AVAILABLE", bundle_available: true },
+                steps: [{ step_id: "prompt_1_transcript_analysis", order: 1, display_name: "Transcript Analysis", required_model: "Gemini", input_artifact_ids: [], optional_input_artifact_ids: [], output_artifact_ids: ["transcript_analysis"], resulting_lifecycle_state: "ONE", constraints: [] }],
+              },
+              state: { current_step_id: "prompt_1_transcript_analysis", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY", state_revision: 0, state_persisted: false, step_states: {} },
+              available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },
+              artifacts: [],
+            };
+            state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+            state.selectedProjectTranscript = { transcript: "", is_template: true, has_real_content: false };
+            render();
+            return { detailHtml: document.getElementById("projectDetailPanel").innerHTML };
+            """
+        )
+        self.assertNotIn("Bundle Error", result["detailHtml"])
+        self.assertNotIn("loaded workflow bundle metadata is inconsistent", result["detailHtml"])
 
     def test_only_one_create_project_form_exists_in_dom(self):
         result = run_ui_runtime_scenario(
