@@ -2836,8 +2836,15 @@ function copyBundleButtonModel() {
 function parseOutputButtonModel() {
   const bundle = activeBundleRecord();
   const step = selectedWorkflowStepRecord();
+  const validationStatus = validationStatusModel();
   if (!state.selectedChannelSlug || !state.selectedProjectSlug || !step || !bundle) {
     return { disabled: true, label: "Parse and Preview", helper: "Load a valid bundle for the selected step before parsing output." };
+  }
+  if (validationStatus.state === "RUNNING") {
+    return { disabled: true, label: "Parse and Preview", helper: "Validation is still running for the selected project." };
+  }
+  if (!validationStatus.passed) {
+    return { disabled: true, label: "Parse and Preview", helper: "Run validation first." };
   }
   if (!String(state.pastedOutputDraft || "").trim()) {
     return { disabled: true, label: "Parse and Preview", helper: "Paste the AI output before parsing." };
@@ -3119,6 +3126,119 @@ function validationModel() {
     disabled: busy,
     label: busy ? "Validating Inputs..." : "Validate Inputs",
     helper: "Run local canonical validation for the selected project only."
+  };
+}
+
+function validationResultPasses(result) {
+  if (!result || typeof result !== "object") return false;
+  const checks = result.checks;
+  if (!checks || typeof checks !== "object") return false;
+  const values = Object.values(checks);
+  if (!values.length) return false;
+  return values.every((value) => value === true);
+}
+
+function validationCheckLabel(key) {
+  const labels = {
+    project_json: "Project metadata exists",
+    competitor_reference: "Competitor reference exists",
+    channel_learnings: "Channel learnings snapshot is present",
+    channel_metrics: "Channel metrics snapshot is present",
+    competitor_raw_json: "Competitor source metadata exists",
+    transcript_real_content: "Transcript has real content",
+    workflow_directory: "Workflow directory exists",
+    ownership: "Project ownership matches the selected channel",
+    safe_snapshot_paths: "Snapshot paths stay inside the canonical project",
+  };
+  return labels[key] || key.replace(/_/g, " ");
+}
+
+function failedValidationCheckNames(result) {
+  if (!result || typeof result !== "object" || !result.checks || typeof result.checks !== "object") return [];
+  return Object.keys(result.checks).filter((key) => result.checks[key] !== true).map(validationCheckLabel);
+}
+
+function validationStatusModel() {
+  const validate = validationModel();
+  const busy = state.validationAction.busy
+    && state.validationAction.slug === state.selectedChannelSlug
+    && state.validationAction.projectSlug === state.selectedProjectSlug;
+  const feedback = projectFeedbackForSelection();
+  const result = state.selectedProjectValidation;
+  const passed = validationResultPasses(result)
+    && !!(result && result.project && result.project.workflow_input_status === "READY" && result.project.runnable === true);
+  const failedChecks = failedValidationCheckNames(result);
+
+  if (!state.selectedChannelSlug || !state.selectedProjectSlug || !state.selectedProjectDetail) {
+    return {
+      state: "UNAVAILABLE",
+      passed: false,
+      buttonClass: "secondary",
+      buttonLabel: validate.label,
+      buttonDisabled: true,
+      helper: validate.helper,
+      statusLabel: "WAITING",
+      title: "Validation unavailable",
+      detail: validate.helper,
+      failedChecks: [],
+    };
+  }
+  if (busy) {
+    return {
+      state: "RUNNING",
+      passed: false,
+      buttonClass: "primary",
+      buttonLabel: validate.label,
+      buttonDisabled: true,
+      helper: "Validation is still running for the selected project.",
+      statusLabel: "RUNNING",
+      title: "Validation running",
+      detail: "Checking canonical project inputs and refreshing workflow readiness.",
+      failedChecks: [],
+    };
+  }
+  if (!result) {
+    return {
+      state: "REQUIRED",
+      passed: false,
+      buttonClass: "primary",
+      buttonLabel: "Run Validation",
+      buttonDisabled: validate.disabled,
+      helper: "Run validation first.",
+      statusLabel: "REQUIRED",
+      title: "Validation required",
+      detail: "Run canonical validation for the selected project before parsing the pasted output.",
+      failedChecks: [],
+    };
+  }
+  if (!passed) {
+    const failedSummary = failedChecks.length
+      ? `Fix these checks before parsing: ${failedChecks.join(", ")}`
+      : "Canonical validation did not mark this project ready for workflow parsing.";
+    return {
+      state: "FAILED",
+      passed: false,
+      buttonClass: "primary",
+      buttonLabel: "Run Validation Again",
+      buttonDisabled: validate.disabled,
+      helper: failedSummary,
+      statusLabel: "FAILED",
+      title: "Validation failed",
+      detail: feedback.kind === "error" && feedback.text ? feedback.text : failedSummary,
+      failedChecks,
+    };
+  }
+  return {
+    state: "PASSED",
+    passed: true,
+    buttonClass: "secondary",
+    buttonLabel: "Run Validation Again",
+    buttonDisabled: validate.disabled,
+    helper: "Validation passed. Parse and Preview can now check the pasted output.",
+    statusLabel: "PASS",
+    title: "Validation passed",
+    detail: "Canonical validation confirms the selected project is ready for workflow parsing.",
+    failedChecks: [],
   };
 }
 
@@ -3560,6 +3680,7 @@ function renderProjectDetailState() {
   const validationPanel = document.getElementById("validationPanel");
   const save = transcriptSaveModel();
   const validate = validationModel();
+  const validationStatus = validationStatusModel();
   const feedback = projectFeedbackForSelection();
   const project = selectedProjectSummaryRecord();
 
@@ -3672,7 +3793,6 @@ function renderProjectDetailState() {
   `;
   const transcriptSecondaryControlsHtml = `
     <div class="row" style="margin-top:12px">
-      <button class="secondary" id="validateProjectBtn"${validate.disabled ? " disabled" : ""}>${escapeHtml(validate.label)}</button>
       <button class="ghost" id="openProjectBtn" disabled data-cutover-state="disabled">Open Project Folder</button>
       <button class="ghost" id="openTranscriptBtn" disabled data-cutover-state="disabled">Open Transcript File</button>
     </div>
@@ -3788,6 +3908,11 @@ function renderProjectDetailState() {
   const candidateFeedbackHtml = candidateSaveFeedback.text
     ? `<div class="check"><strong>${candidateSaveFeedback.kind === "error" ? "Candidate Save Error" : "Candidate Save Status"}</strong>${pill(candidateSaveFeedback.kind === "error" ? "ERROR" : "PASS")}</div><div class="meta">${escapeHtml(candidateSaveFeedback.text)}</div>`
     : `<div class="meta">${escapeHtml(saveCandidateButton.helper)}</div>`;
+  const validationStatusHtml = `
+    <div class="check"><strong>${escapeHtml(validationStatus.title)}</strong>${pill(validationStatus.statusLabel)}</div>
+    <div class="meta">${escapeHtml(validationStatus.detail)}</div>
+    ${validationStatus.failedChecks.length ? `<div class="meta" style="margin-top:8px">${escapeHtml(validationStatus.failedChecks.join(" | "))}</div>` : ""}
+  `;
   const parsedArtifactsHtml = parsedOutput && Array.isArray(parsedOutput.artifacts) && parsedOutput.artifacts.length
     ? parsedOutput.artifacts.map((artifact, index) => `
       <div class="card" style="margin-top:12px">
@@ -3919,13 +4044,19 @@ function renderProjectDetailState() {
           <div class="meta">Paste the model response for the loaded bundle. Parse and Preview checks it in memory only and does not write any artifact files.</div>
           <label for="pastedOutputText" style="margin-top:12px">AI Output</label>
           <textarea id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." ${bundle ? "" : "disabled"} spellcheck="false"></textarea>
+          <div class="status" style="margin-top:12px" role="status" aria-live="polite">${validationStatusHtml}</div>
           <div class="row" style="margin-top:12px">
-            <button type="button" class="primary" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
+            <button type="button" class="${escapeHtml(validationStatus.buttonClass)}" id="validateProjectBtn" ${validationStatus.buttonDisabled ? "disabled" : ""}>${escapeHtml(validationStatus.buttonLabel)}</button>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button type="button" class="${parseButton.disabled ? "secondary" : "primary"}" id="parseOutputBtn" ${parseButton.disabled ? "disabled" : ""}>${escapeHtml(parseButton.label)}</button>
+          </div>
+          <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
+          <div class="row" style="margin-top:12px">
             <button type="button" class="secondary" id="saveCandidateBtn" ${saveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(saveCandidateButton.label)}</button>
             <button type="button" class="success" id="approveCandidateBtn" ${approveCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(approveCandidateButton.label)}</button>
             <button type="button" class="danger" id="rejectCandidateBtn" ${rejectCandidateButton.disabled ? "disabled" : ""}>${escapeHtml(rejectCandidateButton.label)}</button>
           </div>
-          <div class="status" style="margin-top:12px" role="status" aria-live="polite">${parseFeedbackHtml}</div>
           <div class="status" style="margin-top:12px" role="status" aria-live="polite">${candidateFeedbackHtml}</div>
           ${parsedOutputHtml}
         </div>
@@ -4072,26 +4203,9 @@ function renderProjectDetailState() {
     });
   }
 
-  if (!state.selectedProjectValidation) {
-    validationPanel.innerHTML = `
-      ${transcriptPanelState.show_primary_panel ? `<details><summary>Secondary Details</summary><div class="card" style="margin-top:12px">${transcriptSecondaryControlsHtml}<div class="meta" style="margin-top:12px">Run canonical validation for the selected project after the transcript is in place.</div></div></details>` : `<div class="notice"><strong>Validation not run yet</strong><span class="meta">Run canonical validation for the selected project to refresh the workflow readiness checks.</span></div>`}
-    `;
-    return;
-  }
-
-  const checks = state.selectedProjectValidation.checks || {};
-  const entries = Object.keys(checks).sort().map((key) => `<div class="check"><strong>${escapeHtml(key)}</strong>${pill(checks[key] ? "PASS" : "FAILED")}</div>`).join("");
-  validationPanel.innerHTML = `
-    <details>
-      <summary>${transcriptPanelState.show_primary_panel ? "Secondary Details" : "Technical Details"}</summary>
-      <div class="card" style="margin-top:12px">
-        ${transcriptPanelState.show_primary_panel ? transcriptSecondaryControlsHtml : ""}
-        <strong>Validation Result</strong>
-        <div class="meta">Structured canonical validation for the selected project.</div>
-        <div class="stack" style="margin-top:12px">${entries}</div>
-      </div>
-    </details>
-  `;
+  validationPanel.innerHTML = transcriptPanelState.show_primary_panel
+    ? `<details><summary>Secondary Details</summary><div class="card" style="margin-top:12px">${transcriptSecondaryControlsHtml}<div class="meta" style="margin-top:12px">Technical maintenance actions stay collapsed until the transcript-required step is complete.</div></div></details>`
+    : "";
 }
 
 function renderAnalyticsWorkspace() {
@@ -5290,7 +5404,19 @@ async function validateProjectAction() {
     if (state.selectedProjectDetail && state.selectedProjectDetail.project && data.project) {
       state.selectedProjectDetail = { project: { ...state.selectedProjectDetail.project, ...data.project } };
     }
-    setProjectFeedback("success", slug, projectSlug, "Validation completed for the selected project.");
+    if (validationResultPasses(data) && data.project && data.project.workflow_input_status === "READY" && data.project.runnable === true) {
+      setProjectFeedback("success", slug, projectSlug, "Validation passed for the selected project.");
+    } else {
+      const failedChecks = failedValidationCheckNames(data);
+      setProjectFeedback(
+        "error",
+        slug,
+        projectSlug,
+        failedChecks.length
+          ? `Validation failed. Fix these checks first: ${failedChecks.join(", ")}`
+          : "Validation failed for the selected project."
+      );
+    }
   } catch (error) {
     if (
       state.validationAction.requestId !== requestId

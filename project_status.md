@@ -12,7 +12,7 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Task 10E Complete - Maintenance / Operator Mode
+Task 10F Complete - Maintenance / Operator Mode
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
@@ -50,6 +50,32 @@ LIVE_VERIFIED_MAINTENANCE_MODE
 - `CORE_PROJECT_COMPLETE`
 - `MAINTENANCE_MODE`
 - `SAFE_TO_STOP`
+
+## Task 10F Closeout
+- Task 10F is complete and restores a validation-first operator flow without bypassing canonical readiness checks or changing backend workflow contracts.
+- Root cause: the supported canonical validation step remained a real prerequisite for parsing, but the embedded UI rendered Parse / Save / Approve / Reject ahead of the validation action and left the operator looking at later-stage controls before the required check.
+- Validation route and safety:
+  - route: `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/validate`
+  - behavior: supported canonical validation for the selected project only
+  - effect: updates project readiness fields in `project.json` (`status`, `workflow_input_status`, `runnable`, `updated_at`) and does not create revisions, candidates, decisions, artifacts, analytics data, or OAuth changes
+- UI repair:
+  - `Run Validation` now appears inside the same AI Output panel and before `Parse and Preview`
+  - `Parse and Preview` stays disabled until validation passes
+  - `Save Candidate`, `Approve Candidate`, and `Reject Candidate` remain gated behind the current workflow state instead of appearing equally actionable
+  - duplicate bottom validation surfacing was removed so the prerequisite appears once in the current operator flow
+- Focused verification:
+  - Frontend tests: `python -m unittest tests.test_ui_frontend_contract` (`126` run, `126` passed, `0` failures, `0` errors)
+  - Analytics collector tests: `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
+  - Production export tests: `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
+  - Focused compile verification passed: `python -m py_compile scripts/ui_server.py tests/test_ui_frontend_contract.py`
+- Live operator verification passed on port `8766`:
+  - `Build Complete Bundle` produced a valid bundle for the selected workflow step
+  - `Run Validation` appeared in the AI Output panel before `Parse and Preview`
+  - before validation, Parse stayed disabled and explained the prerequisite
+  - after validation pass, Parse became enabled
+  - the pasted AI Output text remained intact throughout validation
+  - no parse, save, approve, reject, analytics sync, or OAuth action was executed
+- `implement.docx` remains unrelated and untracked.
 
 ## Task 10E Closeout
 - Task 10E is complete and closes the false workflow-bundle metadata blocker without mutating workflow runtime, analytics runtime, tokens, or protected project artifacts.

@@ -278,6 +278,94 @@ function assert(condition, message) {{
     return json.loads(completed.stdout)
 
 
+def validation_first_workflow_setup(
+    *,
+    validation_js: str = "state.selectedProjectValidation = null;",
+    workflow_action_js: str = 'available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: false, reject_candidate: false } },',
+    workflow_step_state_js: str = 'step_states: {},',
+    pasted_output: str = "Candidate output",
+    parsed_output_js: str = "state.parsedOutputResult = null;",
+) -> str:
+    return textwrap.dedent(
+        f"""
+        await flush();
+        state.selectedChannelSlug = "channel-a";
+        state.selectedProjectSlug = "project-a";
+        state.selectedProjectDetail = {{
+          project: {{
+            project_slug: "project-a",
+            project_name: "Project A",
+            status: "WAITING_FOR_TRANSCRIPT",
+            workflow_input_status: "NOT_READY",
+            runnable: false,
+            updated_at: "2026-07-10T00:00:00Z",
+          }},
+        }};
+        state.selectedProjectWorkflow = {{
+          binding: {{ workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", binding_source: "PROJECT_JSON" }},
+          definition: {{
+            workflow_id: "wf-demo",
+            workflow_version: "2",
+            display_name: "Workflow Demo",
+            execution_mode: "ASSISTED",
+            prompt_set: {{ status: "AVAILABLE", bundle_available: true }},
+            steps: [{{
+              step_id: "prompt_1_transcript_analysis",
+              order: 1,
+              display_name: "Transcript Analysis",
+              required_model: "Gemini",
+              input_artifact_ids: [],
+              optional_input_artifact_ids: [],
+              output_artifact_ids: ["transcript_analysis"],
+              resulting_lifecycle_state: "ONE",
+              constraints: []
+            }}],
+          }},
+          state: {{
+            current_step_id: "prompt_1_transcript_analysis",
+            current_step_status: "READY",
+            next_step_id: null,
+            current_lifecycle_state: "INPUT_READY",
+            state_revision: 0,
+            state_persisted: false,
+            {workflow_step_state_js}
+          }},
+          {workflow_action_js}
+          artifacts: [],
+        }};
+        state.selectedWorkflowStepId = "prompt_1_transcript_analysis";
+        state.selectedProjectTranscript = {{ transcript: "Saved transcript", is_template: false, has_real_content: true }};
+        state.selectedWorkflowBundle = {{
+          channel_slug: "channel-a",
+          project_slug: "project-a",
+          step_id: "prompt_1_transcript_analysis",
+          binding: {{ workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow" }},
+          bundle: "Prompt bundle text",
+          bundle_sha256: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          bundle_character_count: 18,
+          prompt_file_sha256: "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          input_artifact_ids: [],
+          missing_optional_inputs: [],
+          required_model: "Gemini",
+          output_contract: {{ response_mode: "SINGLE_ARTIFACT" }},
+          identity: {{
+            channel_slug: "channel-a",
+            project_slug: "project-a",
+            workflow_id: "wf-demo",
+            workflow_version: "2",
+            workflow_definition_sha256: "sha-workflow",
+            step_id: "prompt_1_transcript_analysis",
+            bundle_sha256: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          }},
+        }};
+        state.pastedOutputDraft = {json.dumps(pasted_output)};
+        {validation_js}
+        {parsed_output_js}
+        render();
+        """
+    )
+
+
 class UiFrontendContractTests(unittest.TestCase):
     def setUp(self):
         self.html = ui_server.HTML_PAGE
@@ -868,8 +956,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         )
         self.assertIn("<details", result["detailHtml"])
         self.assertNotIn("<details open", result["detailHtml"])
-        self.assertIn("<details", result["validationHtml"])
-        self.assertNotIn("<details open", result["validationHtml"])
+        self.assertEqual(result["validationHtml"], "")
 
     def test_overview_hides_raw_codes_in_default_view_but_keeps_them_in_technical_details(self):
         result = run_ui_runtime_scenario(
@@ -1247,6 +1334,219 @@ class UiFrontendRuntimeTests(unittest.TestCase):
         )
         self.assertNotIn("Bundle Error", result["detailHtml"])
         self.assertNotIn("loaded workflow bundle metadata is inconsistent", result["detailHtml"])
+
+    def test_validation_required_renders_before_parse_and_disables_parse(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup()
+            + """
+            return {
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+              validationPanelHtml: document.getElementById("validationPanel").innerHTML,
+              parseDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="parseOutputBtn" disabled'),
+              parseHelperShown: document.getElementById("projectDetailPanel").innerHTML.includes("Run validation first."),
+              outputIndex: document.getElementById("projectDetailPanel").innerHTML.indexOf("Paste AI Output"),
+              validationIndex: document.getElementById("projectDetailPanel").innerHTML.indexOf('id="validateProjectBtn"'),
+              parseIndex: document.getElementById("projectDetailPanel").innerHTML.indexOf('id="parseOutputBtn"'),
+            };
+            """
+        )
+        self.assertTrue(result["parseDisabled"])
+        self.assertTrue(result["parseHelperShown"])
+        self.assertGreater(result["validationIndex"], result["outputIndex"])
+        self.assertGreater(result["parseIndex"], result["validationIndex"])
+        self.assertEqual(result["validationPanelHtml"], "")
+
+    def test_validation_pending_blocks_duplicate_requests_and_parse(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                validation_js="""
+                state.selectedProjectValidation = null;
+                state.validationAction = { busy: true, slug: "channel-a", projectSlug: "project-a", requestId: 3 };
+                """
+            )
+            + """
+            return {
+              validateDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="validateProjectBtn" disabled'),
+              validateLabelShown: document.getElementById("projectDetailPanel").innerHTML.includes("Validating Inputs..."),
+              parseDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="parseOutputBtn" disabled'),
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertTrue(result["validateDisabled"])
+        self.assertTrue(result["validateLabelShown"])
+        self.assertTrue(result["parseDisabled"])
+        self.assertIn("Validation running", result["detailHtml"])
+
+    def test_validation_failure_preserves_ai_output_and_keeps_parse_disabled(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: false, workflow_directory: true },
+                  project: { workflow_input_status: "NOT_READY", runnable: false }
+                };
+                """
+            )
+            + """
+            return {
+              pastedValue: document.getElementById("pastedOutputText").value,
+              parseDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="parseOutputBtn" disabled'),
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertEqual(result["pastedValue"], "Candidate output")
+        self.assertTrue(result["parseDisabled"])
+        self.assertIn("Validation failed", result["detailHtml"])
+        self.assertIn("Transcript has real content", result["detailHtml"])
+
+    def test_validation_pass_enables_parse_when_output_exists(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: true, workflow_directory: true },
+                  project: { workflow_input_status: "READY", runnable: true }
+                };
+                """
+            )
+            + """
+            return {
+              parseDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="parseOutputBtn" disabled'),
+              validateSecondary: document.getElementById("projectDetailPanel").innerHTML.includes('class="secondary" id="validateProjectBtn"'),
+              parsePrimary: document.getElementById("projectDetailPanel").innerHTML.includes('class="primary" id="parseOutputBtn"'),
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertFalse(result["parseDisabled"])
+        self.assertTrue(result["validateSecondary"])
+        self.assertTrue(result["parsePrimary"])
+        self.assertIn("Validation passed", result["detailHtml"])
+
+    def test_validation_pass_still_keeps_parse_disabled_when_output_is_empty(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                pasted_output="",
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: true, workflow_directory: true },
+                  project: { workflow_input_status: "READY", runnable: true }
+                };
+                """
+            )
+            + """
+            return {
+              parseDisabled: document.getElementById("projectDetailPanel").innerHTML.includes('id="parseOutputBtn" disabled'),
+              detailHtml: document.getElementById("projectDetailPanel").innerHTML,
+            };
+            """
+        )
+        self.assertTrue(result["parseDisabled"])
+        self.assertIn("Paste the AI output before parsing.", result["detailHtml"])
+
+    def test_parse_pass_enables_save_candidate(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                workflow_action_js='available_actions: { prompt_1_transcript_analysis: { save_candidate: true, approve_candidate: false, reject_candidate: false } },',
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: true, workflow_directory: true },
+                  project: { workflow_input_status: "READY", runnable: true }
+                };
+                """,
+                parsed_output_js="""
+                state.parsedOutputResult = {
+                  identity: {
+                    channel_slug: "channel-a",
+                    project_slug: "project-a",
+                    workflow_id: "wf-demo",
+                    workflow_version: "2",
+                    step_id: "prompt_1_transcript_analysis",
+                    bundle_sha256: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                  },
+                  raw_output: { sha256: "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC", character_count: 16 },
+                  contract: { response_mode: "SINGLE_ARTIFACT" },
+                  status: "VALID",
+                  artifacts: [{ artifact_id: "transcript_analysis", display_name: "Transcript Analysis", filename: "transcript_analysis.md", content: state.pastedOutputDraft, sha256: "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD", character_count: 16, validation: { status: "VALID", errors: [], warnings: [], heading_results: [] } }],
+                  validation: { errors: [], warnings: [] }
+                };
+                """
+            )
+            + """
+            const saveButton = saveCandidateButtonModel();
+            const approveButton = candidateDecisionButtonModel("APPROVE");
+            const rejectButton = candidateDecisionButtonModel("REJECT");
+            return {
+              saveDisabled: saveButton.disabled,
+              approveDisabled: approveButton.disabled,
+              rejectDisabled: rejectButton.disabled,
+            };
+            """
+        )
+        self.assertFalse(result["saveDisabled"])
+        self.assertTrue(result["approveDisabled"])
+        self.assertTrue(result["rejectDisabled"])
+
+    def test_saved_candidate_enables_approve_and_reject_per_workflow_semantics(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                workflow_action_js='available_actions: { prompt_1_transcript_analysis: { save_candidate: false, approve_candidate: true, reject_candidate: true } },',
+                workflow_step_state_js="""
+                step_states: {
+                  prompt_1_transcript_analysis: {
+                    status: "CANDIDATE",
+                    candidate_group_id: "grp_000001",
+                    approved_group_id: null,
+                    candidate_group: { revision_group_id: "grp_000001", artifacts: [] }
+                  }
+                },
+                """,
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: true, workflow_directory: true },
+                  project: { workflow_input_status: "READY", runnable: true }
+                };
+                """
+            )
+            + """
+            const saveButton = saveCandidateButtonModel();
+            const approveButton = candidateDecisionButtonModel("APPROVE");
+            const rejectButton = candidateDecisionButtonModel("REJECT");
+            return {
+              saveDisabled: saveButton.disabled,
+              approveDisabled: approveButton.disabled,
+              rejectDisabled: rejectButton.disabled,
+            };
+            """
+        )
+        self.assertTrue(result["saveDisabled"])
+        self.assertFalse(result["approveDisabled"])
+        self.assertFalse(result["rejectDisabled"])
+
+    def test_only_one_validation_control_exists_and_no_duplicate_bottom_panel_is_rendered(self):
+        result = run_ui_runtime_scenario(
+            validation_first_workflow_setup(
+                validation_js="""
+                state.selectedProjectValidation = {
+                  checks: { transcript_real_content: true, workflow_directory: true },
+                  project: { workflow_input_status: "READY", runnable: true }
+                };
+                """
+            )
+            + """
+            const detailHtml = document.getElementById("projectDetailPanel").innerHTML;
+            return {
+              validateButtonCount: (detailHtml.match(/id="validateProjectBtn"/g) || []).length,
+              validationPanelHtml: document.getElementById("validationPanel").innerHTML,
+              detailHtml,
+            };
+            """
+        )
+        self.assertEqual(result["validateButtonCount"], 1)
+        self.assertEqual(result["validationPanelHtml"], "")
+        self.assertNotIn("Validation not run yet", result["detailHtml"])
 
     def test_bundle_validation_accepts_non_bmp_code_point_count(self):
         result = run_ui_runtime_scenario(
@@ -2772,6 +3072,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
               artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.selectedWorkflowStepId = "step-1";
             state.selectedWorkflowBundle = {
               channel_slug: "channel-a",
@@ -2873,6 +3174,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               output_contract: { response_mode: "SINGLE_ARTIFACT" },
               identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-3", bundle_sha256: "sha-bundle" },
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.pastedOutputDraft = "# Locked Creative Package\\n## Topic Verdict\\nPRODUCE\\n";
             fetchHandler = async (path) => {
               if (path.endsWith("/steps/step-3/parse-output")) {
@@ -2945,6 +3247,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
               artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.selectedWorkflowStepId = "step-3";
             state.selectedWorkflowBundle = {
               channel_slug: "channel-a",
@@ -3024,6 +3327,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               available_actions: { "step-3": { save_candidate: true, approve_candidate: false, reject_candidate: false } },
               artifacts: [{ artifact_id: "locked-creative-package", display_name: "Locked Creative Package", relative_path: "workflow/locked_creative_package.md", exists: false }],
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.selectedWorkflowStepId = "step-3";
             state.selectedWorkflowBundle = {
               channel_slug: "channel-a",
@@ -3126,6 +3430,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               state: { current_step_id: "step-1", current_step_status: "READY", next_step_id: null, current_lifecycle_state: "INPUT_READY" },
               artifacts: [{ artifact_id: "artifact-a", display_name: "Artifact A", relative_path: "workflow/artifact_a.md", exists: false }],
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.selectedWorkflowStepId = "step-1";
             render();
             const disabledBefore = document.getElementById("projectDetailPanel").innerHTML.includes('id="pastedOutputText"') && document.getElementById("projectDetailPanel").innerHTML.includes('id="pastedOutputText" placeholder="Paste the exact AI output for the selected step here." disabled');
@@ -3270,6 +3575,7 @@ class UiFrontendRuntimeTests(unittest.TestCase):
               output_contract: { response_mode: "SINGLE_ARTIFACT" },
               identity: { channel_slug: "channel-a", project_slug: "project-a", workflow_id: "wf-demo", workflow_version: "2", workflow_definition_sha256: "sha-workflow", step_id: "step-1", bundle_sha256: "sha-bundle" },
             };
+            state.selectedProjectValidation = { checks: { transcript_real_content: true }, project: { workflow_input_status: "READY", runnable: true } };
             state.pastedOutputDraft = "still here";
             fetchHandler = async (path) => {
               if (path.endsWith("/parse-output")) return errorResponse("PROMPT_OUTPUT_PARSE_FAILED", "Bad output", 409);

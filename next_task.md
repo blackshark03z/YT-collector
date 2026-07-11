@@ -3,9 +3,9 @@
 ## Status
 NO_ACTIVE_IMPLEMENTATION_TASK
 
-## Task 10E Closure
-- There is no active workflow-bundle metadata blocker.
-- Completed Task 10E must not be repeated without a specific regression or a newly approved scope.
+## Task 10F Closure
+- There is no active validation-order blocker in the workflow UI.
+- Completed Task 10F must not be repeated without a specific regression or a newly approved scope.
 
 ## Project State
 - Project is paused in `MAINTENANCE_MODE`.
@@ -14,9 +14,8 @@ NO_ACTIVE_IMPLEMENTATION_TASK
 
 ## Repository Resume Baseline
 - Branch: `master`
-- Resume from the latest synchronized `master` baseline after the Task 10E closeout push.
-- Task 10E pre-push baseline recorded here for traceability: `fc2343d5686ba50e21167cd7345fc3730390a151`
-- Pending Task 10E commit subject: `fix: handle unicode workflow bundle counts`
+- Resume from the latest synchronized `master` baseline after the Task 10F closeout push.
+- Task 10F implementation baseline recorded here for traceability: `fb9f054e82a38c6db684761e97939445de4dc251`
 
 ## Next Action On Resume
 Resume with one of the following only:
@@ -40,7 +39,8 @@ Resume with one of the following only:
 - Task 10B analytics sync repair is complete through the pushed code baseline.
 - Task 10C and Task 10C.1 project-creation UX repair are complete through the pushed code baseline.
 - Task 10D and Task 10D.1 next-action-first workflow UX repair are complete through the pushed code baseline.
-- Task 10E unicode bundle-count repair is complete and awaiting repository closeout only.
-- There is no active analytics blocker or bundle metadata blocker, and the project returns to normal maintenance/operator mode.
+- Task 10E unicode bundle-count repair is complete through the pushed code baseline.
+- Task 10F validation-first parse-flow repair is complete and returns the project to normal maintenance/operator mode.
+- There is no active analytics blocker, bundle metadata blocker, or validation-order blocker.
 - The Ancient Rome pilot, production package flow, analytics collector, fresh Analytics ZIP flow, and canonical channel runtime remain preserved as the current operating baseline.
 - No active implementation diff is pending in this document.

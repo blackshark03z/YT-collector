@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+### Task 10F - Validation-First Parse Flow Closeout
+- Closed Task 10F after confirming the real blocker was UI ordering and action gating, not the visible AI Output text itself.
+- Recorded the supported validation route as `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/validate`.
+- Preserved canonical backend behavior: validation still runs through the existing project-validation route and still updates project readiness fields instead of faking success in the browser.
+- Reworked the embedded workflow action order so the current step now shows:
+  - AI Output
+  - validation status and `Run Validation`
+  - `Parse and Preview`
+  - candidate and decision actions
+- Kept Parse disabled with a clear prerequisite message until validation passes, kept later actions disabled until their existing workflow conditions are met, and removed the duplicate lower validation panel for the same prerequisite.
+- Preserved AI Output draft text while validation runs or fails and kept the current workflow/bundle contract unchanged.
+- Re-ran the focused verification gate successfully:
+  - frontend `126` pass
+  - analytics collector `19` pass
+  - production export `6` pass
+- Recorded live operator verification on port `8766`:
+  - bundle build `PASS`
+  - validation-first ordering visible in the AI Output panel
+  - Parse disabled before validation with prerequisite guidance
+  - Parse enabled after validation pass
+  - pasted AI Output preserved
+  - no parse/save/approve/reject, analytics sync, or OAuth action executed
+- This closeout records the validated UI repair only; it does not add new backend routes, workflow mutation logic, analytics behavior, or OAuth scope.
+
 ### Task 10E - Unicode Workflow Bundle Count Repair Closeout
 - Closed Task 10E after the workflow-bundle metadata mismatch was traced to character-count semantics rather than stale hashes, stale bundle identity, or a backend contract regression.
 - Recorded the accepted root cause: Python `len(...)` counts Unicode code points, while the old frontend validation used JavaScript `String.length`, which counts UTF-16 code units and miscounted non-BMP characters.
