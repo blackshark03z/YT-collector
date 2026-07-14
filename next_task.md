@@ -1,30 +1,27 @@
 # Next Task
 
 ## Status
-NO_ACTIVE_IMPLEMENTATION_TASK
+TASK_11A1_COMPLETE
 
-## Task 10F Closure
-- There is no active validation-order blocker in the workflow UI.
-- Completed Task 10F must not be repeated without a specific regression or a newly approved scope.
+## Task 11A.1 Closure
+- Topic-scan correctness and structured topic-group implementation is complete and approved for repository publication.
+- Task 11A.2 and Task 11B remain unauthorized until a future scoped prompt explicitly approves them.
 
 ## Project State
-- Project is paused in `MAINTENANCE_MODE`.
-- Core MVP and operator-first UI work are complete.
+- Core MVP and operator-first UI work remain complete.
+- Topic-selection tooling is now extended for next-video discovery without changing Collector runtime.
 - Completed phases must not be repeated or re-audited without a specific reason.
 
 ## Repository Resume Baseline
 - Branch: `master`
-- Resume from the latest synchronized `master` baseline after the Task 10F closeout push.
-- Task 10F implementation baseline recorded here for traceability: `fb9f054e82a38c6db684761e97939445de4dc251`
+- Resume from the synchronized `master` baseline before Task 11A.1 closeout: `c7d496f586fd6040fca398cf61fb8fc56ca34d9b`
+- Task 11A.1 tracked scope is now the active repository closeout scope.
 
 ## Next Action On Resume
 Resume with one of the following only:
 - normal operator use of the current tool
-- continue the current real project by entering its next required workflow input
-- create the next real content project through the UI
-- sync or export analytics
-- use fresh analytics data for Growth Baseline
-- define and approve a new scoped development phase
+- define and approve the next scoped development phase explicitly
+- start Task 11A.2 only after explicit authorization
 
 ## Resume Guardrails
 - Verify branch and Git status before resuming work.
@@ -42,5 +39,7 @@ Resume with one of the following only:
 - Task 10E unicode bundle-count repair is complete through the pushed code baseline.
 - Task 10F validation-first parse-flow repair is complete and returns the project to normal maintenance/operator mode.
 - There is no active analytics blocker, bundle metadata blocker, or validation-order blocker.
+- Task 11A.1 adds deterministic topic-selection tooling only; it does not create Collector projects or mutate workflow runtime.
+- Disposable live Rome scan evidence has already been collected for Task 11A.1 and does not need to be repeated unless a future scoped task explicitly asks for a rerun.
 - The Ancient Rome pilot, production package flow, analytics collector, fresh Analytics ZIP flow, and canonical channel runtime remain preserved as the current operating baseline.
-- No active implementation diff is pending in this document.
+- Next gate: a separately authorized follow-up task for expanded Rome topic scanning or shortlist review.

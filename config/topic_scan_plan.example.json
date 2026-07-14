@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "cluster_id": "roman_republic_collapse",
+  "label": "Roman Republic collapse",
+  "published_days": 365,
+  "minimum_duration_seconds": 300,
+  "maximum_duration_seconds": 720,
+  "baseline_recent_count": 20,
+  "baseline_min_age_hours": 48,
+  "groups": [
+    {
+      "topic_group_id": "caesar_rubicon",
+      "label": "Caesar crosses the Rubicon",
+      "gateway_entity": "Julius Caesar",
+      "queries": [
+        "Caesar crossed the Rubicon history documentary",
+        "river Caesar was forbidden to cross history",
+        "Caesar enemy of Rome Rubicon documentary"
+      ]
+    },
+    {
+      "topic_group_id": "marius_sulla",
+      "label": "Marius and Sulla",
+      "gateway_entity": "Sulla",
+      "queries": [
+        "Roman soldiers marched on Rome documentary",
+        "Sulla marched on Rome history documentary",
+        "Marius Sulla civil war Rome documentary"
+      ]
+    }
+  ]
+}

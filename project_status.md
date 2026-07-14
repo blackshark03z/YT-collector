@@ -12,13 +12,77 @@ Mist of Ages Multi-Channel Input Collector
 - no video upload
 
 ## Current Phase
-Task 10F Complete - Maintenance / Operator Mode
+Task 11A.1 Complete - Topic Opportunity Engine Ready
 
 ## Phase Status
 CORE_PROJECT_COMPLETE
 
 ## Approval
 LIVE_VERIFIED_MAINTENANCE_MODE
+
+## Task 11A.1 Scope
+- Implemented a tracked deterministic topic-selection layer for next-video discovery only.
+- Preserved the existing local personal-use filesystem architecture and left the embedded Collector UI/server architecture unchanged.
+- Added canonical tracked scripts under `scripts/` instead of overwriting the untracked root source inputs:
+  - `scripts/youtube_research_core.py`
+  - `scripts/youtube_topic_opportunity_scan.py`
+  - `scripts/youtube_competitor_probe.py`
+- Added deterministic plan-mode output with:
+  - `run_manifest.json`
+  - `candidate_videos.csv`
+  - `candidate_videos.json`
+  - `topic_groups.csv`
+  - `topic_groups.json`
+  - `top_opportunities.md`
+  - `collector_import.json`
+  - optional sanitized `raw_cache/`
+- Added shared-core handling for:
+  - API key loading from explicit argument, `YOUTUBE_API_KEY`, or local ignored `youtube_api_key.txt`
+  - sanitized request handling
+  - bounded retry/backoff
+  - stable request fingerprints and optional cache
+  - `--refresh` bypass
+  - duration parsing and canonical duration bands
+  - datetime parsing
+  - normalized video metrics
+  - same-band baseline eligibility
+  - median/outlier calculations
+  - baseline confidence
+  - deterministic serialization helpers
+- Added structured topic-group aggregation with:
+  - candidate and unique-channel counts
+  - qualifying outlier counts
+  - median/max velocity evidence
+  - cross-channel labels
+  - `WEAK` / `DIRECTIONAL` / `SUPPORTED` / `STRONG`
+  - `SHORTLIST` / `HOLD` / `REJECT`
+- Added a repaired canonical competitor probe that now uses the shared core, minimum baseline age, same-band baseline filtering, `views_outlier_score`, `velocity_outlier_score`, and baseline confidence.
+- Added:
+  - `config/topic_scan_plan.example.json`
+  - `docs/topic_opportunity_engine.md`
+  - `docs/mist_of_ages_improvement_history.md`
+- Confirmed the old Sulla rescue remains closed and outside this task.
+
+## Task 11A.1 Verification Summary
+- Focused topic-scan/core tests: `python -m unittest tests.test_youtube_research_core` (`21` run, `21` passed, `0` failures, `0` errors)
+- Focused existing tests:
+  - `python -m unittest tests.test_collector` (`5` run, `5` passed, `0` failures, `0` errors)
+  - `python -m unittest tests.test_channel_analytics_collector` (`19` run, `19` passed, `0` failures, `0` errors)
+  - `python -m unittest tests.test_channel_production_export` (`6` run, `6` passed, `0` failures, `0` errors)
+- Full offline regression suite: `python -m unittest discover -s tests` (`583` run, `583` passed, `0` failures, `0` errors, `2` skipped)
+- Focused compile verification passed:
+  - `python -m py_compile scripts/youtube_research_core.py scripts/youtube_topic_opportunity_scan.py scripts/youtube_competitor_probe.py tests/test_youtube_research_core.py`
+- Disposable live Rome scan: `PASS`
+  - command path used the canonical tracked module entrypoint only
+  - output directory: temporary disposable directory outside channel/project runtime
+  - candidate videos: `9`
+  - topic groups: `2`
+  - shortlist groups: `1`
+  - `caesar_rubicon` => `SHORTLIST`
+  - `marius_sulla` => `HOLD`
+  - request count: `55`
+  - cache hit count: `0`
+- Closeout scope remains limited to the approved tracked Task 11A.1 files only; unrelated untracked research outputs and protected runtime remain untouched.
 
 ## Final Repository Baseline
 - Branch: `master`

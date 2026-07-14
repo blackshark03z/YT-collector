@@ -2,6 +2,52 @@
 
 ## Unreleased
 
+### Task 11A.1 - Topic Scan Correctness and Structured Topic Groups
+- Added tracked shared research core in `scripts/youtube_research_core.py`.
+- Added tracked canonical topic scanner in `scripts/youtube_topic_opportunity_scan.py`.
+- Added tracked canonical competitor probe in `scripts/youtube_competitor_probe.py`.
+- Preserved the existing untracked root scripts as source inputs and did not delete or overwrite them.
+- Added structured `--plan` mode with validated topic groups, preserved backward-compatible repeated `--query` mode, and made the two modes mutually exclusive.
+- Added canonical duration bands:
+  - `SHORT`
+  - `LONG_3_10`
+  - `LONG_10_30`
+  - `LONG_30_PLUS`
+- Repaired baseline honesty by:
+  - excluding the target from its own baseline
+  - excluding baseline videos younger than `48` hours by default
+  - requiring same-band comparisons
+  - returning `null` instead of fabricated infinity/zero when the median is absent
+- Kept `views_outlier_score` descriptive and added primary `velocity_outlier_score` based on `lifetime_views_per_day`.
+- Added baseline confidence labels `LOW`, `MEDIUM`, and `HIGH`.
+- Added deterministic topic-group aggregation, cross-channel labels, internal quality labels, verdicts, reasons, and a documented qualifying velocity threshold.
+- Added deterministic plan-mode outputs:
+  - `run_manifest.json`
+  - `candidate_videos.csv`
+  - `candidate_videos.json`
+  - `topic_groups.csv`
+  - `topic_groups.json`
+  - `top_opportunities.md`
+  - `collector_import.json`
+- Added `config/topic_scan_plan.example.json`.
+- Added `docs/topic_opportunity_engine.md`.
+- Created `docs/mist_of_ages_improvement_history.md` from the operator source history and appended the Task 11A.1 entry without rewriting prior history.
+- Added offline tests in `tests/test_youtube_research_core.py` covering duration parsing, band boundaries, baseline age/band gating, confidence, hidden subscribers, deduped query hits, plan validation, group aggregation, cache/refresh behavior, key redaction, deterministic ordering, direct-query compatibility, empty results, shared-core competitor probe behavior, and no live HTTP in tests.
+- Re-ran focused verification successfully:
+  - topic/core `21` pass
+  - collector `5` pass
+  - analytics collector `19` pass
+  - production export `6` pass
+  - full offline suite `583` run with `2` skips and no failures
+- Final repository closeout for this task remains limited to the approved tracked scope only; unrelated untracked research outputs and protected runtime are preserved untouched.
+- Ran one disposable live Rome scan with the local ignored API key after all offline checks passed:
+  - `9` candidate videos
+  - `2` topic groups
+  - `1` shortlist group
+  - `caesar_rubicon` => `SHORTLIST`
+  - `marius_sulla` => `HOLD`
+- No AI API, transcript download, Collector import action, workflow runtime mutation, analytics runtime mutation, OAuth mutation, or YouTube Auto change was added in this task.
+
 ### Task 10F - Validation-First Parse Flow Closeout
 - Closed Task 10F after confirming the real blocker was UI ordering and action gating, not the visible AI Output text itself.
 - Recorded the supported validation route as `POST /api/v2/channels/<channel_slug>/projects/<project_slug>/validate`.
